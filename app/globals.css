@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Coin/trade-panel surface tokens — kept the same names as the Robinpad components this
+       fork reuses (ArcDexTradePanel.tsx) so we didn't have to touch that file's classes. */
+    --cp-card: #0a0a0a;
+    --cp-line: #1f1f1f;
+  }
+
+  * {
+    border-color: var(--cp-line);
+  }
+
+  body {
+    background: #000;
+    color: #fff;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0f;
+}
+::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 4px;
+}
+
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
