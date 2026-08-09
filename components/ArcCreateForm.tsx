@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * Launch on Arc — Instant (USDC pair) or Instant Reflection (WETH pair + holder rewards).
+ * Launch on Arc — Instant or Instant Reflection (both TOKEN/USDC + holder rewards path).
  */
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -83,7 +83,7 @@ export function ArcCreateForm() {
   const [telegram, setTelegram] = useState('')
   const [website, setWebsite] = useState('')
   const [rewardsWallet, setRewardsWallet] = useState('')
-  /** Holder reward ERC-20 — default Arc USDC (6dp). Must not be WETH (pair quote). */
+  /** Holder reward ERC-20 — default Arc USDC (6dp). Pool quote is always USDC. */
   const [rewardToken, setRewardToken] = useState<string>(ARC.USDC)
   const [buyAtLaunch, setBuyAtLaunch] = useState(false)
   const [firstBuy, setFirstBuy] = useState('250')
@@ -390,9 +390,8 @@ export function ArcCreateForm() {
                 className="w-full bg-black/40 border border-hair rounded-xl px-3 py-2.5 text-sm font-mono outline-none focus:border-lime-line"
               />
               <p className="mt-1.5 mb-0 text-[12px] text-t3 leading-snug">
-                Defaults to Arc USDC. Pool is always TOKEN/USDC; this is what holders earn when{' '}
-                <code className="text-t2">reflect()</code> runs (must differ from pool USDC only if
-                you want a non-USDC reward and a USDC/reward pool exists).
+                Defaults to Arc USDC. The trading pair is always TOKEN/USDC; this address is the token
+                holders earn when <code className="text-t2">reflect()</code> runs.
               </p>
             </div>
           </div>
