@@ -4,32 +4,129 @@
 
 @layer base {
   :root {
-    /* Coin/trade-panel surface tokens — kept the same names as the Robinpad components this
-       fork reuses (ArcDexTradePanel.tsx) so we didn't have to touch that file's classes. */
-    --cp-card: #0a0a0a;
-    --cp-line: #1f1f1f;
+    /* Design handoff tokens (Claude Design Arcfun redesign) */
+    --lime: #2676ca;
+    --lime2: #1d5fa8;
+    --limeT: #6db3f2;
+    --limeSoft: rgba(38, 118, 202, 0.16);
+    --limeLine: rgba(38, 118, 202, 0.46);
+    --coral: #ff6f53;
+    --coralSoft: rgba(255, 111, 83, 0.12);
+    --s1: #0b0b0d;
+    --s2: #141417;
+    --s3: #1c1c21;
+    --hair: rgba(255, 255, 255, 0.075);
+    --hair2: rgba(255, 255, 255, 0.05);
+    --t2: rgba(255, 255, 255, 0.58);
+    --t3: rgba(255, 255, 255, 0.34);
+    --bg: #08080a;
+
+    /* Legacy aliases used by trade panel / older class names */
+    --cp-card: var(--s1);
+    --cp-line: var(--hair);
+
+    --background: 240 6% 3%;
+    --foreground: 0 0% 100%;
+    --border: 0 0% 100% / 0.075;
+    --input: 0 0% 100% / 0.075;
+    --ring: 210 70% 47%;
+    --primary: 210 70% 47%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 8%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 240 5% 10%;
+    --muted-foreground: 0 0% 58%;
+    --accent: 210 70% 47%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 11 100% 66%;
+    --destructive-foreground: 0 0% 100%;
+    --card: 240 6% 5%;
+    --card-foreground: 0 0% 100%;
+    --popover: 240 6% 5%;
+    --popover-foreground: 0 0% 100%;
+    --radius: 1rem;
   }
 
   * {
-    border-color: var(--cp-line);
+    box-sizing: border-box;
+    border-color: var(--hair);
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
   }
 
   body {
     background: #000;
     color: #fff;
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      'SF Pro Display',
+      'SF Pro Text',
+      'Helvetica Neue',
+      system-ui,
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a {
+    color: var(--limeT);
+    text-decoration: none;
+  }
+  a:hover {
+    color: #ffffff;
+  }
+
+  input,
+  textarea,
+  button {
+    font-family: inherit;
+    color: inherit;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: rgba(255, 255, 255, 0.26);
   }
 }
 
+@keyframes livePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+@keyframes sheetUp {
+  from {
+    transform: translateY(101%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes veil {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.live-dot {
+  animation: livePulse 1.8s ease-in-out infinite;
+}
+
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: #0a0a0f;
-}
-::-webkit-scrollbar-thumb {
-  background: #3f3f46;
-  border-radius: 4px;
+  width: 0;
+  height: 0;
 }
 
 .scrollbar-none {
@@ -37,5 +134,15 @@
   scrollbar-width: none;
 }
 .scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Soft horizontal rail scroll without ugly bars */
+.rail-scroll {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.rail-scroll::-webkit-scrollbar {
   display: none;
 }

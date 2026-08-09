@@ -3,29 +3,29 @@ import { ARC_EXPLORER } from '@/lib/contracts-arc'
 
 export function Footer() {
   return (
-    <footer className="border-t border-white/10 mt-16">
-      <div className="max-w-6xl mx-auto px-4 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
-        <p>
-          ArcFun — Instant token launches on{' '}
+    <footer className="border-t border-hair mt-8">
+      <div className="max-w-desk mx-auto px-4 sm:px-10 py-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 text-[13px] text-t3">
+        <p className="max-w-xl leading-relaxed">
+          Arcfun — Instant token launches on{' '}
           <a
             href={ARC_EXPLORER || 'https://arcscan.app'}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-gray-400 hover:text-gray-200"
+            className="text-t2 hover:text-white"
           >
             Arc
           </a>
           . Full supply on Uniswap V3 from block one, LP locked a year.
         </p>
-        <div className="flex items-center gap-4">
-          <Link href="/create" className="hover:text-gray-300">
+        <div className="flex items-center gap-5 font-medium text-t2">
+          <Link href="/create" className="hover:text-white">
             Launch
           </Link>
           <a
             href={ARC_EXPLORER || 'https://arcscan.app'}
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:text-gray-300"
+            className="hover:text-white"
           >
             ArcScan
           </a>

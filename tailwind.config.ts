@@ -8,6 +8,24 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        lime: {
+          DEFAULT: 'var(--lime)',
+          2: 'var(--lime2)',
+          t: 'var(--limeT)',
+          soft: 'var(--limeSoft)',
+          line: 'var(--limeLine)',
+        },
+        coral: {
+          DEFAULT: 'var(--coral)',
+          soft: 'var(--coralSoft)',
+        },
+        s1: 'var(--s1)',
+        s2: 'var(--s2)',
+        s3: 'var(--s3)',
+        hair: 'var(--hair)',
+        hair2: 'var(--hair2)',
+        t2: 'var(--t2)',
+        t3: 'var(--t3)',
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
@@ -47,10 +65,17 @@ module.exports = {
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
       },
+      maxWidth: {
+        desk: '1280px',
+      },
+      letterSpacing: {
+        tightish: '-0.02em',
+        display: '-0.045em',
+      },
     },
   },
   plugins: [
-    function({ addUtilities }: { addUtilities: (u: Record<string, Record<string, string>>) => void }) {
+    function ({ addUtilities }: { addUtilities: (u: Record<string, Record<string, string>>) => void }) {
       addUtilities({
         '.scrollbar-none': {
           '-ms-overflow-style': 'none',

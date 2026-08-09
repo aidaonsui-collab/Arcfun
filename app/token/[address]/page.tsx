@@ -1,39 +1,33 @@
 'use client'
 
 /**
- * Token detail — stats, buy/sell (ArcDexTradePanel), recent trades, top holders.
- * No TradingView/chart integration and no "open full RobinSwap" cross-link — this fork's
- * create+trade surface stays on this one page. See README for scope notes.
+ * Token detail — Stocks-style hero, stats grid, chart, volume, activity tape, sticky trade panel.
  */
 import { useParams } from 'next/navigation'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { type Address } from 'viem'
 import Link from 'next/link'
-import { Loader2, ExternalLink, Users, List } from 'lucide-react'
+import { Loader2, ExternalLink } from 'lucide-react'
 import type { PoolToken } from '@/lib/tokens'
 import type { EvmTradesResult } from '@/lib/evm-trades'
 import type { EvmHoldersResult } from '@/lib/evm-holders'
 import { ArcDexTradePanel } from '@/components/ArcDexTradePanel'
 import { ARC_EXPLORER, ARC } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
+import {
+  ageLabel,
+  areaChartPaths,
+  changeParts,
+  fmtPrice,
+  fmtUsd,
+  shortAddr,
+  tileGradient,
+  walletHue,
+} from '@/lib/ui-format'
 
-type Tab = 'trades' | 'holders' | 'info'
-
-function fmtUsd(n: number): string {
-  if (!n) return '$0'
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`
-  return `$${n.toFixed(2)}`
-}
-
-function ageLabel(ts: number): string {
-  if (!ts) return '—'
-  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts))
-  if (s < 60) return `${s}s`
-  if (s < 3600) return `${Math.floor(s / 60)}m`
-  if (s < 86400) return `${Math.floor(s / 3600)}h`
-  return `${Math.floor(s / 86400)}d`
-}
+type Tab = 'Activity' | 'holders' | 'traders'
+type Range = '1H' | '1D' | '1W'
+type VolRange = '1H' | '6H' | '24H'
 
 export default function TokenPage() {
   const params = useParams()
@@ -43,7 +37,9 @@ export default function TokenPage() {
   const [trades, setTrades] = useState<EvmTradesResult | null>(null)
   const [holders, setHolders] = useState<EvmHoldersResult | null>(null)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<Tab>('trades')
+  const [tab, setTab] = useState<Tab>('Activity')
+  const [range, setRange] = useState<Range>('1D')
+  const [volRange, setVolRange] = useState<VolRange>('1H')
 
   const load = useCallback(async () => {
     if (!token) return
@@ -98,197 +94,440 @@ export default function TokenPage() {
     return () => clearInterval(id)
   }, [load, loadTrades])
 
-  const oneDayAgoSec = useMemo(() => Math.floor(Date.now() / 1000) - 86_400, [])
-  const { vol24h, txns24h } = useMemo(() => {
+  const volWindowSec = useMemo(() => {
+    if (volRange === '1H') return 3600
+    if (volRange === '6H') return 6 * 3600
+    return 86_400
+  }, [volRange])
+
+  const { vol, buys, sells, buyUsd, sellUsd } = useMemo(() => {
+    const cutoff = Math.floor(Date.now() / 1000) - volWindowSec
     let vol = 0
-    let count = 0
+    let buys = 0
+    let sells = 0
+    let buyUsd = 0
+    let sellUsd = 0
     for (const t of trades?.trades ?? []) {
-      if (t.ts < oneDayAgoSec) continue
+      if (t.ts < cutoff) continue
       vol += t.valueUsd
-      count++
+      if (t.isBuy) {
+        buys++
+        buyUsd += t.valueUsd
+      } else {
+        sells++
+        sellUsd += t.valueUsd
+      }
     }
-    return { vol24h: vol, txns24h: count }
-  }, [trades, oneDayAgoSec])
+    return { vol, buys, sells, buyUsd, sellUsd }
+  }, [trades, volWindowSec])
+
+  const buyPct = vol > 0 ? (buyUsd / vol) * 100 : 50
+  const sellPct = 100 - buyPct
 
   const explorer = ARC_EXPLORER || 'https://arcscan.app'
+  const seed = token || pool?.symbol || 'arc'
+  const { tile, mono } = tileGradient(seed)
+  const chg = changeParts(pool?.priceChange24h)
+  const chart = areaChartPaths(seed + range, range === '1H' ? 24 : range === '1D' ? 48 : 36, pool?.priceChange24h ?? 0)
+  const markerTop = `${(chart.lastY / 300) * 100}%`
+  const axis =
+    range === '1H'
+      ? ['9:00', '9:15', '9:30', '9:45', 'now']
+      : range === '1D'
+        ? ['00:00', '06:00', '12:00', '18:00', 'now']
+        : ['Mon', 'Wed', 'Fri', 'Sun', 'now']
+
+  const holderCount = holders?.holders?.length ?? 0
+  const actTabs: { id: Tab; label: string }[] = [
+    { id: 'Activity', label: 'Activity' },
+    { id: 'holders', label: holderCount ? `${holderCount} holders` : 'Holders' },
+    { id: 'traders', label: 'Top traders' },
+  ]
 
   if (loading && !pool) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-sky-400" />
+      <main className="min-h-screen bg-black text-white flex items-center justify-center pt-16">
+        <Loader2 className="w-8 h-8 animate-spin text-lime-t" />
       </main>
     )
   }
 
   if (!pool) {
     return (
-      <main className="min-h-screen bg-black text-white flex flex-col items-center justify-center gap-4 px-4">
-        <p className="text-gray-400">Token not found on Arc.</p>
-        <Link href="/create" className="text-sky-400 hover:text-sky-300 text-sm">
+      <main className="min-h-screen bg-black text-white flex flex-col items-center justify-center gap-4 px-4 pt-16">
+        <p className="text-t2">Token not found on Arc.</p>
+        <Link href="/create" className="text-lime-t hover:text-white text-sm font-semibold">
           Launch on Arc
         </Link>
       </main>
     )
   }
 
+  const initial = (pool.symbol || pool.name || '?').charAt(0).toUpperCase()
+  const img = pool.imageUrl || pool.logoUrl
+  const creator = pool.creatorShort || shortAddr(pool.creator)
+
   return (
-    <main className="min-h-screen bg-black text-white px-4 pt-24 pb-16">
-      <div className="max-w-6xl mx-auto space-y-5">
-        <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl overflow-hidden bg-white/5 shrink-0 flex items-center justify-center text-lg font-bold text-gray-500">
-            {pool.imageUrl || pool.logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={pool.imageUrl || pool.logoUrl} alt="" className="w-full h-full object-cover" />
-            ) : (
-              (pool.symbol || '?').slice(0, 2)
-            )}
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-xl font-bold truncate">{pool.name}</h1>
-            <p className="text-sm text-gray-500">
-              ${pool.symbol} ·{' '}
-              <a
-                href={`${explorer}/token/${token}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-gray-300 inline-flex items-center gap-1"
+    <main className="min-h-screen bg-black text-white pt-16 pb-20">
+      <div className="max-w-desk mx-auto px-4 sm:px-10 py-6 sm:py-8">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 text-sm font-medium text-t2 hover:text-white mb-5"
+        >
+          ‹ Home
+        </Link>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_384px] gap-7 items-start">
+          <div className="flex flex-col gap-5 min-w-0">
+            {/* Header */}
+            <div className="flex items-center gap-[18px]">
+              <span
+                className="w-[72px] h-[72px] rounded-[24px] shrink-0 flex items-center justify-center text-[32px] font-bold tracking-[-0.04em] overflow-hidden relative"
+                style={{ background: img ? undefined : tile, color: mono }}
               >
-                {token.slice(0, 6)}…{token.slice(-4)} <ExternalLink className="w-3 h-3" />
-              </a>
-            </p>
-          </div>
-        </div>
+                {img ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                ) : (
+                  initial
+                )}
+              </span>
+              <div className="min-w-0 flex flex-col gap-2">
+                <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em] truncate">
+                  {pool.name}
+                </h1>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-sm font-semibold text-t2">${pool.symbol}</span>
+                  <a
+                    href={`${explorer}/token/${token}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-t3 tabular-nums hover:text-t2 inline-flex items-center gap-1"
+                  >
+                    {shortAddr(token)} <ExternalLink className="w-3 h-3" />
+                  </a>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[9px] bg-lime-soft border border-lime-line text-xs font-semibold text-lime-t whitespace-nowrap">
+                    ⚡ Instant Launch
+                  </span>
+                  {creator && (
+                    <span className="px-2.5 py-1 rounded-[9px] bg-s2 border border-hair text-xs font-medium text-t2 whitespace-nowrap">
+                      {creator}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
 
-        <div className="rounded-2xl border border-sky-500/25 bg-sky-500/[0.06] px-4 py-3 text-sm text-sky-100/90">
-          Instant DEX ⚡ — full supply on Uniswap V3 (USDC pair, 1%) from block one · LP locked 1 year
-        </div>
+            {/* FDV + change */}
+            <div className="flex items-end gap-4 pt-1">
+              <span className="text-[48px] sm:text-[56px] font-bold tracking-display leading-[0.92] tabular-nums">
+                {fmtUsd(pool.marketCap)}
+              </span>
+              <span
+                className="px-3 py-1.5 rounded-[11px] text-[15px] font-bold tabular-nums whitespace-nowrap mb-1"
+                style={{ background: chg.chipBg, color: chg.chipFg }}
+              >
+                {chg.label}
+              </span>
+              <span className="text-[13px] text-t3 mb-2 hidden sm:inline">
+                fully diluted · past {range}
+              </span>
+            </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          <Stat label="Market cap" value={fmtUsd(pool.marketCap)} />
-          <Stat label="24h volume" value={fmtUsd(vol24h)} />
-          <Stat label="24h txns" value={String(txns24h)} />
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
-            <div className="flex gap-1 p-1 rounded-xl bg-white/5 w-fit">
-              {(
-                [
-                  ['trades', 'Trades', <List key="i" className="w-3.5 h-3.5" />],
-                  ['holders', 'Holders', <Users key="i" className="w-3.5 h-3.5" />],
-                  ['info', 'Info', null],
-                ] as const
-              ).map(([id, label, icon]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setTab(id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    tab === id ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'
-                  }`}
-                >
-                  {icon}
-                  {label}
-                </button>
+            {/* Stat grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-hair2 border border-hair rounded-[24px] overflow-hidden">
+              {[
+                {
+                  label: 'Price',
+                  value: fmtPrice(pool.currentPrice),
+                  sub: 'per token',
+                  subColor: 'var(--t3)',
+                },
+                {
+                  label: '24H volume',
+                  value: fmtUsd(vol),
+                  sub: `${buyPct.toFixed(1)}% buys`,
+                  subColor: 'var(--limeT)',
+                },
+                {
+                  label: 'Liquidity',
+                  value: '—',
+                  sub: 'locked 12mo',
+                  subColor: 'var(--t3)',
+                },
+                {
+                  label: 'Holders',
+                  value: holderCount ? String(holderCount) : '—',
+                  sub: pool.instant ? 'Instant DEX' : 'on Arc',
+                  subColor: 'var(--limeT)',
+                },
+              ].map((m) => (
+                <div key={m.label} className="px-5 py-[18px] bg-s1 flex flex-col gap-1.5 min-w-0">
+                  <span className="text-[11px] font-semibold tracking-[0.06em] uppercase text-t3 whitespace-nowrap">
+                    {m.label}
+                  </span>
+                  <span className="text-2xl font-semibold tabular-nums tracking-[-0.028em] leading-tight truncate">
+                    {m.value}
+                  </span>
+                  <span className="text-xs font-semibold tabular-nums" style={{ color: m.subColor }}>
+                    {m.sub}
+                  </span>
+                </div>
               ))}
             </div>
 
-            {tab === 'trades' && (
-              <div className="rounded-2xl border border-white/10 divide-y divide-white/5 overflow-hidden">
-                {!trades?.trades.length ? (
-                  <p className="text-sm text-gray-600 text-center py-8">No trades yet.</p>
-                ) : (
-                  trades.trades.slice(0, 40).map((t, i) => (
-                    <a
-                      key={`${t.txHash}-${i}`}
-                      href={`${explorer}/tx/${t.txHash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-between px-4 py-2.5 text-xs hover:bg-white/[0.03]"
+            {/* Chart */}
+            <div className="border border-hair rounded-[28px] bg-s1 px-6 pt-[22px] pb-3">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex gap-4 text-xs font-semibold tabular-nums text-t3">
+                  <span>
+                    M <span className="text-lime-t">{fmtUsd(pool.marketCap)}</span>
+                  </span>
+                  <span>
+                    Δ{' '}
+                    <span style={{ color: chg.stroke }}>{chg.label}</span>
+                  </span>
+                  <span>
+                    P <span className="text-lime-t">{fmtPrice(pool.currentPrice)}</span>
+                  </span>
+                  <span>
+                    V <span className="text-t2">{fmtUsd(vol)}</span>
+                  </span>
+                </div>
+                <div className="flex gap-1 p-1 bg-s2 border border-hair rounded-xl">
+                  {(['1H', '1D', '1W'] as Range[]).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setRange(r)}
+                      className="px-3.5 py-1.5 rounded-[9px] text-xs font-semibold transition-colors"
+                      style={{
+                        background: range === r ? 'rgba(255,255,255,0.12)' : 'transparent',
+                        color: range === r ? '#fff' : 'rgba(255,255,255,0.52)',
+                      }}
                     >
-                      <span className={t.isBuy ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
-                        {t.isBuy ? 'Buy' : 'Sell'}
-                      </span>
-                      <span className="font-mono text-gray-400">
-                        {t.trader.slice(0, 6)}…{t.trader.slice(-4)}
-                      </span>
-                      <span className="font-mono text-gray-300">{fmtUsd(t.valueUsd)}</span>
-                      <span className="text-gray-600">{ageLabel(t.ts)}</span>
-                    </a>
-                  ))
-                )}
+                      {r}
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
 
-            {tab === 'holders' && (
-              <div className="rounded-2xl border border-white/10 divide-y divide-white/5 overflow-hidden">
-                {!holders?.holders.length ? (
-                  <p className="text-sm text-gray-600 text-center py-8">No holders indexed yet.</p>
-                ) : (
-                  holders.holders.map((h) => (
-                    <a
-                      key={h.address}
-                      href={`${explorer}/address/${h.address}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-between px-4 py-2.5 text-xs hover:bg-white/[0.03]"
+              <div className="relative mt-[18px] h-[240px] sm:h-[280px]">
+                <svg
+                  viewBox="0 0 1000 300"
+                  preserveAspectRatio="none"
+                  className="absolute inset-0 w-full h-full block"
+                >
+                  <defs>
+                    <linearGradient id="arcFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#6DB3F2" stopOpacity="0.26" />
+                      <stop offset="100%" stopColor="#6DB3F2" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                  <path d={chart.area} fill="url(#arcFill)" />
+                  <path
+                    d={chart.line}
+                    fill="none"
+                    stroke="#6DB3F2"
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+                <div
+                  className="absolute left-0 right-0 h-0 border-t border-dashed border-[rgba(109,179,242,0.55)]"
+                  style={{ top: markerTop }}
+                />
+                <div
+                  className="absolute right-0 translate-x-1.5 -translate-y-1/2 px-2 py-0.5 rounded-lg bg-lime text-white text-[11px] font-bold tabular-nums"
+                  style={{ top: markerTop }}
+                >
+                  {fmtUsd(pool.marketCap)}
+                </div>
+              </div>
+              <div className="flex justify-between px-0.5 pt-2.5 pb-3 text-[11px] font-medium text-t3">
+                {axis.map((a) => (
+                  <span key={a}>{a}</span>
+                ))}
+              </div>
+            </div>
+
+            {/* Volume */}
+            <div id="activity" className="border border-hair rounded-[28px] bg-s1 p-[22px] px-6">
+              <div className="flex items-start justify-between gap-5">
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[11px] font-semibold tracking-[0.06em] uppercase text-t3">
+                    Volume
+                  </span>
+                  <span className="text-[30px] font-semibold tabular-nums tracking-[-0.03em]">
+                    {fmtUsd(vol)}
+                  </span>
+                </div>
+                <div className="flex gap-1 p-1 bg-s2 border border-hair rounded-xl">
+                  {(['1H', '6H', '24H'] as VolRange[]).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setVolRange(v)}
+                      className="px-3.5 py-1.5 rounded-[9px] text-xs font-semibold transition-colors"
+                      style={{
+                        background: volRange === v ? 'rgba(255,255,255,0.12)' : 'transparent',
+                        color: volRange === v ? '#fff' : 'rgba(255,255,255,0.52)',
+                      }}
                     >
-                      <span className="text-gray-600">#{h.rank}</span>
-                      <span className="font-mono text-gray-300">
-                        {h.address.slice(0, 6)}…{h.address.slice(-4)}
-                        {h.isDev ? <span className="ml-1.5 text-amber-400">dev</span> : null}
-                      </span>
-                      <span className="font-mono text-gray-400">{h.balance}</span>
-                      <span className="text-gray-600">{h.percentage}%</span>
-                    </a>
-                  ))
-                )}
+                      {v}
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
+              <div className="flex gap-1 mt-[18px]">
+                <span
+                  className="h-2 rounded-full bg-lime"
+                  style={{ width: `${Math.max(4, buyPct)}%` }}
+                />
+                <span className="h-2 rounded-full bg-coral flex-1" />
+              </div>
+              <div className="flex justify-between mt-3.5">
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-semibold text-lime-t">{buys} buys</span>
+                  <span className="text-[13px] text-t3 tabular-nums">
+                    {fmtUsd(buyUsd)} · {buyPct.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="flex flex-col gap-1 text-right">
+                  <span className="text-sm font-semibold text-coral">{sells} sells</span>
+                  <span className="text-[13px] text-t3 tabular-nums">
+                    {fmtUsd(sellUsd)} · {sellPct.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </div>
 
-            {tab === 'info' && (
-              <div className="space-y-3 text-sm">
-                {pool.description && <p className="text-gray-400 leading-relaxed">{pool.description}</p>}
-                <div className="grid grid-cols-2 gap-3">
-                  <Stat label="Chain" value="Arc · 5042" />
-                  <Stat label="DEX" value="Uniswap V3" />
-                  <Stat label="Pair" value="USDC · 1%" />
-                  <Stat label="LP lock" value="1 year" />
-                  {pool.creator && (
-                    <Stat label="Creator" value={`${pool.creator.slice(0, 6)}…${pool.creator.slice(-4)}`} />
+            {/* Activity / holders */}
+            <div className="border border-hair rounded-[28px] bg-s1 overflow-hidden">
+              <div className="px-6 pt-5 flex items-center gap-5 sm:gap-6 overflow-x-auto">
+                {actTabs.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => setTab(a.id)}
+                    className="pb-3.5 text-lg sm:text-[19px] font-semibold tracking-tightish whitespace-nowrap border-b-2 transition-colors"
+                    style={{
+                      borderColor: tab === a.id ? 'var(--limeT)' : 'transparent',
+                      color: tab === a.id ? '#fff' : 'var(--t3)',
+                    }}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+              <div className="h-px bg-hair2" />
+
+              {tab === 'Activity' && (
+                <div className="px-3 pb-2 pt-4">
+                  <div className="grid grid-cols-[1.4fr_.7fr_1fr_1fr_.8fr] gap-3 px-3 py-2.5 rounded-xl bg-white/[0.03] text-[11px] font-semibold tracking-[0.06em] uppercase text-t3">
+                    <span>Wallet</span>
+                    <span>Type</span>
+                    <span>Amount</span>
+                    <span>Tokens</span>
+                    <span className="text-right">Time</span>
+                  </div>
+                  {!(trades?.trades?.length) ? (
+                    <p className="text-sm text-t3 text-center py-10">No trades yet.</p>
+                  ) : (
+                    trades!.trades.slice(0, 40).map((t, i) => (
+                      <a
+                        key={`${t.txHash}-${i}`}
+                        href={`${explorer}/tx/${t.txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="grid grid-cols-[1.4fr_.7fr_1fr_1fr_.8fr] gap-3 px-3 py-3.5 border-b border-hair2 text-sm items-center tabular-nums hover:bg-white/[0.02]"
+                      >
+                        <span className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            className="w-[18px] h-[18px] rounded-full shrink-0"
+                            style={{ background: walletHue(t.trader) }}
+                          />
+                          <span className="text-t2 truncate">{shortAddr(t.trader)}</span>
+                        </span>
+                        <span
+                          className="font-semibold"
+                          style={{ color: t.isBuy ? 'var(--limeT)' : 'var(--coral)' }}
+                        >
+                          {t.isBuy ? 'Buy' : 'Sell'}
+                        </span>
+                        <span className="font-medium">{fmtUsd(t.valueUsd)}</span>
+                        <span className="text-t2 truncate">
+                          {t.tokenAmount != null ? String(t.tokenAmount) : '—'}
+                        </span>
+                        <span className="text-right text-t3 text-[13px]">{ageLabel(t.ts)} ago</span>
+                      </a>
+                    ))
                   )}
                 </div>
-                {pool.instantMeta?.uniPool && (
-                  <a
-                    href={`${explorer}/address/${pool.instantMeta.uniPool}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300"
-                  >
-                    Uni pool: {pool.instantMeta.uniPool.slice(0, 10)}… <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-                <p className="text-[10px] text-gray-600">Factory {ARC.INSTANT_FACTORY.slice(0, 10)}…</p>
-              </div>
-            )}
+              )}
+
+              {tab === 'holders' && (
+                <div className="px-3 pb-2 pt-4">
+                  {!(holders?.holders?.length) ? (
+                    <p className="text-sm text-t3 text-center py-10">No holders indexed yet.</p>
+                  ) : (
+                    holders!.holders.map((h) => (
+                      <a
+                        key={h.address}
+                        href={`${explorer}/address/${h.address}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-between px-3 py-3.5 border-b border-hair2 text-sm hover:bg-white/[0.02]"
+                      >
+                        <span className="flex items-center gap-3">
+                          <span className="text-t3 tabular-nums w-8">#{h.rank}</span>
+                          <span
+                            className="w-[18px] h-[18px] rounded-full"
+                            style={{ background: walletHue(h.address) }}
+                          />
+                          <span className="font-mono text-t2">
+                            {shortAddr(h.address)}
+                            {h.isDev ? <span className="ml-1.5 text-amber-400">dev</span> : null}
+                          </span>
+                        </span>
+                        <span className="tabular-nums text-t2">
+                          {h.balance} · {h.percentage}%
+                        </span>
+                      </a>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {tab === 'traders' && (
+                <div className="px-6 py-10 text-sm text-t3 text-center">
+                  Top-trader leaderboard needs a volume index — coming next.
+                  <p className="mt-3 text-xs">
+                    Factory {ARC.INSTANT_FACTORY.slice(0, 10)}… ·{' '}
+                    {pool.instantMeta?.uniPool
+                      ? `pool ${pool.instantMeta.uniPool.slice(0, 10)}…`
+                      : 'Uni V3'}
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="lg:col-span-1">
-            <div className="sticky top-24">
-              <ArcDexTradePanel token={token} symbol={pool.symbol} onTraded={refreshAfterTrade} />
-            </div>
+          {/* Trade panel */}
+          <div className="lg:sticky lg:top-[88px]">
+            <ArcDexTradePanel
+              token={token}
+              symbol={pool.symbol}
+              onTraded={refreshAfterTrade}
+            />
+            {pool.description && (
+              <p className="mt-4 px-2 text-[13px] text-t3 leading-relaxed">{pool.description}</p>
+            )}
           </div>
         </div>
       </div>
     </main>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl px-3 py-2.5 border bg-[var(--cp-card)] border-[var(--cp-line)]">
-      <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
-      <div className="text-sm font-semibold text-white mt-0.5 truncate">{value}</div>
-    </div>
   )
 }

@@ -1,15 +1,28 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { Suspense, useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { Loader2, Rocket } from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
+import { Loader2 } from 'lucide-react'
 import type { PoolToken } from '@/lib/tokens'
-import { TokenCard } from '@/components/TokenCard'
+import { TokenCard, TokenRailCard } from '@/components/TokenCard'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
+import { changeParts, fmtUsd, tileGradient } from '@/lib/ui-format'
 
-export default function HomePage() {
+type SortKey = 'Trending' | 'New' | 'Top MC'
+
+function HomeInner() {
+  const searchParams = useSearchParams()
+  const q = (searchParams.get('q') || '').trim().toLowerCase()
+
   const [tokens, setTokens] = useState<PoolToken[]>([])
   const [loading, setLoading] = useState(true)
+  const [sort, setSort] = useState<SortKey>('Trending')
+  const [filter, setFilter] = useState(q)
+
+  useEffect(() => {
+    setFilter(q)
+  }, [q])
 
   const load = useCallback(async () => {
     try {
@@ -33,45 +46,254 @@ export default function HomePage() {
     return () => clearInterval(id)
   }, [load])
 
-  const sorted = [...tokens].sort((a, b) => (b.lastTradeAt ?? b.createdAt ?? 0) - (a.lastTradeAt ?? a.createdAt ?? 0))
+  const filtered = useMemo(() => {
+    let list = [...tokens]
+    if (filter) {
+      list = list.filter((t) => {
+        const hay = `${t.name} ${t.symbol} ${t.coinType} ${t.poolId} ${t.creator}`.toLowerCase()
+        return hay.includes(filter)
+      })
+    }
+    if (sort === 'New') {
+      list.sort(
+        (a, b) =>
+          (b.createdAt ?? b.lastTradeAt ?? 0) - (a.createdAt ?? a.lastTradeAt ?? 0),
+      )
+    } else if (sort === 'Top MC') {
+      list.sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0))
+    } else {
+      list.sort((a, b) => {
+        const ta = b.lastTradeAt ?? b.createdAt ?? 0
+        const tb = a.lastTradeAt ?? a.createdAt ?? 0
+        if (ta !== tb) return ta - tb
+        return (b.marketCap ?? 0) - (a.marketCap ?? 0)
+      })
+    }
+    return list
+  }, [tokens, filter, sort])
+
+  const rail = useMemo(() => {
+    return [...tokens]
+      .sort(
+        (a, b) =>
+          (b.createdAt ?? b.lastTradeAt ?? 0) - (a.createdAt ?? a.lastTradeAt ?? 0),
+      )
+      .slice(0, 8)
+  }, [tokens])
+
+  const stack = rail.slice(0, 3)
+  const liveCount = tokens.length
+  const sortTabs: SortKey[] = ['Trending', 'New', 'Top MC']
 
   return (
-    <main className="min-h-screen bg-black text-white px-4 pt-24 pb-16">
-      <div className="max-w-6xl mx-auto">
-        <section className="py-14 sm:py-20 text-center space-y-5">
-          <h1 className="font-[family-name:var(--font-space-grotesk)] text-4xl sm:text-5xl font-bold tracking-tight">
-            Launch a token on <span className="text-sky-400">Arc</span>
-          </h1>
-          <p className="text-gray-400 max-w-xl mx-auto">
-            One transaction. Full supply straight onto Uniswap V3, quoted in USDC. LP locked a year, no presale.
-          </p>
-          <Link
-            href="/create"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-black font-semibold transition-colors"
+    <main className="min-h-screen bg-black text-white pt-16 pb-16">
+      <div className="max-w-desk mx-auto px-4 sm:px-10">
+        <section className="relative overflow-hidden mt-6 border border-hair rounded-[32px] bg-s1 px-6 sm:px-11 py-12 min-h-[320px] sm:min-h-[360px]">
+          <svg
+            viewBox="0 0 64 64"
+            preserveAspectRatio="xMidYMid slice"
+            className="absolute -left-10 -bottom-40 w-[420px] h-[420px] opacity-[0.055] pointer-events-none"
+            aria-hidden
           >
-            <Rocket className="w-4 h-4" /> Launch a token
-          </Link>
-        </section>
+            <path d="M32 14 L50 46 L41 46 L32 30 L23 46 L14 46 Z" fill="var(--limeT)" />
+          </svg>
+          <div className="absolute left-0 right-0 top-0 h-px bg-gradient-to-r from-transparent via-[rgba(38,118,202,0.85)] to-transparent" />
 
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Live on Arc</h2>
-            {loading && <Loader2 className="w-4 h-4 animate-spin text-gray-600" />}
+          <div className="relative max-w-[600px] flex flex-col gap-5">
+            <span className="self-start inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-lime-soft border border-lime-line text-xs font-semibold text-lime-t tracking-tightish whitespace-nowrap">
+              <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot" />
+              {liveCount} live pool{liveCount === 1 ? '' : 's'} · Instant on Arc
+            </span>
+            <h1 className="m-0 text-[40px] sm:text-[54px] leading-[0.98] font-bold tracking-display text-pretty">
+              Nothing to wait for.
+              <br />
+              <span className="text-lime-t">It trades the second it exists.</span>
+            </h1>
+            <p className="m-0 text-base leading-relaxed text-t2 max-w-[470px] text-pretty">
+              Full supply mints straight into a Uniswap V3 pool, quoted in USDC. LP locked a year.
+              No presale, no curve, no team bag held back.
+            </p>
+            <div className="flex flex-wrap gap-3 pt-1">
+              <Link
+                href="/create"
+                className="inline-flex h-[50px] items-center px-7 rounded-2xl bg-lime text-white text-base font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
+              >
+                Launch a token
+              </Link>
+              <a
+                href="#all-launches"
+                className="inline-flex h-[50px] items-center px-[22px] rounded-2xl bg-white/[0.06] border border-hair text-white text-base font-medium tracking-tightish hover:bg-white/10 transition-colors"
+              >
+                How it works
+              </a>
+            </div>
           </div>
 
-          {!loading && sorted.length === 0 ? (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-10 text-center text-gray-500 text-sm">
-              Nothing launched yet — be the first.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sorted.map((t) => (
-                <TokenCard key={t.id || t.coinType || t.poolId} token={t} />
-              ))}
+          {stack.length > 0 && (
+            <div className="hidden lg:block absolute right-14 top-[52px] w-72 h-[260px] pointer-events-none">
+              {stack.map((t, i) => {
+                const seed = t.coinType || t.poolId || t.symbol
+                const { tile } = tileGradient(seed)
+                const chg = changeParts(t.priceChange24h)
+                const initial = (t.symbol || t.name || '?').charAt(0).toUpperCase()
+                const transform = `translateY(${i * 62}px) rotate(${i * 1.6 - 1.6}deg) scale(${1 - i * 0.045})`
+                const shade = `rgba(0,0,0,${0.18 + i * 0.14})`
+                return (
+                  <div
+                    key={t.id || seed}
+                    className="absolute left-0 right-0 top-0 h-[118px] rounded-[22px] overflow-hidden border border-white/10 shadow-[0_22px_48px_rgba(0,0,0,0.55)]"
+                    style={{ background: tile, transform, zIndex: 30 - i * 10 }}
+                  >
+                    <div className="absolute inset-0" style={{ background: shade }} />
+                    <div className="relative h-full px-4 py-3.5 flex flex-col justify-between">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-lg bg-black/35 flex items-center justify-center text-xs font-bold text-white">
+                            {initial}
+                          </span>
+                          <span className="text-[13px] font-semibold text-white tracking-tightish">
+                            {t.name}
+                          </span>
+                        </span>
+                        <span
+                          className="px-2 py-0.5 rounded-lg text-[11px] font-bold tabular-nums"
+                          style={{ background: chg.chipBg, color: chg.chipFg }}
+                        >
+                          {chg.label}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-[22px] font-semibold tracking-[-0.03em] tabular-nums text-white">
+                          {fmtUsd(t.marketCap)}
+                        </span>
+                        <span className="text-[11px] font-semibold text-white/70">{t.symbol}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </section>
+
+        {rail.length > 0 && (
+          <section className="mt-11">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2.5">
+                <h2 className="m-0 text-[21px] font-semibold tracking-tightish">Just launched</h2>
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-lime-t">
+                  <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot" />
+                  live
+                </span>
+              </div>
+              <span className="text-[13px] font-medium text-t2">
+                {loading ? 'Loading…' : 'Updated every block'}
+              </span>
+            </div>
+            <div className="rail-scroll flex gap-3 pb-1">
+              {rail.map((t) => (
+                <TokenRailCard key={t.id || t.coinType || t.poolId} token={t} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section id="all-launches" className="mt-11">
+          <div className="flex items-center justify-between gap-5 flex-wrap">
+            <h2 className="m-0 text-[21px] font-semibold tracking-tightish">All launches</h2>
+            <div className="flex items-center gap-2.5">
+              <div className="flex gap-1 p-1 bg-s1 border border-hair rounded-[14px]">
+                {sortTabs.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setSort(s)}
+                    className="px-[15px] py-[7px] rounded-[10px] text-[13px] font-medium tracking-tightish transition-colors"
+                    style={{
+                      background: sort === s ? 'var(--lime)' : 'transparent',
+                      color: sort === s ? '#fff' : 'rgba(255,255,255,0.52)',
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+              <div className="h-[38px] flex items-center gap-2 px-3 bg-s1 border border-hair rounded-[14px]">
+                <span className="w-[13px] h-[13px] border-[1.6px] border-t3 rounded-full" />
+                <input
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Filter"
+                  className="w-[110px] bg-transparent border-0 outline-none text-[13px] placeholder:text-white/25"
+                />
+              </div>
+            </div>
+          </div>
+
+          {loading && filtered.length === 0 ? (
+            <div className="mt-10 flex justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-lime-t" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="mt-[18px] rounded-[24px] border border-hair bg-s1 p-12 text-center text-t3 text-sm">
+              Nothing launched yet — be the first.
+              <div className="mt-4">
+                <Link
+                  href="/create"
+                  className="inline-flex h-11 items-center px-6 rounded-2xl bg-lime text-white text-sm font-semibold"
+                >
+                  Launch a token
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-[18px] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filtered.map((t, i) => (
+                <TokenCard key={t.id || t.coinType || t.poolId} token={t} rank={i} />
+              ))}
+            </div>
+          )}
+
+          <div className="mt-14 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {[
+              {
+                t: 'One transaction',
+                d: 'Token + Uniswap V3 pool + single-sided mint + year lock in a single create.',
+              },
+              {
+                t: 'Quoted in USDC',
+                d: 'Native Arc economics. No ETH hop, no bonding curve, no graduation gate.',
+              },
+              {
+                t: 'LP locked 12 months',
+                d: 'Position NFT sits in MonLock. No rug pull via unlocked LP.',
+              },
+            ].map((x) => (
+              <div
+                key={x.t}
+                className="rounded-[22px] border border-hair bg-s1 p-5 flex flex-col gap-2"
+              >
+                <span className="text-[15px] font-semibold tracking-tightish">{x.t}</span>
+                <span className="text-[13px] text-t2 leading-relaxed">{x.d}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
     </main>
+  )
+}
+
+export default function HomePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-black flex items-center justify-center">
+          <Loader2 className="w-6 h-6 animate-spin text-lime-t" />
+        </main>
+      }
+    >
+      <HomeInner />
+    </Suspense>
   )
 }

@@ -1,15 +1,13 @@
 import { ArcCreateForm } from '@/components/ArcCreateForm'
 
-export const metadata = { title: 'Launch a token — ArcFun' }
+export const metadata = { title: 'Launch a token — Arcfun' }
 
 export default function CreatePage() {
   return (
-    <main className="min-h-screen bg-black text-white px-4 pt-28 pb-16">
-      <div className="max-w-lg mx-auto mb-8 text-center space-y-2">
-        <h1 className="font-[family-name:var(--font-space-grotesk)] text-2xl font-bold">Launch on Arc</h1>
-        <p className="text-sm text-gray-500">One transaction. Full supply onto Uniswap V3. LP locked a year.</p>
+    <main className="min-h-screen bg-black text-white pt-16 pb-20">
+      <div className="max-w-desk mx-auto px-4 sm:px-10 py-6 sm:py-8">
+        <ArcCreateForm />
       </div>
-      <ArcCreateForm />
     </main>
   )
 }
