@@ -105,14 +105,8 @@ function HomeInner() {
               {liveCount} live pool{liveCount === 1 ? '' : 's'} · Instant on Arc
             </span>
             <h1 className="m-0 text-[40px] sm:text-[54px] leading-[0.98] font-bold tracking-display text-pretty">
-              Nothing to wait for.
-              <br />
-              <span className="text-lime-t">It trades the second it exists.</span>
+              The best way to launch and trade tokens on Arc.
             </h1>
-            <p className="m-0 text-base leading-relaxed text-t2 max-w-[470px] text-pretty">
-              Full supply mints straight into a Uniswap V3 pool, quoted in USDC. LP locked a year.
-              No presale, no curve, no team bag held back.
-            </p>
             <div className="flex flex-wrap gap-3 pt-1">
               <Link
                 href="/create"
