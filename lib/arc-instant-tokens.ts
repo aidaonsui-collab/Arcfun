@@ -2,12 +2,60 @@
  * Arc InstantErc20QuoteFactory + ArcBondingCurveFactory → PoolToken (USDC-quoted).
  */
 import { formatUnits, type Address } from 'viem'
-import { ARC, ARC_UNI_V3, arcInstantEnabled, arcCurveEnabled, arcPublicClient } from './contracts-arc'
+import { ARC, ARC_UNI_V3, arcInstantEnabled, arcCurveEnabled, arcReflectionEnabled, arcPublicClient } from './contracts-arc'
 import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
 import { erc20Abi as ERC20_ABI } from 'viem'
 import { getArcTokenMeta } from './arc-token-meta'
 import { type PoolToken } from './tokens'
 import { summarizeRpcError } from './rpc-error'
+
+/** InstantReflectionUsdcFactory.pools(token) — same shape the keeper reads (arc-reflection-keeper.ts). */
+const REFLECTION_POOL_ABI = [
+  {
+    type: 'function',
+    name: 'pools',
+    stateMutability: 'view',
+    inputs: [{ name: 'token', type: 'address' }],
+    outputs: [
+      { name: 'creator', type: 'address' },
+      { name: 'rewardToken', type: 'address' },
+      { name: 'feeSink', type: 'address' },
+      { name: 'uniPool', type: 'address' },
+      { name: 'positionId', type: 'uint256' },
+      { name: 'liquidity', type: 'uint128' },
+      { name: 'tickLower', type: 'int24' },
+      { name: 'tickUpper', type: 'int24' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'allTokensLength',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'allTokens',
+    stateMutability: 'view',
+    inputs: [{ name: 'i', type: 'uint256' }],
+    outputs: [{ type: 'address' }],
+  },
+] as const
+
+// Auto-generated Solidity mapping-getter for a struct returns multiple top-level values, not a
+// wrapped tuple — viem decodes that as a labeled array, so this must be destructured by position
+// (same as arc-reflection-keeper.ts's REFLECTION_EXTRA_ABI.pools), never accessed by `.creator` etc.
+type ReflectionPoolTuple = readonly [
+  creator: Address,
+  rewardToken: Address,
+  feeSink: Address,
+  uniPool: Address,
+  positionId: bigint,
+  liquidity: bigint,
+  tickLower: number,
+  tickUpper: number,
+]
 
 /** ArcBondingCurveFactory.Pool — no dex-seed tail (unlike RH FACTORY_ABI). */
 const ARC_CURVE_GET_POOL_ABI = [
@@ -240,6 +288,7 @@ function toPoolToken(
   meta: Awaited<ReturnType<typeof getArcTokenMeta>>,
   launchVirtualQuote: bigint,
   createdAt?: number,
+  factoryOverride?: Address,
 ): PoolToken {
   const creator = p.creator
   // PoolToken.currentPrice is "native" units; on Arc native ≈ USDC, so priceUsdc works as currentPrice.
@@ -282,7 +331,7 @@ function toPoolToken(
     dexVenue: 'v3',
     virtualSuiReserves: launchVirtualQuote,
     virtualTokenReserves: VIRTUAL_TOKEN_INIT_18,
-    moonbagsPackageId: ARC.INSTANT_FACTORY,
+    moonbagsPackageId: factoryOverride ?? ARC.INSTANT_FACTORY,
     volume1h: 0,
     priceChange24h: 0,
     age: '',
@@ -358,6 +407,95 @@ export async function isArcInstantToken(token: Address): Promise<boolean> {
     return !!(p?.creator && p.creator !== ZERO && p.uniPool && p.uniPool !== ZERO)
   } catch {
     return false
+  }
+}
+
+/**
+ * Arc Instant Reflection token (InstantReflectionUsdcFactory). Same single-tx, full-supply,
+ * straight-onto-Uniswap-V3 launch as plain Instant, plus a fee-sink/reward-token pair the plain
+ * Instant factory doesn't have — hence its own `pools` read here instead of `getPool`.
+ */
+export async function fetchArcReflectionPoolToken(token: Address): Promise<PoolToken | null> {
+  if (!arcReflectionEnabled()) return null
+  const client = arcPublicClient()
+  const factory = ARC.REFLECTION_FACTORY
+  try {
+    const p = (await client.readContract({
+      address: factory,
+      abi: REFLECTION_POOL_ABI,
+      functionName: 'pools',
+      args: [token],
+    })) as ReflectionPoolTuple
+    const [creator, , , uniPool, positionId, liquidity, tickLower, tickUpper] = p
+    if (!creator || creator === ZERO || !uniPool || uniPool === ZERO) return null
+    const pool = { creator, uniPool, positionId, liquidity, tickLower, tickUpper } as InstantQuotePool
+
+    const [name, symbol, tokenDecimals, meta] = await Promise.all([
+      client.readContract({ address: token, abi: ERC20_ABI, functionName: 'name' }).catch(() => '') as Promise<string>,
+      client.readContract({ address: token, abi: ERC20_ABI, functionName: 'symbol' }).catch(() => '') as Promise<string>,
+      client
+        .readContract({ address: token, abi: ERC20_ABI, functionName: 'decimals' })
+        .then((d) => Number(d))
+        .catch(() => ARC.TOKEN_DECIMALS) as Promise<number>,
+      getArcTokenMeta(token).catch(() => null),
+    ])
+
+    const dec = Number.isFinite(tokenDecimals) && tokenDecimals > 0 ? tokenDecimals : ARC.TOKEN_DECIMALS
+    // Reflection factory has no launchVirtualQuote getter; reuse the Instant default (same seeding
+    // scheme) as a fallback for the brief window before the pool has traded and slot0 is live.
+    const launchVq = 5_500_000_000n
+    const defaultPrice = defaultArcInstantPriceUsdc(launchVq, dec)
+    const live = await getArcLivePriceUsdc(token, uniPool)
+    const priceUsdc = live != null && live > 0 ? live : defaultPrice > 0 ? defaultPrice : 0
+
+    return toPoolToken(token, pool, name, symbol, priceUsdc, meta, launchVq, undefined, factory)
+  } catch (e) {
+    console.error('[arc-reflection-tokens]', summarizeRpcError(e))
+    return null
+  }
+}
+
+/** Full Reflection catalog for home grid — mirrors listInstantFactoryTokens below. */
+export async function fetchArcReflectionPoolTokens(): Promise<PoolToken[]> {
+  if (!arcReflectionEnabled()) return []
+  const client = arcPublicClient()
+  const factory = ARC.REFLECTION_FACTORY
+  try {
+    const count = Number(
+      await client.readContract({
+        address: factory,
+        abi: REFLECTION_POOL_ABI,
+        functionName: 'allTokensLength',
+      }),
+    )
+    if (!Number.isFinite(count) || count <= 0) return []
+
+    const n = Math.min(count, 200)
+    const indices = Array.from({ length: n }, (_, i) => count - 1 - i)
+    const addrs: Address[] = []
+    for (let i = 0; i < indices.length; i += 25) {
+      const chunk = indices.slice(i, i + 25)
+      const rows = await Promise.all(
+        chunk.map((idx) =>
+          client
+            .readContract({ address: factory, abi: REFLECTION_POOL_ABI, functionName: 'allTokens', args: [BigInt(idx)] })
+            .catch(() => null) as Promise<Address | null>,
+        ),
+      )
+      for (const a of rows) if (a && a !== ZERO) addrs.push(a)
+    }
+    if (addrs.length === 0) return []
+
+    const out: PoolToken[] = []
+    for (let i = 0; i < addrs.length; i += 10) {
+      const batch = addrs.slice(i, i + 10)
+      const rows = await Promise.all(batch.map((token) => fetchArcReflectionPoolToken(token).catch(() => null)))
+      for (const r of rows) if (r) out.push(r)
+    }
+    return out
+  } catch (e) {
+    console.error('[arc-reflection-tokens] catalog', summarizeRpcError(e))
+    return []
   }
 }
 
@@ -594,10 +732,12 @@ export async function fetchArcCurvePoolToken(token: Address): Promise<PoolToken 
   }
 }
 
-/** Instant first, then bonding-curve factory. */
+/** Instant, then Reflection, then bonding-curve factory. */
 export async function fetchArcPoolToken(token: Address): Promise<PoolToken | null> {
   const instant = await fetchArcInstantPoolToken(token)
   if (instant) return instant
+  const reflection = await fetchArcReflectionPoolToken(token)
+  if (reflection) return reflection
   return fetchArcCurvePoolToken(token)
 }
 
@@ -637,17 +777,21 @@ export async function fetchArcCurvePoolTokens(): Promise<PoolToken[]> {
 }
 
 export async function buildArcCatalog(): Promise<{ tokens: PoolToken[]; source: string }> {
-  const [instant, curve] = await Promise.all([
+  const [instant, reflection, curve] = await Promise.all([
     fetchArcInstantPoolTokens().catch(() => [] as PoolToken[]),
+    fetchArcReflectionPoolTokens().catch(() => [] as PoolToken[]),
     fetchArcCurvePoolTokens().catch(() => [] as PoolToken[]),
   ])
   const byId = new Map<string, PoolToken>()
-  for (const t of [...instant, ...curve]) {
+  for (const t of [...instant, ...reflection, ...curve]) {
     const id = (t.coinType || t.poolId || t.id || '').toLowerCase()
     if (id) byId.set(id, t)
   }
+  const sources = ['arc-instant', reflection.length ? 'reflection' : '', curve.length ? 'curve' : '']
+    .filter(Boolean)
+    .join('+')
   return {
     tokens: [...byId.values()],
-    source: curve.length ? 'arc-instant+curve' : 'arc-instant-factory',
+    source: sources || 'arc-instant-factory',
   }
 }
