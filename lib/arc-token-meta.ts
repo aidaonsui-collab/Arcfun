@@ -4,7 +4,8 @@
  */
 import { kv } from '@vercel/kv'
 
-const KEY = (t: string) => `arc:token:meta:${t.toLowerCase()}`
+/** ArcFun-only prefix — do not share the Robinpad `arc:token:meta:` namespace. */
+const KEY = (t: string) => `arcfun:token:meta:${t.toLowerCase()}`
 
 export interface ArcTokenMeta {
   name?: string
