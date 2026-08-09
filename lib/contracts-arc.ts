@@ -21,7 +21,8 @@
  * 2026-08-06: thirdweb (`https://5042.rpc.thirdweb.com`) is BANNED as an Arc endpoint — see the
  * block above ARC_RPC_URLS. It is not a weak fallback, it is a poisoned one.
  */
-import { createPublicClient, defineChain, fallback, http, isAddress, type Address } from 'viem'
+import { createPublicClient, createWalletClient, defineChain, fallback, http, isAddress, type Address } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
 
 /** Strip whitespace / newlines from env addresses (Vercel `echo | env add` can bake in `\n`). */
 function envAddr(raw: string | undefined, fallback: Address): Address {
@@ -431,4 +432,18 @@ export function arcPublicClient() {
     })
   }
   return _clients[0]
+}
+
+/**
+ * Server-only signing client for keeper/cron routes — never import this from client components
+ * (the private key must stay a server env var, no `NEXT_PUBLIC_` prefix, ever). Reuses the same
+ * chain/RPC-fallback config as `arcPublicClient()`.
+ */
+export function arcServerWalletClient(privateKey: `0x${string}`) {
+  const urls = ARC_SERVER_RPC_CANDIDATES.length ? ARC_SERVER_RPC_CANDIDATES : [ARC_SERVER_RPC]
+  return createWalletClient({
+    account: privateKeyToAccount(privateKey),
+    chain: arcChain,
+    transport: urls.length > 1 ? fallback(urls.map((u) => http(u, { retryCount: 0 }))) : http(urls[0]),
+  })
 }

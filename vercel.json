@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/arc/keeper/reflect",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}
