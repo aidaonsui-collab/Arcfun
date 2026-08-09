@@ -29,15 +29,31 @@ export function parseArcUsdc(v: string | number): bigint {
 }
 
 /**
- * createTokenMemeInstantQuote — first buy in USDC (approve factory first when > 0).
+ * createTokenMemeInstantQuote / createTokenMemeInstantQuoteTo —
+ * first buy in USDC (approve factory first when > 0).
  * `value` = CREATION_FEE only (native USDC 18dp); firstBuy is ERC-20 pull.
+ * @param creatorRewardsWallet optional LP creator-fee recipient (zero/undefined → launcher).
  */
 export function buildCreateTokenMemeInstantArc(
   name: string,
   symbol: string,
   firstBuyUsdc6: bigint,
   creationFeeWei: bigint,
+  creatorRewardsWallet?: Address | null,
 ): ArcInstantWriteCall {
+  const rewards = creatorRewardsWallet && creatorRewardsWallet !== '0x0000000000000000000000000000000000000000'
+    ? creatorRewardsWallet
+    : null
+  if (rewards) {
+    return {
+      address: arcInstantFactory(),
+      abi: INSTANT_QUOTE_FACTORY_ABI,
+      functionName: 'createTokenMemeInstantQuoteTo',
+      args: [name, symbol, firstBuyUsdc6, rewards],
+      value: creationFeeWei > 0n ? creationFeeWei : undefined,
+      chainId: ARC_CHAIN_ID,
+    }
+  }
   return {
     address: arcInstantFactory(),
     abi: INSTANT_QUOTE_FACTORY_ABI,

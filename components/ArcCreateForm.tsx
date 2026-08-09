@@ -8,13 +8,14 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount, useConnect, useSwitchChain, useWriteContract, usePublicClient } from 'wagmi'
-import { erc20Abi, parseEventLogs } from 'viem'
+import { erc20Abi, parseEventLogs, isAddress, type Address } from 'viem'
 import { Loader2, AlertCircle, CheckCircle, ImagePlus } from 'lucide-react'
 import {
   ARC,
   ARC_CHAIN_ID,
   ARC_INSTANT_CREATE_GAS,
   arcInstantEnabled,
+  arcReflectionEnabled,
   arcCreationFeeWeiFor,
 } from '@/lib/contracts-arc'
 import {
@@ -70,7 +71,6 @@ export function ArcCreateForm() {
   const publicClient = usePublicClient({ chainId: ARC_CHAIN_ID })
 
   const [launchType, setLaunchType] = useState<LaunchType>('instant')
-  const [reflect, setReflect] = useState(2)
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
   const [description, setDescription] = useState('')
@@ -79,7 +79,7 @@ export function ArcCreateForm() {
   const [twitter, setTwitter] = useState('')
   const [telegram, setTelegram] = useState('')
   const [website, setWebsite] = useState('')
-  const [creatorFee, setCreatorFee] = useState(true)
+  const [rewardsWallet, setRewardsWallet] = useState('')
   const [buyAtLaunch, setBuyAtLaunch] = useState(false)
   const [firstBuy, setFirstBuy] = useState('250')
 
@@ -88,8 +88,11 @@ export function ArcCreateForm() {
 
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
   const configured = arcInstantEnabled()
+  const reflectionLive = arcReflectionEnabled()
   const busy = step !== 'idle' && step !== 'done'
   const isReflection = launchType === 'reflection'
+  const rewardsOk =
+    !rewardsWallet.trim() || isAddress(rewardsWallet.trim() as Address)
 
   const seed = symbol || name || 'new'
   const { tile, mono } = useMemo(() => tileGradient(seed), [seed])
@@ -102,8 +105,16 @@ export function ArcCreateForm() {
 
   const onSubmit = async () => {
     if (!address) return
-    if (isReflection) {
-      setError('Reflection tokens aren’t live on Arc yet — pick Instant Launch to ship today.')
+    if (isReflection && !reflectionLive) {
+      setError('Reflection factory isn’t live on Arc yet — pick Instant Launch to ship today.')
+      return
+    }
+    if (isReflection && reflectionLive) {
+      setError('Reflection create UI is wired next — Instant is ready now with rewards wallet.')
+      return
+    }
+    if (!rewardsOk) {
+      setError('Rewards wallet must be a valid 0x address (or leave blank to use your wallet).')
       return
     }
     setError(null)
@@ -117,6 +128,10 @@ export function ArcCreateForm() {
       const feeWei = arcCreationFeeWeiFor(address)
       const firstBuyUsdc6 =
         buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcUsdc(firstBuy) : 0n
+      const rewardsAddr =
+        rewardsWallet.trim() && isAddress(rewardsWallet.trim() as Address)
+          ? (rewardsWallet.trim() as Address)
+          : null
 
       if (firstBuyUsdc6 > 0n) {
         setStep('approving')
@@ -130,7 +145,13 @@ export function ArcCreateForm() {
       }
 
       setStep('creating')
-      const call = buildCreateTokenMemeInstantArc(name.trim(), symbol.trim(), firstBuyUsdc6, feeWei)
+      const call = buildCreateTokenMemeInstantArc(
+        name.trim(),
+        symbol.trim(),
+        firstBuyUsdc6,
+        feeWei,
+        rewardsAddr,
+      )
       const hash = await writeContractAsync({
         address: call.address,
         abi: call.abi,
@@ -191,7 +212,8 @@ export function ArcCreateForm() {
     symbol.trim().length > 0 &&
     !busy &&
     configured &&
-    !isReflection
+    rewardsOk &&
+    !isReflection // Instant only until reflection create path is wired end-to-end
 
   if (!configured) {
     return (
@@ -202,13 +224,22 @@ export function ArcCreateForm() {
     )
   }
 
+  const rewardsPreview =
+    rewardsWallet.trim() && isAddress(rewardsWallet.trim() as Address)
+      ? `${rewardsWallet.trim().slice(0, 6)}…${rewardsWallet.trim().slice(-4)}`
+      : 'Your wallet'
   const shipRows = [
     { k: 'Type', v: isReflection ? 'Reflection' : 'Instant' },
     { k: 'Supply', v: '1,000,000,000' },
-    { k: 'Pair', v: 'USDC · 1% fee' },
-    { k: 'Reflects', v: isReflection ? `${reflect}% to holders` : '—' },
-    { k: 'LP lock', v: '12 months' },
-    { k: 'Creator fee', v: creatorFee ? 'On (protocol default)' : 'Protocol default' },
+    { k: 'Pair', v: isReflection ? 'WETH · 1% fee' : 'USDC · 1% fee' },
+    {
+      k: 'LP fees',
+      v: isReflection
+        ? '25% creator · 50% holders · 25% platform'
+        : '70% creator · 30% platform (protocol)',
+    },
+    { k: 'Rewards to', v: rewardsPreview },
+    { k: 'LP lock', v: '12 months · ArcLock' },
   ]
 
   return (
@@ -286,37 +317,22 @@ export function ArcCreateForm() {
 
         {isReflection && (
           <div className="mt-3 p-5 rounded-[22px] bg-s2 border border-lime-line">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex flex-col gap-1">
-                <span className="text-[15px] font-semibold tracking-tightish">Reflection rate</span>
-                <span className="text-[13px] text-t3 leading-snug">
-                  {reflect}% of every buy and sell is split across holders, pro rata. You keep the
-                  rest of the LP fee.
-                </span>
+            <div className="flex flex-col gap-1">
+              <span className="text-[15px] font-semibold tracking-tightish">LP fee split</span>
+              <span className="text-[13px] text-t2 leading-snug">
+                Quote-side LP fees: <strong className="text-white">25% creator</strong> ·{' '}
+                <strong className="text-white">50% holders</strong> (via reflect) ·{' '}
+                <strong className="text-white">25% platform</strong>. Launch-token fees burn.
+              </span>
+              {!reflectionLive ? (
                 <span className="text-[12px] text-coral mt-1">
-                  Contracts not live yet — switch to Instant to launch today.
+                  Reflection factory not deployed yet — switch to Instant Launch to ship today.
                 </span>
-              </div>
-              <div className="flex gap-1.5 shrink-0">
-                {[1, 2, 3, 5].map((r) => {
-                  const on = reflect === r
-                  return (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setReflect(r)}
-                      className="px-3.5 py-2 rounded-xl text-[13px] font-semibold tabular-nums border transition-colors"
-                      style={{
-                        background: on ? 'var(--lime)' : '#000',
-                        color: on ? '#fff' : 'rgba(255,255,255,0.58)',
-                        borderColor: on ? 'var(--lime)' : 'var(--hair)',
-                      }}
-                    >
-                      {r}%
-                    </button>
-                  )
-                })}
-              </div>
+              ) : (
+                <span className="text-[12px] text-lime-t mt-1">
+                  Live on Arc. Reward token + create path shipping next.
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -409,15 +425,25 @@ export function ArcCreateForm() {
           ))}
         </div>
 
-        {/* Creator fee toggle (display only — fee split is on-chain) */}
-        <div className="flex items-center justify-between gap-4 p-[18px] rounded-[18px] bg-s2 border border-hair mt-3">
-          <div className="flex flex-col gap-0.5 pr-5">
-            <span className="text-[15px] font-semibold tracking-tightish">Creator fee</span>
-            <span className="text-[13px] text-t3 leading-snug">
-              Protocol routes creator share of LP fees in USDC. Split is set by the factory.
-            </span>
-          </div>
-          <Toggle on={creatorFee} onToggle={() => setCreatorFee((v) => !v)} />
+        {/* LP creator rewards wallet — stamped into ArcLock creator fee leg */}
+        <div className="px-[18px] py-3.5 rounded-[18px] bg-s2 border border-hair mt-3">
+          <span className="block text-xs font-semibold text-t3 mb-1.5">
+            Creator rewards wallet <span className="text-t3 font-normal">(optional)</span>
+          </span>
+          <input
+            value={rewardsWallet}
+            onChange={(e) => setRewardsWallet(e.target.value.trim())}
+            placeholder={address || '0x… leave blank to use your connected wallet'}
+            spellCheck={false}
+            className="w-full bg-transparent border-0 outline-none text-[15px] font-mono tracking-tightish placeholder:text-white/25"
+          />
+          <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
+            Where your share of LP fees is paid (Instant: ~70% of quote-side fees). Defaults to the
+            wallet that signs the create tx.
+          </p>
+          {rewardsWallet.trim() && !rewardsOk && (
+            <p className="mt-1.5 mb-0 text-[12px] text-coral">Enter a valid 0x address.</p>
+          )}
         </div>
 
         {/* Buy at launch */}
@@ -505,7 +531,7 @@ export function ArcCreateForm() {
         )}
 
         <p className="mt-3.5 mb-0 text-xs text-t3 text-center leading-relaxed">
-          Creation fee 1 USDC · gas on Arc · LP NFT locked 12 months in MonLock
+          Creation fee 1 USDC · gas on Arc · LP NFT locked 12 months in ArcLock
         </p>
       </div>
 

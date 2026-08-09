@@ -260,7 +260,7 @@ function HomeInner() {
               },
               {
                 t: 'LP locked 12 months',
-                d: 'Position NFT sits in MonLock. No rug pull via unlocked LP.',
+                d: 'Position NFT sits in ArcLock. No rug pull via unlocked LP.',
               },
             ].map((x) => (
               <div

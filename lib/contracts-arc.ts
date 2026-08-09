@@ -286,13 +286,17 @@ export const ARC = {
   /** Curve for-sale tokens (18dp). */
   CURVE_FOR_SALE: 800_000_000n * 10n ** 18n,
 
-  // ── Robinpad Instant (LaunchToken18 · 5042 · owner 0x2403…) ─────────────────
+  // ── ArcFun Instant (LaunchToken18 · 5042) ───────────────────────────────────
   INSTANT_FACTORY: (process.env.NEXT_PUBLIC_ARC_INSTANT_FACTORY ??
-    '0xca1834b9564988d4eb998b2fddd615e48b89ce42') as Address,
+    '0xd51E6217bb3bC7586866713854Ea75B7BefF1009') as Address,
   INSTANT_LOCKER: (process.env.NEXT_PUBLIC_ARC_INSTANT_LOCKER ??
-    '0x429c90eef056e15e3db2291e28f91453633e34df') as Address,
+    '0x84F486d7254aEDc89986bce392771D88bf5828EA') as Address,
   BPS_SOURCE: (process.env.NEXT_PUBLIC_ARC_BPS_SOURCE ??
-    '0xfc207f9fb65adc3f22db4e6269e55f74c9b63d7e') as Address,
+    '0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE') as Address,
+
+  // ── Instant Reflection (upgradeable; set after DeployInstantReflectionArc) ──
+  REFLECTION_FACTORY: envAddr(process.env.NEXT_PUBLIC_ARC_REFLECTION_FACTORY, ZERO),
+  REFLECTION_LOCKER: envAddr(process.env.NEXT_PUBLIC_ARC_REFLECTION_LOCKER, ZERO),
 
   // ── RobinSwap = fee router over Uni (not a private AMM) ─────────────────────
   FEE_ROUTER: (process.env.NEXT_PUBLIC_ARC_FEE_ROUTER ??
@@ -331,6 +335,11 @@ export function arcRpcConfigured(): boolean {
 /** True when Instant pad contracts are configured. */
 export function arcInstantEnabled(): boolean {
   return arcRpcConfigured() && ARC.INSTANT_FACTORY !== ZERO && ARC.INSTANT_LOCKER !== ZERO
+}
+
+/** True when Instant Reflection factory is deployed and wired. */
+export function arcReflectionEnabled(): boolean {
+  return arcRpcConfigured() && ARC.REFLECTION_FACTORY !== ZERO && ARC.REFLECTION_LOCKER !== ZERO
 }
 
 /**

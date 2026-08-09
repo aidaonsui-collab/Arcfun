@@ -18,6 +18,18 @@ export const INSTANT_QUOTE_FACTORY_ABI = [
   },
   {
     type: 'function',
+    name: 'createTokenMemeInstantQuoteTo',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'name', type: 'string' },
+      { name: 'symbol', type: 'string' },
+      { name: 'firstBuyQuoteAmount', type: 'uint256' },
+      { name: 'creatorRewardsWallet', type: 'address' },
+    ],
+    outputs: [{ name: 'token', type: 'address' }],
+  },
+  {
+    type: 'function',
     name: 'createTokenMemeInstantQuoteWithEth',
     stateMutability: 'payable',
     inputs: [
