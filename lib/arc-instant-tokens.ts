@@ -295,10 +295,22 @@ function toPoolToken(
 
 export async function fetchArcInstantPoolToken(token: Address): Promise<PoolToken | null> {
   if (!arcInstantEnabled()) return null
+  // Same two factories the catalog (fetchArcInstantPoolTokens) merges — current first, then the
+  // pre–LaunchToken18 legacy factory. Without this fallback, any token whose pool lives only on
+  // the legacy factory shows fine in the home-grid catalog but 404s on its own /token page, since
+  // this single-lookup path used to check only ARC.INSTANT_FACTORY.
+  for (const factory of [ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_LEGACY]) {
+    const row = await fetchArcInstantPoolTokenFromFactory(token, factory)
+    if (row) return row
+  }
+  return null
+}
+
+async function fetchArcInstantPoolTokenFromFactory(token: Address, factory: Address): Promise<PoolToken | null> {
   const client = arcPublicClient()
   try {
     const p = (await client.readContract({
-      address: ARC.INSTANT_FACTORY,
+      address: factory,
       abi: INSTANT_QUOTE_FACTORY_ABI,
       functionName: 'getPool',
       args: [token],
@@ -310,7 +322,7 @@ export async function fetchArcInstantPoolToken(token: Address): Promise<PoolToke
       client.readContract({ address: token, abi: ERC20_ABI, functionName: 'symbol' }).catch(() => '') as Promise<string>,
       client
         .readContract({
-          address: ARC.INSTANT_FACTORY,
+          address: factory,
           abi: INSTANT_QUOTE_FACTORY_ABI,
           functionName: 'launchVirtualQuote',
         })
