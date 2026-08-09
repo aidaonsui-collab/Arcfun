@@ -15,7 +15,7 @@ export function Footer() {
           >
             Arc
           </a>
-          . Full supply on Uniswap V3 from block one, LP locked a year.
+          . Full supply on Uniswap V3 from block one; launch-token LP fees are auto-burned.
         </p>
         <div className="flex items-center gap-5 font-medium text-t2">
           <Link href="/create" className="hover:text-white">
