@@ -88,7 +88,7 @@ function HomeInner() {
   return (
     <main className="min-h-screen text-white pt-16 pb-16">
       <div className="max-w-desk mx-auto px-4 sm:px-10">
-        <section className="hero-panel relative overflow-hidden mt-6 border border-hair rounded-[32px] px-6 sm:px-11 py-12 min-h-[320px] sm:min-h-[360px]">
+        <section className="hero-panel relative overflow-hidden mt-6 border border-hair rounded-[32px] px-6 sm:px-11 py-7 sm:py-8">
           <svg
             viewBox="0 0 64 64"
             preserveAspectRatio="xMidYMid slice"
