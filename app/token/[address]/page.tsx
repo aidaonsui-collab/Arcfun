@@ -258,7 +258,7 @@ export default function TokenPage() {
                 {
                   label: 'Holders',
                   value: holderCount ? String(holderCount) : '—',
-                  sub: pool.instant ? 'Instant DEX' : 'on Arc',
+                  sub: 'on Arc',
                   subColor: 'var(--limeT)',
                 },
               ].map((m) => (
