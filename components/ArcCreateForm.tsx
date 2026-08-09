@@ -23,7 +23,6 @@ import {
 } from '@/lib/arc-instant-launchpad'
 import {
   buildCreateTokenReflectionArc,
-  parseArcNative,
   INSTANT_REFLECTION_FACTORY_ABI,
   ARC_REFLECTION_CREATE_GAS,
 } from '@/lib/arc-reflection-launchpad'
@@ -59,7 +58,7 @@ const LAUNCH_TYPES: {
     points: [
       '50% of quote LP fees → holders via reflect()',
       '25% creator · 25% platform · launch fees burn',
-      'Instant TOKEN/WETH pool from block one',
+      'Instant TOKEN/USDC pool from block one',
     ],
   },
 ]
@@ -124,10 +123,7 @@ export function ArcCreateForm() {
       setError('Reward token must be a valid ERC-20 address (e.g. Arc USDC).')
       return
     }
-    if (isReflection && rewardToken.toLowerCase() === ARC.WETH.toLowerCase()) {
-      setError('Reward token can’t be WETH (that’s the pool quote). Use USDC or another ERC-20.')
-      return
-    }
+    // rewardToken may be Arc USDC (holders earn USDC) or any other ERC-20 with a USDC pool.
     setError(null)
     try {
       let imageUrl = ''
@@ -146,16 +142,28 @@ export function ArcCreateForm() {
       let token: Address | undefined
       let pool: Address | undefined
 
+      const firstBuyUsdc6 =
+        buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcUsdc(firstBuy) : 0n
+      const factory = isReflection ? ARC.REFLECTION_FACTORY : ARC.INSTANT_FACTORY
+
+      if (firstBuyUsdc6 > 0n) {
+        setStep('approving')
+        await writeContractAsync({
+          address: ARC.USDC,
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [factory, firstBuyUsdc6],
+          chainId: ARC_CHAIN_ID,
+        })
+      }
+
       if (isReflection) {
-        // Reflection: msg.value = fee + optional native first-buy (TOKEN/WETH pool).
-        const firstBuyNative =
-          buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcNative(firstBuy) : 0n
         setStep('creating')
         const call = buildCreateTokenReflectionArc(
           name.trim(),
           symbol.trim(),
           rewardToken as Address,
-          firstBuyNative,
+          firstBuyUsdc6,
           feeWei,
           rewardsAddr,
         )
@@ -179,19 +187,6 @@ export function ArcCreateForm() {
         token = created?.args?.token as Address | undefined
         pool = created?.args?.pool as Address | undefined
       } else {
-        // Instant: USDC pair + optional ERC-20 first buy.
-        const firstBuyUsdc6 =
-          buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcUsdc(firstBuy) : 0n
-        if (firstBuyUsdc6 > 0n) {
-          setStep('approving')
-          await writeContractAsync({
-            address: ARC.USDC,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [ARC.INSTANT_FACTORY, firstBuyUsdc6],
-            chainId: ARC_CHAIN_ID,
-          })
-        }
         setStep('creating')
         const call = buildCreateTokenMemeInstantArc(
           name.trim(),
@@ -281,7 +276,7 @@ export function ArcCreateForm() {
   const shipRows = [
     { k: 'Type', v: isReflection ? 'Reflection' : 'Instant' },
     { k: 'Supply', v: '1,000,000,000' },
-    { k: 'Pair', v: isReflection ? 'WETH · 1% fee' : 'USDC · 1% fee' },
+    { k: 'Pair', v: 'USDC · 1% fee' },
     {
       k: 'LP fees',
       v: isReflection
@@ -379,7 +374,7 @@ export function ArcCreateForm() {
                 </span>
               ) : (
                 <span className="text-[12px] text-lime-t mt-1">
-                  Live · TOKEN/WETH pool · factory {ARC.REFLECTION_FACTORY.slice(0, 10)}…
+                  Live · TOKEN/USDC pool · factory {ARC.REFLECTION_FACTORY.slice(0, 10)}…
                 </span>
               )}
             </div>
@@ -395,8 +390,9 @@ export function ArcCreateForm() {
                 className="w-full bg-black/40 border border-hair rounded-xl px-3 py-2.5 text-sm font-mono outline-none focus:border-lime-line"
               />
               <p className="mt-1.5 mb-0 text-[12px] text-t3 leading-snug">
-                Defaults to Arc USDC. Must be a contract with code — not WETH (pool quote). Holders
-                receive this token when <code className="text-t2">reflect()</code> runs.
+                Defaults to Arc USDC. Pool is always TOKEN/USDC; this is what holders earn when{' '}
+                <code className="text-t2">reflect()</code> runs (must differ from pool USDC only if
+                you want a non-USDC reward and a USDC/reward pool exists).
               </p>
             </div>
           </div>
@@ -516,9 +512,7 @@ export function ArcCreateForm() {
           <div className="flex flex-col gap-0.5 pr-5">
             <span className="text-[15px] font-semibold tracking-tightish">Buy at launch</span>
             <span className="text-[13px] text-t3 leading-snug">
-              {isReflection
-                ? 'Optional native first buy into the TOKEN/WETH pool (msg.value on top of creation fee).'
-                : 'Bundle a USDC first buy into the Instant create transaction.'}
+              Bundle a USDC first buy into the create transaction.
             </span>
           </div>
           <Toggle on={buyAtLaunch} onToggle={() => setBuyAtLaunch((v) => !v)} />
@@ -527,9 +521,7 @@ export function ArcCreateForm() {
         {buyAtLaunch && (
           <div className="px-[18px] py-3.5 rounded-[18px] bg-s2 border border-lime-line mt-3 flex items-center justify-between gap-4">
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-semibold text-t3">
-                {isReflection ? 'First buy — native USDC (18dp)' : 'First buy — USDC (6dp)'}
-              </span>
+              <span className="text-xs font-semibold text-t3">First buy — USDC</span>
               <input
                 value={firstBuy}
                 onChange={(e) => setFirstBuy(e.target.value.replace(/[^0-9.]/g, ''))}
@@ -600,8 +592,7 @@ export function ArcCreateForm() {
         )}
 
         <p className="mt-3.5 mb-0 text-xs text-t3 text-center leading-relaxed">
-          Creation fee 1 USDC · gas on Arc · launch-token LP fees auto-burn
-          {isReflection ? ' · pair WETH' : ' · pair USDC'}
+          Creation fee 1 USDC · gas on Arc · launch-token LP fees auto-burn · pair USDC
         </p>
       </div>
 

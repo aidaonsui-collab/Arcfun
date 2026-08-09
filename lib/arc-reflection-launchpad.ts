@@ -1,6 +1,6 @@
 /**
- * Arc Instant Reflection factory — create + catalog helpers.
- * Factory: InstantReflectionFactory (Transparent proxy) on Arc 5042.
+ * Arc Instant Reflection (USDC-quoted) — InstantReflectionUsdcFactory.
+ * Pair: TOKEN / USDC. Creation fee: native USDC. First buy: ERC-20 USDC pull.
  */
 import type { Address } from 'viem'
 import { parseUnits } from 'viem'
@@ -15,7 +15,7 @@ export const INSTANT_REFLECTION_FACTORY_ABI = [
       { name: 'name', type: 'string' },
       { name: 'symbol', type: 'string' },
       { name: 'rewardToken', type: 'address' },
-      { name: 'firstBuyEthWei', type: 'uint256' },
+      { name: 'firstBuyUsdc6', type: 'uint256' },
     ],
     outputs: [{ name: 'token', type: 'address' }],
   },
@@ -27,7 +27,7 @@ export const INSTANT_REFLECTION_FACTORY_ABI = [
       { name: 'name', type: 'string' },
       { name: 'symbol', type: 'string' },
       { name: 'rewardToken', type: 'address' },
-      { name: 'firstBuyEthWei', type: 'uint256' },
+      { name: 'firstBuyUsdc6', type: 'uint256' },
       { name: 'creatorRewardsWallet', type: 'address' },
     ],
     outputs: [{ name: 'token', type: 'address' }],
@@ -38,6 +38,13 @@ export const INSTANT_REFLECTION_FACTORY_ABI = [
     stateMutability: 'view',
     inputs: [],
     outputs: [{ type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'QUOTE',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }],
   },
   {
     type: 'function',
@@ -52,27 +59,6 @@ export const INSTANT_REFLECTION_FACTORY_ABI = [
     stateMutability: 'view',
     inputs: [{ name: 'i', type: 'uint256' }],
     outputs: [{ type: 'address' }],
-  },
-  {
-    type: 'function',
-    name: 'getPool',
-    stateMutability: 'view',
-    inputs: [{ name: 'token', type: 'address' }],
-    outputs: [
-      {
-        type: 'tuple',
-        components: [
-          { name: 'creator', type: 'address' },
-          { name: 'rewardToken', type: 'address' },
-          { name: 'feeSink', type: 'address' },
-          { name: 'uniPool', type: 'address' },
-          { name: 'positionId', type: 'uint256' },
-          { name: 'liquidity', type: 'uint128' },
-          { name: 'tickLower', type: 'int24' },
-          { name: 'tickUpper', type: 'int24' },
-        ],
-      },
-    ],
   },
   {
     type: 'event',
@@ -97,21 +83,20 @@ export type ArcReflectionWriteCall = {
   chainId: number
 }
 
-/** Native 18dp amount (Arc gas = USDC native). Used for creation fee + optional first buy. */
-export function parseArcNative(v: string | number): bigint {
-  return parseUnits(String(v || '0'), 18)
+/** USDC 6dp first-buy (same as Instant meme). */
+export function parseArcUsdc(v: string | number): bigint {
+  return parseUnits(String(v || '0'), 6)
 }
 
 /**
  * createTokenReflectionInstant / createTokenReflectionInstantTo
- * msg.value = CREATION_FEE + firstBuyEthWei (native).
- * Pair is TOKEN/WETH; first buy spends native via router into the launch pool.
+ * value = CREATION_FEE only (native). First buy is ERC-20 USDC approve + pull.
  */
 export function buildCreateTokenReflectionArc(
   name: string,
   symbol: string,
   rewardToken: Address,
-  firstBuyNativeWei: bigint,
+  firstBuyUsdc6: bigint,
   creationFeeWei: bigint,
   creatorRewardsWallet?: Address | null,
 ): ArcReflectionWriteCall {
@@ -120,14 +105,13 @@ export function buildCreateTokenReflectionArc(
     creatorRewardsWallet && creatorRewardsWallet !== '0x0000000000000000000000000000000000000000'
       ? creatorRewardsWallet
       : null
-  const value = creationFeeWei + firstBuyNativeWei
   if (rewards) {
     return {
       address: ARC.REFLECTION_FACTORY,
       abi: INSTANT_REFLECTION_FACTORY_ABI,
       functionName: 'createTokenReflectionInstantTo',
-      args: [name, symbol, rewardToken, firstBuyNativeWei, rewards],
-      value: value > 0n ? value : undefined,
+      args: [name, symbol, rewardToken, firstBuyUsdc6, rewards],
+      value: creationFeeWei > 0n ? creationFeeWei : undefined,
       chainId: ARC_CHAIN_ID,
     }
   }
@@ -135,11 +119,10 @@ export function buildCreateTokenReflectionArc(
     address: ARC.REFLECTION_FACTORY,
     abi: INSTANT_REFLECTION_FACTORY_ABI,
     functionName: 'createTokenReflectionInstant',
-    args: [name, symbol, rewardToken, firstBuyNativeWei],
-    value: value > 0n ? value : undefined,
+    args: [name, symbol, rewardToken, firstBuyUsdc6],
+    value: creationFeeWei > 0n ? creationFeeWei : undefined,
     chainId: ARC_CHAIN_ID,
   }
 }
 
-/** Heavy create (token + sink + mint + lock) — skip eth_estimateGas on flaky public RPCs. */
 export const ARC_REFLECTION_CREATE_GAS = 14_000_000n
