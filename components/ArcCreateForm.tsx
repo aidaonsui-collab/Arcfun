@@ -1,9 +1,7 @@
 'use client'
 
 /**
- * Launch a token on Arc — InstantErc20QuoteFactory.createTokenMemeInstantQuote.
- * UI matches redesign: Instant vs Reflection type cards, live preview, ship sheet.
- * Reflection is UI-only until contracts land (CTA disabled when selected).
+ * Launch on Arc — Instant (USDC pair) or Instant Reflection (WETH pair + holder rewards).
  */
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -23,6 +21,12 @@ import {
   parseArcUsdc,
   INSTANT_QUOTE_FACTORY_ABI,
 } from '@/lib/arc-instant-launchpad'
+import {
+  buildCreateTokenReflectionArc,
+  parseArcNative,
+  INSTANT_REFLECTION_FACTORY_ABI,
+  ARC_REFLECTION_CREATE_GAS,
+} from '@/lib/arc-reflection-launchpad'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
 import { tileGradient } from '@/lib/ui-format'
 
@@ -51,11 +55,11 @@ const LAUNCH_TYPES: {
     key: 'reflection',
     icon: '◈',
     title: 'Reflection token',
-    tagline: 'Every trade pays your holders',
+    tagline: 'LP fees pay your holders',
     points: [
-      'A slice of each trade redistributes to holders',
-      'Rewards accrue in USDC, claimable any time',
-      'Same instant Uniswap V3 pool underneath',
+      '50% of quote LP fees → holders via reflect()',
+      '25% creator · 25% platform · launch fees burn',
+      'Instant TOKEN/WETH pool, LP locked 12 months',
     ],
   },
 ]
@@ -80,6 +84,8 @@ export function ArcCreateForm() {
   const [telegram, setTelegram] = useState('')
   const [website, setWebsite] = useState('')
   const [rewardsWallet, setRewardsWallet] = useState('')
+  /** Holder reward ERC-20 — default Arc USDC (6dp). Must not be WETH (pair quote). */
+  const [rewardToken, setRewardToken] = useState<string>(ARC.USDC)
   const [buyAtLaunch, setBuyAtLaunch] = useState(false)
   const [firstBuy, setFirstBuy] = useState('250')
 
@@ -93,6 +99,7 @@ export function ArcCreateForm() {
   const isReflection = launchType === 'reflection'
   const rewardsOk =
     !rewardsWallet.trim() || isAddress(rewardsWallet.trim() as Address)
+  const rewardTokenOk = isAddress(rewardToken)
 
   const seed = symbol || name || 'new'
   const { tile, mono } = useMemo(() => tileGradient(seed), [seed])
@@ -109,12 +116,16 @@ export function ArcCreateForm() {
       setError('Reflection factory isn’t live on Arc yet — pick Instant Launch to ship today.')
       return
     }
-    if (isReflection && reflectionLive) {
-      setError('Reflection create UI is wired next — Instant is ready now with rewards wallet.')
-      return
-    }
     if (!rewardsOk) {
       setError('Rewards wallet must be a valid 0x address (or leave blank to use your wallet).')
+      return
+    }
+    if (isReflection && !rewardTokenOk) {
+      setError('Reward token must be a valid ERC-20 address (e.g. Arc USDC).')
+      return
+    }
+    if (isReflection && rewardToken.toLowerCase() === ARC.WETH.toLowerCase()) {
+      setError('Reward token can’t be WETH (that’s the pool quote). Use USDC or another ERC-20.')
       return
     }
     setError(null)
@@ -126,52 +137,90 @@ export function ArcCreateForm() {
       }
 
       const feeWei = arcCreationFeeWeiFor(address)
-      const firstBuyUsdc6 =
-        buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcUsdc(firstBuy) : 0n
       const rewardsAddr =
         rewardsWallet.trim() && isAddress(rewardsWallet.trim() as Address)
           ? (rewardsWallet.trim() as Address)
           : null
 
-      if (firstBuyUsdc6 > 0n) {
-        setStep('approving')
-        await writeContractAsync({
-          address: ARC.USDC,
-          abi: erc20Abi,
-          functionName: 'approve',
-          args: [ARC.INSTANT_FACTORY, firstBuyUsdc6],
-          chainId: ARC_CHAIN_ID,
+      let hash: `0x${string}`
+      let token: Address | undefined
+      let pool: Address | undefined
+
+      if (isReflection) {
+        // Reflection: msg.value = fee + optional native first-buy (TOKEN/WETH pool).
+        const firstBuyNative =
+          buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcNative(firstBuy) : 0n
+        setStep('creating')
+        const call = buildCreateTokenReflectionArc(
+          name.trim(),
+          symbol.trim(),
+          rewardToken as Address,
+          firstBuyNative,
+          feeWei,
+          rewardsAddr,
+        )
+        hash = await writeContractAsync({
+          address: call.address,
+          abi: call.abi as never,
+          functionName: call.functionName as never,
+          args: call.args as never,
+          value: call.value,
+          chainId: call.chainId,
+          gas: ARC_REFLECTION_CREATE_GAS,
         })
+        setStep('confirming')
+        if (!publicClient) throw new Error('No Arc RPC client available to confirm the transaction.')
+        const rcpt = await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 })
+        const [created] = parseEventLogs({
+          abi: INSTANT_REFLECTION_FACTORY_ABI,
+          eventName: 'InstantReflectionCreated',
+          logs: rcpt.logs,
+        })
+        token = created?.args?.token as Address | undefined
+        pool = created?.args?.pool as Address | undefined
+      } else {
+        // Instant: USDC pair + optional ERC-20 first buy.
+        const firstBuyUsdc6 =
+          buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcUsdc(firstBuy) : 0n
+        if (firstBuyUsdc6 > 0n) {
+          setStep('approving')
+          await writeContractAsync({
+            address: ARC.USDC,
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [ARC.INSTANT_FACTORY, firstBuyUsdc6],
+            chainId: ARC_CHAIN_ID,
+          })
+        }
+        setStep('creating')
+        const call = buildCreateTokenMemeInstantArc(
+          name.trim(),
+          symbol.trim(),
+          firstBuyUsdc6,
+          feeWei,
+          rewardsAddr,
+        )
+        hash = await writeContractAsync({
+          address: call.address,
+          abi: call.abi as never,
+          functionName: call.functionName as never,
+          args: call.args as never,
+          value: call.value,
+          chainId: call.chainId,
+          gas: ARC_INSTANT_CREATE_GAS,
+        })
+        setStep('confirming')
+        if (!publicClient) throw new Error('No Arc RPC client available to confirm the transaction.')
+        const rcpt = await publicClient.waitForTransactionReceipt({ hash, timeout: 90_000 })
+        const [created] = parseEventLogs({
+          abi: INSTANT_QUOTE_FACTORY_ABI,
+          eventName: 'InstantQuoteTokenCreated',
+          logs: rcpt.logs,
+        })
+        token = created?.args?.token as Address | undefined
+        pool = created?.args?.pool as Address | undefined
       }
 
-      setStep('creating')
-      const call = buildCreateTokenMemeInstantArc(
-        name.trim(),
-        symbol.trim(),
-        firstBuyUsdc6,
-        feeWei,
-        rewardsAddr,
-      )
-      const hash = await writeContractAsync({
-        address: call.address,
-        abi: call.abi,
-        functionName: call.functionName as never,
-        args: call.args as never,
-        value: call.value,
-        chainId: call.chainId,
-        gas: ARC_INSTANT_CREATE_GAS,
-      })
-      setStep('confirming')
-
-      if (!publicClient) throw new Error('No Arc RPC client available to confirm the transaction.')
-      const rcpt = await publicClient.waitForTransactionReceipt({ hash, timeout: 90_000 })
-      const [created] = parseEventLogs({
-        abi: INSTANT_QUOTE_FACTORY_ABI,
-        eventName: 'InstantQuoteTokenCreated',
-        logs: rcpt.logs,
-      })
-      const token = created?.args?.token
-      const pool = created?.args?.pool
       if (!token)
         throw new Error(
           'Token created, but could not read its address from the transaction. Check ArcScan.',
@@ -211,15 +260,16 @@ export function ArcCreateForm() {
     name.trim().length > 0 &&
     symbol.trim().length > 0 &&
     !busy &&
-    configured &&
     rewardsOk &&
-    !isReflection // Instant only until reflection create path is wired end-to-end
+    (isReflection
+      ? reflectionLive && rewardTokenOk
+      : configured)
 
-  if (!configured) {
+  if (!configured && !reflectionLive) {
     return (
       <div className="rounded-[22px] border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
-        Arc Instant factory isn&apos;t configured — set NEXT_PUBLIC_ARC_INSTANT_FACTORY /
-        NEXT_PUBLIC_ARC_INSTANT_LOCKER.
+        Arc launch factories aren&apos;t configured — set NEXT_PUBLIC_ARC_INSTANT_* and/or
+        NEXT_PUBLIC_ARC_REFLECTION_*.
       </div>
     )
   }
@@ -316,7 +366,7 @@ export function ArcCreateForm() {
         </div>
 
         {isReflection && (
-          <div className="mt-3 p-5 rounded-[22px] bg-s2 border border-lime-line">
+          <div className="mt-3 p-5 rounded-[22px] bg-s2 border border-lime-line space-y-4">
             <div className="flex flex-col gap-1">
               <span className="text-[15px] font-semibold tracking-tightish">LP fee split</span>
               <span className="text-[13px] text-t2 leading-snug">
@@ -326,13 +376,29 @@ export function ArcCreateForm() {
               </span>
               {!reflectionLive ? (
                 <span className="text-[12px] text-coral mt-1">
-                  Reflection factory not deployed yet — switch to Instant Launch to ship today.
+                  Reflection factory not configured — switch to Instant Launch.
                 </span>
               ) : (
                 <span className="text-[12px] text-lime-t mt-1">
-                  Live on Arc. Reward token + create path shipping next.
+                  Live · TOKEN/WETH pool · factory {ARC.REFLECTION_FACTORY.slice(0, 10)}…
                 </span>
               )}
+            </div>
+            <div>
+              <span className="block text-xs font-semibold text-t3 mb-1.5">
+                Holder reward token <span className="text-coral">*</span>
+              </span>
+              <input
+                value={rewardToken}
+                onChange={(e) => setRewardToken(e.target.value.trim())}
+                placeholder="0x… ERC-20 holders earn (default Arc USDC)"
+                spellCheck={false}
+                className="w-full bg-black/40 border border-hair rounded-xl px-3 py-2.5 text-sm font-mono outline-none focus:border-lime-line"
+              />
+              <p className="mt-1.5 mb-0 text-[12px] text-t3 leading-snug">
+                Defaults to Arc USDC. Must be a contract with code — not WETH (pool quote). Holders
+                receive this token when <code className="text-t2">reflect()</code> runs.
+              </p>
             </div>
           </div>
         )}
@@ -451,7 +517,9 @@ export function ArcCreateForm() {
           <div className="flex flex-col gap-0.5 pr-5">
             <span className="text-[15px] font-semibold tracking-tightish">Buy at launch</span>
             <span className="text-[13px] text-t3 leading-snug">
-              Bundle your own first buy into the launch transaction.
+              {isReflection
+                ? 'Optional native first buy into the TOKEN/WETH pool (msg.value on top of creation fee).'
+                : 'Bundle a USDC first buy into the Instant create transaction.'}
             </span>
           </div>
           <Toggle on={buyAtLaunch} onToggle={() => setBuyAtLaunch((v) => !v)} />
@@ -460,7 +528,9 @@ export function ArcCreateForm() {
         {buyAtLaunch && (
           <div className="px-[18px] py-3.5 rounded-[18px] bg-s2 border border-lime-line mt-3 flex items-center justify-between gap-4">
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-semibold text-t3">First buy — USDC</span>
+              <span className="text-xs font-semibold text-t3">
+                {isReflection ? 'First buy — native USDC (18dp)' : 'First buy — USDC (6dp)'}
+              </span>
               <input
                 value={firstBuy}
                 onChange={(e) => setFirstBuy(e.target.value.replace(/[^0-9.]/g, ''))}
@@ -523,7 +593,7 @@ export function ArcCreateForm() {
                 <CheckCircle className="w-4 h-4" /> Launched
               </>
             ) : isReflection ? (
-              'Reflection coming soon'
+              'Launch reflection token'
             ) : (
               'Review launch'
             )}
@@ -532,6 +602,7 @@ export function ArcCreateForm() {
 
         <p className="mt-3.5 mb-0 text-xs text-t3 text-center leading-relaxed">
           Creation fee 1 USDC · gas on Arc · LP NFT locked 12 months in ArcLock
+          {isReflection ? ' · pair WETH' : ' · pair USDC'}
         </p>
       </div>
 

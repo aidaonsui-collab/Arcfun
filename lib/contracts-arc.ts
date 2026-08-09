@@ -294,9 +294,15 @@ export const ARC = {
   BPS_SOURCE: (process.env.NEXT_PUBLIC_ARC_BPS_SOURCE ??
     '0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE') as Address,
 
-  // ── Instant Reflection (upgradeable; set after DeployInstantReflectionArc) ──
-  REFLECTION_FACTORY: envAddr(process.env.NEXT_PUBLIC_ARC_REFLECTION_FACTORY, ZERO),
-  REFLECTION_LOCKER: envAddr(process.env.NEXT_PUBLIC_ARC_REFLECTION_LOCKER, ZERO),
+  // ── Instant Reflection (upgradeable · DeployInstantReflectionArc 2026-08-09) ─
+  REFLECTION_FACTORY: envAddr(
+    process.env.NEXT_PUBLIC_ARC_REFLECTION_FACTORY,
+    '0xEdf061e755b6dbb909b859Bc153719BeE0972fBB',
+  ),
+  REFLECTION_LOCKER: envAddr(
+    process.env.NEXT_PUBLIC_ARC_REFLECTION_LOCKER,
+    '0xBcEf511D2CFe35b0913457dD52C532B0F3a712eE',
+  ),
 
   // ── RobinSwap = fee router over Uni (not a private AMM) ─────────────────────
   FEE_ROUTER: (process.env.NEXT_PUBLIC_ARC_FEE_ROUTER ??
