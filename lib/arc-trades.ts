@@ -3,8 +3,8 @@
  * Arc RPCs often cap eth_getLogs to 10_000 blocks — scan newest→oldest in chunks.
  */
 import { formatUnits, parseAbiItem, type Address, type Log } from 'viem'
-import { ARC, arcInstantEnabled, arcPublicClient } from './contracts-arc'
-import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
+import { arcPublicClient } from './contracts-arc'
+import { fetchArcPoolToken } from './arc-instant-tokens'
 import {
   type EvmTrade,
   type EvmTradesResult,
@@ -54,16 +54,17 @@ const empty: EvmTradesResult = {
 const abs = (x: bigint) => (x < 0n ? -x : x)
 const mem = new Map<string, { result: EvmTradesResult; at: number }>()
 
+/**
+ * Resolve the Uni V3 pool for any Arc pool type (Instant, Reflection, or graduated bonding-curve)
+ * via the shared fetchArcPoolToken lookup instead of hardcoding the Instant factory — the old
+ * Instant-only resolvePool silently returned "no trades" for Reflection/curve tokens even when
+ * they had a live, tradeable pool.
+ */
 async function resolvePool(token: Address): Promise<{ pool: Address; tokenIs0: boolean } | null> {
   try {
     const client = arcPublicClient()
-    const row = (await client.readContract({
-      address: ARC.INSTANT_FACTORY,
-      abi: INSTANT_QUOTE_FACTORY_ABI,
-      functionName: 'getPool',
-      args: [token],
-    })) as { uniPool?: Address }
-    const pool = row?.uniPool
+    const t = await fetchArcPoolToken(token)
+    const pool = t?.instantMeta?.uniPool as Address | undefined
     if (!pool || pool === ZERO) return null
     const token0 = (await client.readContract({
       address: pool,
@@ -112,7 +113,6 @@ function buildStats(trades: EvmTrade[]): EvmTradeStats {
 }
 
 export async function fetchArcTrades(token: Address): Promise<EvmTradesResult> {
-  if (!arcInstantEnabled()) return empty
   const key = token.toLowerCase()
   const hit = mem.get(key)
   if (hit && Date.now() - hit.at < FRESH_MS) return hit.result

@@ -6,7 +6,7 @@ import { type Address } from 'viem'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { fetchEvmHolders } from '@/lib/evm-holders'
 import { fetchArcTrades } from '@/lib/arc-trades'
-import { fetchArcInstantPoolToken } from '@/lib/arc-instant-tokens'
+import { fetchArcPoolToken } from '@/lib/arc-instant-tokens'
 import { ARC, arcInstantEnabled } from '@/lib/contracts-arc'
 
 export const dynamic = 'force-dynamic'
@@ -21,10 +21,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
   }
 
   try {
-    const pool = await fetchArcInstantPoolToken(token as Address)
+    // fetchArcPoolToken (not the Instant-only variant) so Reflection and graduated-curve tokens
+    // get their holders indexed too — this used to 404 for anything that wasn't a plain Instant
+    // launch, even though the pool itself was live and had holders.
+    const pool = await fetchArcPoolToken(token as Address)
     if (!pool) {
       return NextResponse.json({ error: 'not found', holders: [], total: 0 }, { status: 404 })
     }
+    const isReflection = pool.moonbagsPackageId?.toLowerCase() === ARC.REFLECTION_FACTORY.toLowerCase()
+    const factory = isReflection ? ARC.REFLECTION_FACTORY : ARC.INSTANT_FACTORY
+    const locker = isReflection ? ARC.REFLECTION_LOCKER : ARC.INSTANT_LOCKER
 
     // Seed candidates from recent swap traders so Transfer scan has somewhere to start.
     const trades = await fetchArcTrades(token as Address)
@@ -32,16 +38,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
       new Set([
         ...trades.trades.map((t) => t.trader.toLowerCase()),
         pool.creator?.toLowerCase(),
-        ARC.INSTANT_FACTORY.toLowerCase(),
-        ARC.INSTANT_LOCKER.toLowerCase(),
+        factory.toLowerCase(),
+        locker.toLowerCase(),
       ].filter(Boolean) as string[]),
     )
 
     const result = await fetchEvmHolders('arc', token as Address, {
       seedAddresses: seed,
       excludeAddresses: [
-        ARC.INSTANT_FACTORY,
-        ARC.INSTANT_LOCKER,
+        factory,
+        locker,
         ...(pool.instantMeta?.uniPool ? [pool.instantMeta.uniPool] : []),
       ],
       creatorAddress: pool.creator,
