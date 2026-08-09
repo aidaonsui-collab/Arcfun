@@ -4,6 +4,10 @@ node_modules
 .env
 .env.local
 .env*.local
+# Deployer / platform private keys — never commit
+.env.deploy
+.env*.deploy
+*.pk
 next-env.d.ts
 *.tsbuildinfo
 .DS_Store
