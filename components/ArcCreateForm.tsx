@@ -48,7 +48,7 @@ const LAUNCH_TYPES: {
     points: [
       'Full supply onto Uniswap V3 at creation',
       'No graduation, no waiting room',
-      'LP NFT locked 12 months',
+      'Launch-token LP fees auto-burned',
     ],
   },
   {
@@ -59,7 +59,7 @@ const LAUNCH_TYPES: {
     points: [
       '50% of quote LP fees → holders via reflect()',
       '25% creator · 25% platform · launch fees burn',
-      'Instant TOKEN/WETH pool, LP locked 12 months',
+      'Instant TOKEN/WETH pool from block one',
     ],
   },
 ]
@@ -286,10 +286,9 @@ export function ArcCreateForm() {
       k: 'LP fees',
       v: isReflection
         ? '25% creator · 50% holders · 25% platform'
-        : '70% creator · 30% platform (protocol)',
+        : '70% creator · 30% platform · launch side burns',
     },
     { k: 'Rewards to', v: rewardsPreview },
-    { k: 'LP lock', v: '12 months · ArcLock' },
   ]
 
   return (
@@ -298,8 +297,8 @@ export function ArcCreateForm() {
       <div className="border border-hair rounded-[28px] bg-s1 p-6 sm:p-8">
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em]">Launch your token</h1>
         <p className="mt-2.5 mb-0 text-[15px] text-t2 leading-relaxed">
-          Fixed supply of 1B. One transaction, straight onto Uniswap V3 in USDC. LP locks for a year
-          the moment it mints.
+          Fixed supply of 1B. One transaction, straight onto Uniswap V3. Launch-token LP fees
+          auto-burn.
         </p>
 
         {/* Launch type cards */}
@@ -601,7 +600,7 @@ export function ArcCreateForm() {
         )}
 
         <p className="mt-3.5 mb-0 text-xs text-t3 text-center leading-relaxed">
-          Creation fee 1 USDC · gas on Arc · LP NFT locked 12 months in ArcLock
+          Creation fee 1 USDC · gas on Arc · launch-token LP fees auto-burn
           {isReflection ? ' · pair WETH' : ' · pair USDC'}
         </p>
       </div>
