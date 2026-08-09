@@ -88,40 +88,25 @@ function HomeInner() {
   return (
     <main className="min-h-screen text-white pt-16 pb-16">
       <div className="max-w-desk mx-auto px-4 sm:px-10">
-        <section className="hero-panel relative overflow-hidden mt-6 border border-hair rounded-[32px] px-6 sm:px-11 py-7 sm:py-8">
-          <svg
-            viewBox="0 0 64 64"
-            preserveAspectRatio="xMidYMid slice"
-            className="absolute -left-10 -bottom-40 w-[420px] h-[420px] opacity-[0.1] pointer-events-none"
-            aria-hidden
-          >
-            <path d="M32 14 L50 46 L41 46 L32 30 L23 46 L14 46 Z" fill="var(--limeT)" />
-          </svg>
-          <div className="absolute left-0 right-0 top-0 h-px bg-gradient-to-r from-transparent via-[rgba(126,192,247,0.9)] to-transparent" />
-          <div
-            className="absolute -right-20 top-0 w-[420px] h-[420px] rounded-full pointer-events-none blur-3xl opacity-40"
-            style={{ background: 'radial-gradient(circle, rgba(47,132,219,0.35), transparent 65%)' }}
-            aria-hidden
-          />
-
-          <div className="relative max-w-[600px] flex flex-col gap-5">
-            <span className="self-start inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-lime-soft border border-lime-line text-xs font-semibold text-lime-t tracking-tightish whitespace-nowrap shadow-[0_0_24px_rgba(47,132,219,0.25)]">
+        <section className="relative mt-6">
+          <div className="relative max-w-[600px] flex flex-col gap-3">
+            <span className="self-start inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-lime-soft border border-lime-line text-xs font-semibold text-lime-t tracking-tightish whitespace-nowrap">
               <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot" />
               {liveCount} live pool{liveCount === 1 ? '' : 's'} · Instant on Arc
             </span>
-            <h1 className="m-0 text-[40px] sm:text-[54px] leading-[0.98] font-bold tracking-display text-pretty text-white drop-shadow-[0_2px_24px_rgba(47,132,219,0.2)]">
+            <h1 className="m-0 text-[26px] sm:text-[32px] leading-[1.15] font-bold tracking-display text-pretty text-white">
               The best way to launch and trade tokens on Arc.
             </h1>
             <div className="flex flex-wrap gap-3 pt-1">
               <Link
                 href="/create"
-                className="inline-flex h-[50px] items-center px-7 rounded-2xl bg-lime text-white text-base font-semibold tracking-tightish hover:bg-lime-2 transition-colors shadow-[0_8px_28px_rgba(47,132,219,0.35)]"
+                className="inline-flex h-[42px] items-center px-6 rounded-full bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
               >
                 Launch a token
               </Link>
               <a
                 href="#all-launches"
-                className="inline-flex h-[50px] items-center px-[22px] rounded-2xl bg-white/10 border border-hair text-white text-base font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
+                className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
               >
                 How it works
               </a>
