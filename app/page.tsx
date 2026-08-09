@@ -247,31 +247,6 @@ function HomeInner() {
               ))}
             </div>
           )}
-
-          <div className="mt-14 grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {[
-              {
-                t: 'One transaction',
-                d: 'Token + Uniswap V3 pool + single-sided mint + year lock in a single create.',
-              },
-              {
-                t: 'Quoted in USDC',
-                d: 'Native Arc economics. No ETH hop, no bonding curve, no graduation gate.',
-              },
-              {
-                t: 'LP locked 12 months',
-                d: 'Position NFT sits in ArcLock. No rug pull via unlocked LP.',
-              },
-            ].map((x) => (
-              <div
-                key={x.t}
-                className="rounded-[22px] border border-hair bg-s1 p-5 flex flex-col gap-2"
-              >
-                <span className="text-[15px] font-semibold tracking-tightish">{x.t}</span>
-                <span className="text-[13px] text-t2 leading-relaxed">{x.d}</span>
-              </div>
-            ))}
-          </div>
         </section>
       </div>
     </main>
