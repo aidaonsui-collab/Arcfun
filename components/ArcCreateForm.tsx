@@ -297,7 +297,7 @@ export function ArcCreateForm() {
         </p>
 
         {/* Launch type cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-[26px]">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-[26px]">
           {LAUNCH_TYPES.map((lt) => {
             const on = launchType === lt.key
             return (
@@ -357,6 +357,38 @@ export function ArcCreateForm() {
               </button>
             )
           })}
+
+          {/* RWA paired tokens — placeholder, not selectable yet */}
+          <div
+            className="relative text-left p-5 rounded-[22px] opacity-60 cursor-not-allowed"
+            style={{ background: 'var(--s2)', border: '1px solid var(--hair)' }}
+          >
+            <span
+              className="absolute top-4 right-4 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide"
+              style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.5)' }}
+            >
+              Soon
+            </span>
+            <span
+              className="flex items-center justify-center w-[38px] h-[38px] rounded-xl text-[17px]"
+              style={{ background: 'rgba(255,255,255,0.06)' }}
+            >
+              🏛
+            </span>
+            <h3 className="mt-3.5 mb-1 text-[17px] font-semibold tracking-tightish text-white">
+              RWA paired tokens
+            </h3>
+            <p className="m-0 text-[13px] font-semibold" style={{ color: 'rgba(255,255,255,0.34)' }}>
+              Coming soon
+            </p>
+            <span className="mt-3.5 flex flex-col gap-2">
+              {['Pair a launch against a real-world asset', 'Same Instant mint + LP lock mechanics'].map((p) => (
+                <span key={p} className="text-[13px] leading-snug" style={{ color: 'rgba(255,255,255,0.34)' }}>
+                  — {p}
+                </span>
+              ))}
+            </span>
+          </div>
         </div>
 
         {isReflection && (
