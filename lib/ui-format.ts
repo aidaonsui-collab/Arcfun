@@ -114,38 +114,6 @@ export function sparkPath(seed: string, n = 26, bias = 0): string {
   )
 }
 
-/** Area chart path for token detail (1000×300 viewBox). */
-export function areaChartPaths(
-  seed: string,
-  points = 48,
-  bias = 0,
-): { line: string; area: string; lastY: number } {
-  let s = 19
-  for (let i = 0; i < seed.length; i++) s = (s * 31 + seed.charCodeAt(i)) >>> 0
-  const series: number[] = []
-  const drift = Math.max(-0.4, Math.min(0.4, bias / 80))
-  for (let i = 0; i < points; i++) {
-    s = (s * 1103515245 + 12345) % 2147483648
-    const r = s / 2147483648 - 0.5
-    const base = i < 10 ? 40 + i * 4 : 140 * Math.pow(0.985, i - 10) + 50
-    series.push(Math.max(8, base * (1 + r * 0.18) * (1 + drift * (i / points))))
-  }
-  const min = Math.min(...series)
-  const max = Math.max(...series)
-  const span = max - min || 1
-  const pts = series.map((v, i) => [
-    (i / (points - 1)) * 1000,
-    288 - ((v - min) / span) * 252,
-  ])
-  const line =
-    'M ' + pts.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' L ')
-  return {
-    line,
-    area: line + ' L 1000 300 L 0 300 Z',
-    lastY: pts[pts.length - 1][1],
-  }
-}
-
 export function walletHue(addr: string): string {
   let h = 0
   for (let i = 0; i < addr.length; i++) h = (h * 33 + addr.charCodeAt(i)) >>> 0
