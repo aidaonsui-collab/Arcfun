@@ -12,11 +12,12 @@ import type { PoolToken } from '@/lib/tokens'
 import type { EvmTradesResult } from '@/lib/evm-trades'
 import type { EvmHoldersResult } from '@/lib/evm-holders'
 import { ArcDexTradePanel } from '@/components/ArcDexTradePanel'
+import { TokenChart } from '@/components/TokenChart'
 import { ARC_EXPLORER, ARC } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
+import { buildCandles, RANGE_BUCKET_SEC } from '@/lib/candles'
 import {
   ageLabel,
-  areaChartPaths,
   changeParts,
   fmtPrice,
   fmtUsd,
@@ -128,14 +129,10 @@ export default function TokenPage() {
   const seed = token || pool?.symbol || 'arc'
   const { tile, mono } = tileGradient(seed)
   const chg = changeParts(pool?.priceChange24h)
-  const chart = areaChartPaths(seed + range, range === '1H' ? 24 : range === '1D' ? 48 : 36, pool?.priceChange24h ?? 0)
-  const markerTop = `${(chart.lastY / 300) * 100}%`
-  const axis =
-    range === '1H'
-      ? ['9:00', '9:15', '9:30', '9:45', 'now']
-      : range === '1D'
-        ? ['00:00', '06:00', '12:00', '18:00', 'now']
-        : ['Mon', 'Wed', 'Fri', 'Sun', 'now']
+  const candles = useMemo(
+    () => buildCandles(trades?.trades ?? [], RANGE_BUCKET_SEC[range], pool?.currentPrice ?? 0),
+    [trades, range, pool?.currentPrice],
+  )
 
   const holderCount = holders?.holders?.length ?? 0
   const actTabs: { id: Tab; label: string }[] = [
@@ -312,44 +309,8 @@ export default function TokenPage() {
                 </div>
               </div>
 
-              <div className="relative mt-[18px] h-[240px] sm:h-[280px]">
-                <svg
-                  viewBox="0 0 1000 300"
-                  preserveAspectRatio="none"
-                  className="absolute inset-0 w-full h-full block"
-                >
-                  <defs>
-                    <linearGradient id="arcFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6DB3F2" stopOpacity="0.26" />
-                      <stop offset="100%" stopColor="#6DB3F2" stopOpacity="0" />
-                    </linearGradient>
-                  </defs>
-                  <path d={chart.area} fill="url(#arcFill)" />
-                  <path
-                    d={chart.line}
-                    fill="none"
-                    stroke="#6DB3F2"
-                    strokeWidth="2"
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                </svg>
-                <div
-                  className="absolute left-0 right-0 h-0 border-t border-dashed border-[rgba(109,179,242,0.55)]"
-                  style={{ top: markerTop }}
-                />
-                <div
-                  className="absolute right-0 translate-x-1.5 -translate-y-1/2 px-2 py-0.5 rounded-lg bg-lime text-white text-[11px] font-bold tabular-nums"
-                  style={{ top: markerTop }}
-                >
-                  {fmtUsd(pool.marketCap)}
-                </div>
-              </div>
-              <div className="flex justify-between px-0.5 pt-2.5 pb-3 text-[11px] font-medium text-t3">
-                {axis.map((a) => (
-                  <span key={a}>{a}</span>
-                ))}
+              <div className="relative mt-[18px] rounded-2xl overflow-hidden">
+                <TokenChart candles={candles} height={280} />
               </div>
             </div>
 
