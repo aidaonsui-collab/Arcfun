@@ -143,7 +143,7 @@ export default function TokenPage() {
 
   if (loading && !pool) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center pt-16">
+      <main className="min-h-screen text-white flex items-center justify-center pt-16">
         <Loader2 className="w-8 h-8 animate-spin text-lime-t" />
       </main>
     )
@@ -151,7 +151,7 @@ export default function TokenPage() {
 
   if (!pool) {
     return (
-      <main className="min-h-screen bg-black text-white flex flex-col items-center justify-center gap-4 px-4 pt-16">
+      <main className="min-h-screen text-white flex flex-col items-center justify-center gap-4 px-4 pt-16">
         <p className="text-t2">Token not found on Arc.</p>
         <Link href="/create" className="text-lime-t hover:text-white text-sm font-semibold">
           Launch on Arc
@@ -165,7 +165,7 @@ export default function TokenPage() {
   const creator = pool.creatorShort || shortAddr(pool.creator)
 
   return (
-    <main className="min-h-screen bg-black text-white pt-16 pb-20">
+    <main className="min-h-screen text-white pt-16 pb-20">
       <div className="max-w-desk mx-auto px-4 sm:px-10 py-6 sm:py-8">
         <Link
           href="/"

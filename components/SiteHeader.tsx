@@ -50,7 +50,7 @@ export function SiteHeader() {
   }
 
   return (
-    <header className="fixed top-0 inset-x-0 z-40 h-16 flex items-center gap-4 sm:gap-6 px-4 sm:px-10 bg-black/74 backdrop-blur-[28px] saturate-150 border-b border-hair2">
+    <header className="fixed top-0 inset-x-0 z-40 h-16 flex items-center gap-4 sm:gap-6 px-4 sm:px-10 bg-[rgba(10,15,24,0.82)] backdrop-blur-[28px] saturate-150 border-b border-hair2">
       <Link href="/" className="flex items-center gap-2.5 shrink-0">
         <BrandMark />
         <span className="text-[17px] font-semibold tracking-tightish text-white">Arcfun</span>

@@ -4,45 +4,45 @@
 
 @layer base {
   :root {
-    /* Design handoff tokens (Claude Design Arcfun redesign) */
-    --lime: #2676ca;
-    --lime2: #1d5fa8;
-    --limeT: #6db3f2;
-    --limeSoft: rgba(38, 118, 202, 0.16);
-    --limeLine: rgba(38, 118, 202, 0.46);
-    --coral: #ff6f53;
-    --coralSoft: rgba(255, 111, 83, 0.12);
-    --s1: #0b0b0d;
-    --s2: #141417;
-    --s3: #1c1c21;
-    --hair: rgba(255, 255, 255, 0.075);
-    --hair2: rgba(255, 255, 255, 0.05);
-    --t2: rgba(255, 255, 255, 0.58);
-    --t3: rgba(255, 255, 255, 0.34);
-    --bg: #08080a;
+    /* Lively dark — navy-black surfaces, clearer type, stronger blue accent */
+    --lime: #2f84db;
+    --lime2: #2470c2;
+    --limeT: #7ec0f7;
+    --limeSoft: rgba(47, 132, 219, 0.2);
+    --limeLine: rgba(47, 132, 219, 0.5);
+    --coral: #ff7a62;
+    --coralSoft: rgba(255, 122, 98, 0.14);
+    --s1: #12151c;
+    --s2: #1a1f2a;
+    --s3: #242b38;
+    --hair: rgba(255, 255, 255, 0.11);
+    --hair2: rgba(255, 255, 255, 0.07);
+    --t2: rgba(255, 255, 255, 0.74);
+    --t3: rgba(255, 255, 255, 0.48);
+    --bg: #0a0f18;
 
     /* Legacy aliases used by trade panel / older class names */
     --cp-card: var(--s1);
     --cp-line: var(--hair);
 
-    --background: 240 6% 3%;
+    --background: 220 28% 7%;
     --foreground: 0 0% 100%;
-    --border: 0 0% 100% / 0.075;
-    --input: 0 0% 100% / 0.075;
-    --ring: 210 70% 47%;
-    --primary: 210 70% 47%;
+    --border: 0 0% 100% / 0.11;
+    --input: 0 0% 100% / 0.11;
+    --ring: 210 72% 52%;
+    --primary: 210 72% 52%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 5% 8%;
+    --secondary: 220 18% 12%;
     --secondary-foreground: 0 0% 100%;
-    --muted: 240 5% 10%;
-    --muted-foreground: 0 0% 58%;
-    --accent: 210 70% 47%;
+    --muted: 220 16% 14%;
+    --muted-foreground: 0 0% 72%;
+    --accent: 210 72% 52%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 11 100% 66%;
+    --destructive: 11 100% 68%;
     --destructive-foreground: 0 0% 100%;
-    --card: 240 6% 5%;
+    --card: 220 20% 9%;
     --card-foreground: 0 0% 100%;
-    --popover: 240 6% 5%;
+    --popover: 220 20% 9%;
     --popover-foreground: 0 0% 100%;
     --radius: 1rem;
   }
@@ -59,7 +59,11 @@
   }
 
   body {
-    background: #000;
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse 90% 55% at 50% -15%, rgba(47, 132, 219, 0.16), transparent 55%),
+      radial-gradient(ellipse 50% 40% at 100% 0%, rgba(126, 192, 247, 0.06), transparent 45%);
+    background-attachment: fixed;
     color: #fff;
     font-family:
       -apple-system,
@@ -88,7 +92,7 @@
   }
   input::placeholder,
   textarea::placeholder {
-    color: rgba(255, 255, 255, 0.26);
+    color: rgba(255, 255, 255, 0.32);
   }
 }
 
@@ -96,9 +100,11 @@
   0%,
   100% {
     opacity: 1;
+    box-shadow: 0 0 0 0 rgba(126, 192, 247, 0.55);
   }
   50% {
-    opacity: 0.2;
+    opacity: 0.35;
+    box-shadow: 0 0 0 6px rgba(126, 192, 247, 0);
   }
 }
 
@@ -122,6 +128,18 @@
 
 .live-dot {
   animation: livePulse 1.8s ease-in-out infinite;
+}
+
+/* Hero surface — gradient card + soft blue wash */
+.hero-panel {
+  background:
+    radial-gradient(ellipse 80% 70% at 85% 20%, rgba(47, 132, 219, 0.18), transparent 55%),
+    radial-gradient(ellipse 60% 50% at 10% 90%, rgba(126, 192, 247, 0.08), transparent 50%),
+    linear-gradient(145deg, #1a2230 0%, #121820 48%, #0e131c 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+    0 28px 80px rgba(10, 20, 40, 0.55),
+    0 12px 40px rgba(47, 132, 219, 0.12);
 }
 
 ::-webkit-scrollbar {
