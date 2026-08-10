@@ -22,6 +22,7 @@ const EMPTY = {
     sellers: 0,
   },
   pricePoints: [],
+  total: 0,
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
@@ -30,8 +31,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     return NextResponse.json({ error: 'invalid token' }, { status: 400 })
   }
   const fresh = req.nextUrl.searchParams.get('fresh') === '1'
-  const data = await fetchArcTrades(token as Address)
-  return NextResponse.json(data.trades.length ? data : EMPTY, {
+  const limit = Number(req.nextUrl.searchParams.get('limit') || '') || undefined
+  const offset = Number(req.nextUrl.searchParams.get('offset') || '') || undefined
+  const data = await fetchArcTrades(token as Address, { limit, offset })
+  return NextResponse.json(data.trades.length || offset ? data : EMPTY, {
     headers: {
       'Cache-Control': fresh
         ? 'private, no-store'
