@@ -76,6 +76,18 @@ const ARC_INFURA_RPC = ARC_INFURA_KEY ? `${ARC_INFURA_HOST}/v3/${ARC_INFURA_KEY}
 const ARC_BARACAT_RPC = 'https://arc-mainnet-rpc.baracat.meme'
 
 /**
+ * Tail-only fallback — verified 2026-08-10 as a real, in-sync Arc mainnet node (correct chainId,
+ * live block number, correct eth_call/eth_getBlockByNumber, CORS open) but it deliberately
+ * disables eth_getLogs ("method disabled on this endpoint"). That's fatal for a primary RPC here
+ * — the trade tape, chart, holders panel, and reflection keeper all depend on eth_getLogs — so
+ * this must never be placed ahead of ARC_BARACAT_RPC. Kept purely as extra redundancy for simple
+ * calls (balance, nonce, eth_call reads, gas estimate) if every RPC ahead of it is down; viem's
+ * fallback() transport moves on to the next URL on any error, so a getLogs call landing here just
+ * fails through to whatever (if anything) is configured after it — never breaks silently.
+ */
+const ARC_THELEAK_RPC = 'https://ac-rpc.theleak.cx'
+
+/**
  * Endpoints that must never serve Arc, no matter who configures them.
  *
  * thirdweb (`5042.rpc.thirdweb.com`) has Arc in its chain registry but no working node behind it.
@@ -151,7 +163,7 @@ export const ARC_RPC_URLS: string[] = (() => {
   // Infura first (MetaMask Arc), then public fallbacks.
   const defaults = ARC_IS_TESTNET
     ? [ARC_TESTNET_RPC]
-    : [ARC_INFURA_RPC, ARC_BARACAT_RPC].filter(Boolean)
+    : [ARC_INFURA_RPC, ARC_BARACAT_RPC, ARC_THELEAK_RPC].filter(Boolean)
   const seen = new Set<string>()
   const out: string[] = []
   for (const u of [primary, ...extras, ...defaults]) {
