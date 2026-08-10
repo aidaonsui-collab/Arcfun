@@ -11,16 +11,15 @@
  *      creator-chosen reward token if it isn't USDC, sends it to the token contract, then calls
  *      distribute() + pushRewards() to actually pay holders.
  *
- * Step 3 is the one place this keeper deliberately holds back: when rewardToken != USDC, reflect()
- * does a real on-chain swap, and this keeper has no price oracle for arbitrary reward tokens to
- * compute a safe amountOutMinimum. Passing 0 there would accept any price — a sandwich-attack
- * surface on a scheduled, predictable transaction. So for now: USDC-reward tokens (the default, and
- * expected common case) get swept automatically; anything else is left pending for a manual
- * reflect() call (e.g. from the token's creator) that can supply a real minOut.
+ * For rewardToken === USDC, amountOutMinimum is 0 (pass-through, no swap).
+ * For custom reward CAs, the keeper quotes Uni V3 USDC→reward (same fee tiers as the factory:
+ * 1% / 0.3% / 0.05% / 0.01%), applies REFLECT_SLIPPAGE_BPS, and passes that minOut. If no pool
+ * or quote fails, the token is skipped until a later cycle (or a manual reflect).
  */
 import { type Address, erc20Abi, parseEther } from 'viem'
 import { ARC, ARC_CHAIN_ID, ARC_PLATFORM_WALLET, arcPublicClient, arcServerWalletClient } from './contracts-arc'
 import { INSTANT_REFLECTION_FACTORY_ABI } from './arc-reflection-launchpad'
+import { minOutFromSlippage } from './arc-swap'
 
 const MONLOCK_ABI = [
   {
@@ -84,6 +83,76 @@ const REFLECTION_EXTRA_ABI = [
 /** Skip reflect() below this — not worth the gas. $0.25 USDC (6dp). */
 const MIN_REFLECT_USDC = 250_000n
 
+/**
+ * Fee tiers the factory's `_swapQuoteForReward` walks (InstantReflectionUsdcFactory).
+ * Keeper must quote the same order so minOut matches the pool reflect() will use.
+ */
+const REFLECT_FEE_TIERS = [10_000, 3_000, 500, 100] as const
+
+/** Slippage on USDC→reward swap for custom CA reflections (5%). */
+const REFLECT_SLIPPAGE_BPS = 500
+
+const QUOTER_ABI = [
+  {
+    type: 'function',
+    name: 'quoteExactInputSingle',
+    stateMutability: 'nonpayable',
+    inputs: [
+      {
+        name: 'params',
+        type: 'tuple',
+        components: [
+          { name: 'tokenIn', type: 'address' },
+          { name: 'tokenOut', type: 'address' },
+          { name: 'amountIn', type: 'uint256' },
+          { name: 'fee', type: 'uint24' },
+          { name: 'sqrtPriceLimitX96', type: 'uint160' },
+        ],
+      },
+    ],
+    outputs: [
+      { name: 'amountOut', type: 'uint256' },
+      { name: 'sqrtPriceX96After', type: 'uint160' },
+      { name: 'initializedTicksCrossed', type: 'uint32' },
+      { name: 'gasEstimate', type: 'uint256' },
+    ],
+  },
+] as const
+
+/**
+ * Quote USDC → reward across factory fee tiers. Returns first successful tier (matches
+ * factory loop order so amountOutMinimum aligns with the pool reflect() will pick).
+ */
+async function quoteUsdcToReward(
+  rewardToken: Address,
+  usdcIn: bigint,
+): Promise<{ amountOut: bigint; fee: number } | null> {
+  if (usdcIn <= 0n || !ARC.UNI_QUOTER) return null
+  const client = arcPublicClient()
+  for (const fee of REFLECT_FEE_TIERS) {
+    try {
+      const res = (await client.readContract({
+        address: ARC.UNI_QUOTER,
+        abi: QUOTER_ABI,
+        functionName: 'quoteExactInputSingle',
+        args: [
+          {
+            tokenIn: ARC.USDC,
+            tokenOut: rewardToken,
+            amountIn: usdcIn,
+            fee,
+            sqrtPriceLimitX96: 0n,
+          },
+        ],
+      })) as readonly [bigint, bigint, number, bigint]
+      if (res[0] > 0n) return { amountOut: res[0], fee }
+    } catch {
+      /* try next tier */
+    }
+  }
+  return null
+}
+
 export interface KeeperTokenResult {
   token: Address
   collectFeesTx?: `0x${string}`
@@ -93,6 +162,12 @@ export interface KeeperTokenResult {
   reflectTx?: `0x${string}`
   reflectSkippedReason?: string
   reflectError?: string
+  /** USDC pending at reflect time (6dp). */
+  pendingUsdc?: string
+  rewardToken?: Address
+  /** minOut passed to reflect (0 for USDC pass-through). */
+  amountOutMinimum?: string
+  quoteFeeTier?: number
 }
 
 export interface KeeperGasTopUpResult {
@@ -234,32 +309,52 @@ export async function runReflectionKeeperCycle(privateKey: `0x${string}`): Promi
         r.forwardFeesError = (e as Error).message?.slice(0, 200)
       }
 
-      // 3. Actually pay holders — only when the reward token is USDC (no swap, no slippage risk).
-      //    See module doc comment for why non-USDC reward tokens are skipped here.
+      // 3. Pay holders via reflect(). USDC rewards: pass-through minOut=0.
+      //    Custom CA: quote Uni V3 USDC→reward, apply slippage, pass minOut.
       const pending = (await client.readContract({
         address: factory,
         abi: REFLECTION_EXTRA_ABI,
         functionName: 'pendingReflectionQuote',
         args: [token],
       })) as bigint
+      r.pendingUsdc = pending.toString()
+      r.rewardToken = rewardToken
 
       if (pending < MIN_REFLECT_USDC) {
         r.reflectSkippedReason = `pending ${pending.toString()} below dust floor`
-      } else if (rewardToken.toLowerCase() !== ARC.USDC.toLowerCase()) {
-        r.reflectSkippedReason = 'reward token is not USDC — no safe amountOutMinimum, needs a manual reflect()'
       } else {
-        try {
-          const hash = await wallet.writeContract({
-            address: factory,
-            abi: REFLECTION_EXTRA_ABI,
-            functionName: 'reflect',
-            args: [token, 0n], // pass-through, no swap, when rewardToken === QUOTE
-            chain: wallet.chain,
-          })
-          r.reflectTx = hash
-          await client.waitForTransactionReceipt({ hash })
-        } catch (e) {
-          r.reflectError = (e as Error).message?.slice(0, 200)
+        let amountOutMinimum = 0n
+        const isUsdcReward = rewardToken.toLowerCase() === ARC.USDC.toLowerCase()
+
+        if (!isUsdcReward) {
+          const q = await quoteUsdcToReward(rewardToken, pending)
+          if (!q) {
+            r.reflectSkippedReason =
+              'no Uni V3 USDC→reward quote (missing pool or quoter failed) — needs pool or manual reflect()'
+          } else {
+            amountOutMinimum = minOutFromSlippage(q.amountOut, REFLECT_SLIPPAGE_BPS)
+            r.quoteFeeTier = q.fee
+            if (amountOutMinimum <= 0n) {
+              r.reflectSkippedReason = 'quoted amountOut too small after slippage'
+            }
+          }
+        }
+
+        if (!r.reflectSkippedReason) {
+          r.amountOutMinimum = amountOutMinimum.toString()
+          try {
+            const hash = await wallet.writeContract({
+              address: factory,
+              abi: REFLECTION_EXTRA_ABI,
+              functionName: 'reflect',
+              args: [token, amountOutMinimum],
+              chain: wallet.chain,
+            })
+            r.reflectTx = hash
+            await client.waitForTransactionReceipt({ hash })
+          } catch (e) {
+            r.reflectError = (e as Error).message?.slice(0, 200)
+          }
         }
       }
     } catch (e) {
