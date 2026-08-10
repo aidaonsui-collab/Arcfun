@@ -362,14 +362,14 @@ export function arcReflectionEnabled(): boolean {
 }
 
 /**
- * UI kill switch for public token creates (Instant + Reflection).
+ * UI kill switch for public token creates (Meme / Instant + Reflection).
  *
- * Default **off** — create page shows all launch types as "Soon".
- * Set `NEXT_PUBLIC_ARC_LAUNCHES_ENABLED=1` and redeploy to ungate Instant + Reflection
- * (RWA stays placeholder). Contracts stay live; this only gates the create form.
+ * Default **on**. Set `NEXT_PUBLIC_ARC_LAUNCHES_ENABLED=0` and redeploy to gate creates
+ * as "Soon" again (RWA stays a placeholder either way). Contracts stay live; this only
+ * gates the create form.
  */
 export function arcLaunchesEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_ARC_LAUNCHES_ENABLED === '1'
+  return process.env.NEXT_PUBLIC_ARC_LAUNCHES_ENABLED !== '0'
 }
 
 /**

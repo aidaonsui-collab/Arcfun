@@ -43,7 +43,7 @@ const LAUNCH_TYPES: {
   {
     key: 'instant',
     icon: '⚡',
-    title: 'Instant Launch',
+    title: 'Meme Launch',
     tagline: 'Tradable from block one',
     points: [
       'Full supply onto Uniswap V3 at creation',
@@ -95,7 +95,7 @@ export function ArcCreateForm() {
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
   const configured = arcInstantEnabled()
   const reflectionLive = arcReflectionEnabled()
-  /** Public creates gated until NEXT_PUBLIC_ARC_LAUNCHES_ENABLED=1. */
+  /** Public creates on by default; set NEXT_PUBLIC_ARC_LAUNCHES_ENABLED=0 to pause. */
   const launchesLive = arcLaunchesEnabled()
   const busy = step !== 'idle' && step !== 'done'
   const isReflection = launchType === 'reflection'
@@ -119,7 +119,7 @@ export function ArcCreateForm() {
       return
     }
     if (isReflection && !reflectionLive) {
-      setError('Reflection factory isn’t live on Arc yet — pick Instant Launch to ship today.')
+      setError('Reflection factory isn’t live on Arc yet — pick Meme Launch to ship today.')
       return
     }
     if (!rewardsOk) {
@@ -282,7 +282,7 @@ export function ArcCreateForm() {
       ? `${rewardsWallet.trim().slice(0, 6)}…${rewardsWallet.trim().slice(-4)}`
       : 'Your wallet'
   const shipRows = [
-    { k: 'Type', v: isReflection ? 'Reflection' : 'Instant' },
+    { k: 'Type', v: isReflection ? 'Reflection' : 'Meme' },
     { k: 'Supply', v: '1,000,000,000' },
     { k: 'Pair', v: 'USDC · 1% fee' },
     {
@@ -311,7 +311,7 @@ export function ArcCreateForm() {
             : 'Fixed supply of 1B · Uniswap V3 Instant + Reflection paths. Public launches opening soon.'}
         </p>
 
-        {/* Launch type cards — all "Soon" until NEXT_PUBLIC_ARC_LAUNCHES_ENABLED=1 */}
+        {/* Launch type cards — Meme + Reflection live; set LAUNCHES_ENABLED=0 to gate */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-[26px]">
           {LAUNCH_TYPES.map((lt) => {
             if (!launchesLive) {
@@ -468,7 +468,7 @@ export function ArcCreateForm() {
               </span>
               {!reflectionLive ? (
                 <span className="text-[12px] text-coral mt-1">
-                  Reflection factory not configured — switch to Instant Launch.
+                  Reflection factory not configured — switch to Meme Launch.
                 </span>
               ) : (
                 <span className="text-[12px] text-lime-t mt-1">
