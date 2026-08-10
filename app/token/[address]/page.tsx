@@ -7,7 +7,7 @@ import { useParams } from 'next/navigation'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { type Address } from 'viem'
 import Link from 'next/link'
-import { Loader2, ExternalLink } from 'lucide-react'
+import { Loader2, ExternalLink, Copy, Check } from 'lucide-react'
 import type { PoolToken } from '@/lib/tokens'
 import type { EvmTradesResult } from '@/lib/evm-trades'
 import type { EvmHoldersResult } from '@/lib/evm-holders'
@@ -41,6 +41,18 @@ export default function TokenPage() {
   const [tab, setTab] = useState<Tab>('Activity')
   const [range, setRange] = useState<Range>('1D')
   const [volRange, setVolRange] = useState<VolRange>('1H')
+  const [copied, setCopied] = useState(false)
+
+  const copyAddress = useCallback(() => {
+    if (!token) return
+    navigator.clipboard
+      .writeText(token)
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      })
+      .catch(() => {})
+  }, [token])
 
   const load = useCallback(async () => {
     if (!token) return
@@ -195,13 +207,23 @@ export default function TokenPage() {
                 </h1>
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <span className="text-sm font-semibold text-t2">${pool.symbol}</span>
+                  <button
+                    type="button"
+                    onClick={copyAddress}
+                    title={copied ? 'Copied!' : 'Copy contract address'}
+                    className="text-sm text-t3 tabular-nums hover:text-t2 inline-flex items-center gap-1"
+                  >
+                    {shortAddr(token)}
+                    {copied ? <Check className="w-3 h-3 text-lime-t" /> : <Copy className="w-3 h-3" />}
+                  </button>
                   <a
                     href={`${explorer}/token/${token}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm text-t3 tabular-nums hover:text-t2 inline-flex items-center gap-1"
+                    title="View on explorer"
+                    className="text-t3 hover:text-t2 inline-flex items-center"
                   >
-                    {shortAddr(token)} <ExternalLink className="w-3 h-3" />
+                    <ExternalLink className="w-3 h-3" />
                   </a>
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[9px] bg-lime-soft border border-lime-line text-xs font-semibold text-lime-t whitespace-nowrap">
                     ⚡ Instant Launch
