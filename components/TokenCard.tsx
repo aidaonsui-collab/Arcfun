@@ -39,25 +39,27 @@ export function TokenCard({
             {initial}
           </span>
         )}
-        <span className="absolute top-2.5 left-2.5 flex gap-1.5 pointer-events-auto z-10">
-          <span className="px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-white">
-            {age}
+        <span className="absolute top-2.5 left-2.5 right-2.5 flex items-start justify-between gap-1.5 pointer-events-auto z-10">
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="shrink-0 px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-white">
+              {age}
+            </span>
+            {creator && creatorAddr ? (
+              <Link
+                href={`/creator/${creatorAddr}`}
+                className="min-w-0 max-w-[92px] truncate px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-medium text-white/80 hover:text-white hover:bg-black/65"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {creator}
+              </Link>
+            ) : null}
           </span>
-          {creator && creatorAddr ? (
-            <Link
-              href={`/creator/${creatorAddr}`}
-              className="px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-medium text-white/80 hover:text-white hover:bg-black/65"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {creator}
-            </Link>
-          ) : null}
+          {(token.instant || token.instantLaunch) && (
+            <span className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-lime-t">
+              Uni V3
+            </span>
+          )}
         </span>
-        {(token.instant || token.instantLaunch) && (
-          <span className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-lime-t">
-            ⚡ Instant
-          </span>
-        )}
       </span>
 
       {/* Pools.trade-style bottom block: name, then price + change on one line — no ticker,

@@ -226,7 +226,7 @@ export default function TokenPage() {
                     <ExternalLink className="w-3 h-3" />
                   </a>
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[9px] bg-lime-soft border border-lime-line text-xs font-semibold text-lime-t whitespace-nowrap">
-                    ⚡ Instant Launch
+                    Uni V3
                   </span>
                   {pool.creator && (
                     <Link
