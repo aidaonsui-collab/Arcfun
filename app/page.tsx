@@ -169,7 +169,7 @@ function HomeInner() {
           <section className="mt-11">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2.5">
-                <h2 className="m-0 text-[21px] font-semibold tracking-tightish">Just launched</h2>
+                <h2 className="m-0 text-[21px] font-semibold tracking-tightish">Top Memes</h2>
                 <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-lime-t">
                   <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot" />
                   live

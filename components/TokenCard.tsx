@@ -84,7 +84,7 @@ export function TokenCard({
   )
 }
 
-/** Compact horizontal rail card for "Just launched". */
+/** Compact horizontal rail card for "Top Memes". */
 export function TokenRailCard({ token }: { token: PoolToken }) {
   const address = token.coinType || token.poolId
   const seed = address || token.symbol || token.name
