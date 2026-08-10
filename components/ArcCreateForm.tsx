@@ -47,7 +47,7 @@ const LAUNCH_TYPES: {
     tagline: 'Tradable from block one',
     points: [
       'Full supply onto Uniswap V3 at creation',
-      'No graduation, no waiting room',
+      'Quote LP fees: 70% creator · 30% platform',
       'Launch-token LP fees auto-burned',
     ],
   },
