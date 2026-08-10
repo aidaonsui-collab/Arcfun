@@ -22,6 +22,22 @@ export function Footer() {
             Launch
           </Link>
           <a
+            href="https://x.com/Arcfun_pad"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-white"
+          >
+            X
+          </a>
+          <a
+            href="https://t.me/ArcFun_pad"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-white"
+          >
+            TG
+          </a>
+          <a
             href={ARC_EXPLORER || 'https://arcscan.app'}
             target="_blank"
             rel="noopener noreferrer"
