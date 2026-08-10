@@ -448,10 +448,20 @@ export function arcPublicClient() {
               // or dead-node error three times before ever reaching the next candidate. That error
               // will not resolve on retry; the useful retry here is trying a DIFFERENT endpoint,
               // which is what fallback() itself does.
-              urls.map((u) => http(u, { retryCount: 0 })),
+              //
+              // timeout: 4_000 — viem's http() default is 10_000ms with no response before it gives
+              // up on a transport. A transport that hangs instead of fast-erroring (confirmed: the
+              // primary Infura URL, whatever's wrong with it on a given day) then eats the FULL 10s
+              // on every RPC call before fallback() ever tries the next candidate — and since a
+              // catalog build fires many calls in parallel (per-token name/symbol/decimals/price...),
+              // that 10s tax lands on the whole page, not just one call. This is exactly what made
+              // arcfun.co take ~10s to load while a real indexer with a healthy primary loads in ~1s.
+              // 4s is generous for Arc's public RPCs (baracat/theleak both reply in well under 1s)
+              // while still bailing fast on a transport that isn't answering at all.
+              urls.map((u) => http(u, { retryCount: 0, timeout: 4_000 })),
               { shouldThrow: (error) => !isArcRpcInfraError(error) },
             )
-          : http(urls[0]),
+          : http(urls[0], { timeout: 4_000 }),
     })
   }
   return _clients[0]
@@ -467,6 +477,10 @@ export function arcServerWalletClient(privateKey: `0x${string}`) {
   return createWalletClient({
     account: privateKeyToAccount(privateKey),
     chain: arcChain,
-    transport: urls.length > 1 ? fallback(urls.map((u) => http(u, { retryCount: 0 }))) : http(urls[0]),
+    // Same 4s timeout as arcPublicClient() above — see its comment for why.
+    transport:
+      urls.length > 1
+        ? fallback(urls.map((u) => http(u, { retryCount: 0, timeout: 4_000 })))
+        : http(urls[0], { timeout: 4_000 }),
   })
 }
