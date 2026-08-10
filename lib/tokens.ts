@@ -42,6 +42,10 @@ export interface PoolToken {
   /** Instant DEX launch (no bonding curve) — always true for Arc tokens today. */
   instantLaunch?: boolean
   instant?: boolean
+  /** Instant Reflection (holder rewards) vs plain Instant Uni V3. */
+  reflection?: boolean
+  /** Launch product line for badges / filters. */
+  launchKind?: 'instant' | 'reflection' | 'curve'
   instantMeta?: {
     uniPool?: string
     positionId?: string
@@ -52,6 +56,14 @@ export interface PoolToken {
     dexId?: 0 | 1
   }
   dexVenue?: 'v3' | 'v4'
+}
+
+/** True when token was launched via Instant Reflection factory. */
+export function isReflectionToken(token: Pick<PoolToken, 'reflection' | 'launchKind' | 'moonbagsPackageId'>): boolean {
+  if (token.reflection === true || token.launchKind === 'reflection') return true
+  const f = (token.moonbagsPackageId || '').toLowerCase()
+  // Default Instant Reflection factory (also set via env at catalog build time).
+  return f === '0xa4957e724696b740b323ff3536415bb945e46828'
 }
 
 /** Denylist — hide test/spam tokens. New tokens show automatically unless added here. */

@@ -294,6 +294,8 @@ function toPoolToken(
   // PoolToken.currentPrice is "native" units; on Arc native ≈ USDC, so priceUsdc works as currentPrice.
   const priceNative = priceUsdc
   const priceUsd = priceUsdc // USDC ~ $1
+  const factory = (factoryOverride ?? ARC.INSTANT_FACTORY).toLowerCase()
+  const isReflectionFactory = factory === ARC.REFLECTION_FACTORY.toLowerCase()
   return {
     id: token,
     chain: 'arc',
@@ -319,6 +321,8 @@ function toPoolToken(
     isCompleted: true,
     instantLaunch: true,
     instant: true,
+    reflection: isReflectionFactory,
+    launchKind: isReflectionFactory ? 'reflection' : 'instant',
     instantMeta: {
       uniPool: p.uniPool,
       positionId: p.positionId.toString(),
@@ -697,6 +701,8 @@ export async function fetchArcCurvePoolToken(token: Address): Promise<PoolToken 
       isCompleted: p.completed,
       instantLaunch: false,
       instant: false,
+      reflection: false,
+      launchKind: 'curve',
       instantMeta: uniPool && uniPool !== ZERO
         ? {
             uniPool,

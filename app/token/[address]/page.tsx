@@ -13,6 +13,7 @@ import type { EvmTradesResult } from '@/lib/evm-trades'
 import type { EvmHoldersResult } from '@/lib/evm-holders'
 import { ArcDexTradePanel } from '@/components/ArcDexTradePanel'
 import { TokenChart, type ChartTradeMarker } from '@/components/TokenChart'
+import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import type { TraderMeta } from '@/lib/arc-trader-meta'
 import { ARC_EXPLORER, ARC } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
@@ -276,9 +277,7 @@ export default function TokenPage() {
                   >
                     <ExternalLink className="w-3 h-3" />
                   </a>
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[9px] bg-lime-soft border border-lime-line text-xs font-semibold text-lime-t whitespace-nowrap">
-                    Uni V3
-                  </span>
+                  <LaunchKindBadge token={pool} size="md" />
                   {pool.creator && (
                     <Link
                       href={`/creator/${pool.creator}`}
@@ -561,7 +560,12 @@ export default function TokenPage() {
                 <div className="px-6 py-10 text-sm text-t3 text-center">
                   Top-trader leaderboard needs a volume index — coming next.
                   <p className="mt-3 text-xs">
-                    Factory {ARC.INSTANT_FACTORY.slice(0, 10)}… ·{' '}
+                    {pool.launchKind === 'reflection' || pool.reflection
+                      ? 'Reflection'
+                      : pool.launchKind === 'curve'
+                        ? 'Curve'
+                        : 'Instant'}{' '}
+                    · Factory {(pool.moonbagsPackageId || ARC.INSTANT_FACTORY).slice(0, 10)}… ·{' '}
                     {pool.instantMeta?.uniPool
                       ? `pool ${pool.instantMeta.uniPool.slice(0, 10)}…`
                       : 'Uni V3'}

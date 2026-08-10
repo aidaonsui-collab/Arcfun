@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import type { PoolToken } from '@/lib/tokens'
+import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import { ageLabel, changeParts, fmtUsd, sparkPath, tileGradient } from '@/lib/ui-format'
 
 export function TokenCard({
@@ -54,11 +55,7 @@ export function TokenCard({
               </Link>
             ) : null}
           </span>
-          {(token.instant || token.instantLaunch) && (
-            <span className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-lime-t">
-              Uni V3
-            </span>
-          )}
+          <LaunchKindBadge token={token} />
         </span>
       </span>
 
@@ -119,6 +116,9 @@ export function TokenRailCard({ token }: { token: PoolToken }) {
         )}
         <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded-lg bg-black/55 backdrop-blur-sm text-[10px] font-semibold text-white">
           {age}
+        </span>
+        <span className="absolute bottom-2 left-2 scale-90 origin-bottom-left">
+          <LaunchKindBadge token={token} />
         </span>
       </span>
       <span className="flex-1 min-w-0 px-4 py-3.5 flex flex-col gap-1.5">
