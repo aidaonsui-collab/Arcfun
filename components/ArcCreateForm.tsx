@@ -623,7 +623,7 @@ export function ArcCreateForm() {
         )}
 
         <p className="mt-3.5 mb-0 text-xs text-t3 text-center leading-relaxed">
-          Creation fee 1 USDC · gas on Arc · launch-token LP fees auto-burn · pair USDC
+          Creation fee 0.10 USDC · gas on Arc · launch-token LP fees auto-burn · pair USDC
         </p>
       </div>
 

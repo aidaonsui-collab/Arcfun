@@ -203,15 +203,15 @@ export const ARC_INSTANT_CREATE_GAS = 12_000_000n
 export const ARC_CURVE_CREATE_GAS = 4_000_000n
 
 /**
- * Live Instant factory `CREATION_FEE` is **1 native USDC** (1e18) for non-owner creators.
- * Factory **owner / platform wallet is fee-waived** on-chain (`creationFeeDue(owner) == 0`).
+ * Live Instant + Reflection factory `CREATION_FEE` is **0.1 native USDC** (1e17) for non-owner
+ * creators. Factory **owner / platform wallet is fee-waived** on-chain (`creationFeeDue(owner) == 0`).
  * Public RPCs rate-limit eth_call, so the UI uses these constants instead of reading on-chain.
  * Excess value is refunded by the factory.
  */
 export const ARC_CREATION_FEE_WEI: bigint = (() => {
   const raw = process.env.NEXT_PUBLIC_ARC_CREATION_FEE_WEI
   if (raw != null && raw !== '' && /^\d+$/.test(raw)) return BigInt(raw)
-  return 10n ** 18n // 1 USDC native (public creators)
+  return 10n ** 17n // 0.1 USDC native (public creators)
 })()
 
 /** Factory owner / platform wallet — free Instant creates (matches on-chain owner). */
