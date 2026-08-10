@@ -33,6 +33,8 @@ import { tileGradient } from '@/lib/ui-format'
 
 const SLIPPAGE_BPS = 500 // 5% — thin Instant single-sided ranges
 const BUY_PRESETS = [25, 100, 500]
+/** Sell fraction of wallet balance (Max = 100). */
+const SELL_PCTS = [25, 50, 75, 100] as const
 
 function fmtTok(v: bigint): string {
   const n = Number(formatUnits(v, 6))
@@ -321,16 +323,35 @@ export function ArcDexTradePanel({
                 </div>
               )}
               {mode === 'sell' && (
-                <button
-                  type="button"
-                  className="text-xs text-t2 hover:text-white"
-                  onClick={() => {
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                  {SELL_PCTS.map((pct) => {
                     const bal = (tokenBal as bigint | undefined) ?? 0n
-                    setAmount(formatToken(bal))
-                  }}
-                >
-                  Max {fmtTok((tokenBal as bigint | undefined) ?? 0n)}
-                </button>
+                    const pctAmt = bal > 0n ? (bal * BigInt(pct)) / 100n : 0n
+                    const pctStr = pctAmt > 0n ? formatToken(pctAmt) : ''
+                    const on = pctStr !== '' && amount === pctStr
+                    return (
+                      <button
+                        key={pct}
+                        type="button"
+                        disabled={bal === 0n}
+                        onClick={() => {
+                          if (pctAmt <= 0n) return
+                          setAmount(formatToken(pctAmt))
+                        }}
+                        className="px-2.5 py-1.5 rounded-[10px] text-xs font-semibold tabular-nums border border-hair transition-colors disabled:opacity-40"
+                        style={{
+                          background: on ? 'rgba(255,122,98,0.22)' : 'rgba(255,255,255,0.07)',
+                          color: on ? 'var(--coral)' : 'rgba(255,255,255,0.58)',
+                        }}
+                      >
+                        {pct === 100 ? 'Max' : `${pct}%`}
+                      </button>
+                    )
+                  })}
+                  <span className="text-[11px] text-t3 tabular-nums ml-0.5">
+                    {fmtTok((tokenBal as bigint | undefined) ?? 0n)}
+                  </span>
+                </div>
               )}
             </div>
 
@@ -370,28 +391,28 @@ export function ArcDexTradePanel({
             </div>
           </div>
 
-          <div className="mx-2 mt-2 px-5 py-4 rounded-[22px] bg-s2 flex items-center justify-between">
-            <span className="text-sm font-medium text-t2">
-              {mode === 'buy' ? 'Pay with' : 'Receive'}
-            </span>
-            <span className="flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full bg-black border border-hair">
-              {mode === 'buy' ? (
-                <>
-                  <span
-                    className="w-6 h-6 rounded-full"
-                    style={{ background: 'linear-gradient(140deg,#2775CA,#5AA9F5)' }}
-                  />
-                  <span className="text-sm font-semibold">USDC</span>
-                </>
-              ) : (
-                <>
-                  <span
-                    className="w-6 h-6 rounded-full"
-                    style={{ background: 'linear-gradient(140deg,#2775CA,#5AA9F5)' }}
-                  />
-                  <span className="text-sm font-semibold">USDC</span>
-                </>
+          <div className="mx-2 mt-2 px-5 py-4 rounded-[22px] bg-s2 flex items-center justify-between gap-3">
+            <div className="min-w-0 flex flex-col gap-1">
+              <span className="text-sm font-medium text-t2">
+                {mode === 'buy' ? 'Pay with' : 'You receive'}
+              </span>
+              {mode === 'sell' && (
+                <span className="text-[22px] font-semibold tracking-tightish tabular-nums truncate">
+                  {quoting ? '…' : estOut != null ? formatUsdc(estOut) : '0'}
+                </span>
               )}
+              {mode === 'buy' && (
+                <span className="text-[22px] font-semibold tracking-tightish tabular-nums truncate">
+                  {amtNum > 0 ? (amtNum % 1 === 0 ? amtNum.toFixed(0) : String(amtNum)) : '0'}
+                </span>
+              )}
+            </div>
+            <span className="flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-full bg-black border border-hair shrink-0">
+              <span
+                className="w-6 h-6 rounded-full"
+                style={{ background: 'linear-gradient(140deg,#2775CA,#5AA9F5)' }}
+              />
+              <span className="text-sm font-semibold">USDC</span>
             </span>
           </div>
 
