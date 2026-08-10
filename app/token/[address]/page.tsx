@@ -228,10 +228,14 @@ export default function TokenPage() {
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[9px] bg-lime-soft border border-lime-line text-xs font-semibold text-lime-t whitespace-nowrap">
                     ⚡ Instant Launch
                   </span>
-                  {creator && (
-                    <span className="px-2.5 py-1 rounded-[9px] bg-s2 border border-hair text-xs font-medium text-t2 whitespace-nowrap">
+                  {pool.creator && (
+                    <Link
+                      href={`/creator/${pool.creator}`}
+                      className="px-2.5 py-1 rounded-[9px] bg-s2 border border-hair text-xs font-medium text-t2 whitespace-nowrap hover:border-lime-line hover:text-lime-t transition-colors"
+                      title="View creator profile"
+                    >
                       {creator}
-                    </span>
+                    </Link>
                   )}
                 </div>
               </div>

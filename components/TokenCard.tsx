@@ -18,15 +18,14 @@ export function TokenCard({
   const rankLabel =
     rank != null ? (rank + 1 < 10 ? `0${rank + 1}` : String(rank + 1)) : null
   const age = ageLabel(token.createdAt ?? token.lastTradeAt)
-  const creator = token.creatorShort || (token.creator ? `${token.creator.slice(0, 6)}…` : '')
+  const creatorAddr = token.creatorFull || token.creator
+  const creator = token.creatorShort || (creatorAddr ? `${creatorAddr.slice(0, 6)}…` : '')
 
   return (
-    <Link
-      href={`/token/${address}`}
-      className="group text-left border border-hair rounded-[20px] overflow-hidden bg-s1 flex flex-col transition-colors hover:border-lime-line"
-    >
+    <div className="group relative text-left border border-hair rounded-[20px] overflow-hidden bg-s1 flex flex-col transition-colors hover:border-lime-line">
+      <Link href={`/token/${address}`} className="absolute inset-0 z-0" aria-label={token.name || 'Token'} />
       <span
-        className="relative block aspect-square flex items-center justify-center"
+        className="relative block aspect-square flex items-center justify-center pointer-events-none"
         style={{ background: img ? undefined : tile }}
       >
         {img ? (
@@ -40,14 +39,18 @@ export function TokenCard({
             {initial}
           </span>
         )}
-        <span className="absolute top-2.5 left-2.5 flex gap-1.5">
+        <span className="absolute top-2.5 left-2.5 flex gap-1.5 pointer-events-auto z-10">
           <span className="px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-white">
             {age}
           </span>
-          {creator ? (
-            <span className="px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-medium text-white/80">
+          {creator && creatorAddr ? (
+            <Link
+              href={`/creator/${creatorAddr}`}
+              className="px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-medium text-white/80 hover:text-white hover:bg-black/65"
+              onClick={(e) => e.stopPropagation()}
+            >
               {creator}
-            </span>
+            </Link>
           ) : null}
         </span>
         {(token.instant || token.instantLaunch) && (
@@ -58,8 +61,8 @@ export function TokenCard({
       </span>
 
       {/* Pools.trade-style bottom block: name, then price + change on one line — no ticker,
-          no volume line, no sparkline (kept only in the "Just launched" rail card). */}
-      <span className="px-3.5 pt-3 pb-3.5 flex flex-col gap-1">
+          no volume line, no sparkline (kept only in the "Top Memes" rail card). */}
+      <span className="px-3.5 pt-3 pb-3.5 flex flex-col gap-1 relative z-[1] pointer-events-none">
         <span className="flex items-baseline gap-1.5 min-w-0">
           {rankLabel && (
             <span className="text-xs font-bold text-lime-t tabular-nums shrink-0">{rankLabel}</span>
@@ -68,7 +71,7 @@ export function TokenCard({
             {token.name || 'Unnamed'}
           </span>
         </span>
-        <span className="flex items-center justify-between gap-2">
+        <span className="flex items-center justify-between gap-2 relative z-[1] pointer-events-none">
           <span className="text-lg font-bold tabular-nums tracking-[-0.02em]">
             {fmtUsd(token.marketCap)}
           </span>
@@ -80,7 +83,7 @@ export function TokenCard({
           </span>
         </span>
       </span>
-    </Link>
+    </div>
   )
 }
 

@@ -80,29 +80,39 @@ export function SiteHeader() {
       </Link>
 
       {isConnected && address ? (
-        <button
-          type="button"
-          onClick={() => disconnect()}
-          className={`h-9 flex items-center gap-2.5 pl-3.5 pr-1.5 rounded-xl border text-sm font-semibold tabular-nums tracking-tightish transition-colors ${
-            wrongChain
-              ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
-              : 'border-hair bg-s2 text-white hover:bg-s3'
-          }`}
-          title={wrongChain ? 'Wrong network — click to disconnect' : 'Disconnect'}
-        >
-          {wrongChain ? (
-            'Wrong network'
-          ) : (
-            <>
-              <span>{fmtBal(bal?.value)}</span>
-              <span
-                className="w-6 h-6 rounded-lg shrink-0"
-                style={{ background: 'linear-gradient(140deg,#6DB3F2,#1D5FA8)' }}
-                title={short(address)}
-              />
-            </>
+        <div className="flex items-center gap-2">
+          {!wrongChain && (
+            <Link
+              href={`/creator/${address}`}
+              className="hidden sm:inline-flex h-9 items-center px-3 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
+            >
+              Profile
+            </Link>
           )}
-        </button>
+          <button
+            type="button"
+            onClick={() => disconnect()}
+            className={`h-9 flex items-center gap-2.5 pl-3.5 pr-1.5 rounded-xl border text-sm font-semibold tabular-nums tracking-tightish transition-colors ${
+              wrongChain
+                ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+                : 'border-hair bg-s2 text-white hover:bg-s3'
+            }`}
+            title={wrongChain ? 'Wrong network — click to disconnect' : 'Disconnect'}
+          >
+            {wrongChain ? (
+              'Wrong network'
+            ) : (
+              <>
+                <span>{fmtBal(bal?.value)}</span>
+                <span
+                  className="w-6 h-6 rounded-lg shrink-0"
+                  style={{ background: 'linear-gradient(140deg,#6DB3F2,#1D5FA8)' }}
+                  title={short(address)}
+                />
+              </>
+            )}
+          </button>
+        </div>
       ) : (
         <button
           type="button"
