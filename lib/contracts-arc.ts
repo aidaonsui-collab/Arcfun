@@ -362,6 +362,17 @@ export function arcReflectionEnabled(): boolean {
 }
 
 /**
+ * UI kill switch for public token creates (Instant + Reflection).
+ *
+ * Default **off** — create page shows all launch types as "Soon".
+ * Set `NEXT_PUBLIC_ARC_LAUNCHES_ENABLED=1` and redeploy to ungate Instant + Reflection
+ * (RWA stays placeholder). Contracts stay live; this only gates the create form.
+ */
+export function arcLaunchesEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_ARC_LAUNCHES_ENABLED === '1'
+}
+
+/**
  * Arc USDC bonding curve — WITHDRAWN 2026-08-06. Instant DEX is the only Arc launch path.
  *
  * Hard-false rather than merely unconfigured, because ARC.FACTORY has a non-zero default baked in,

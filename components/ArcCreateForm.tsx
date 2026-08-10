@@ -14,6 +14,7 @@ import {
   ARC_INSTANT_CREATE_GAS,
   arcInstantEnabled,
   arcReflectionEnabled,
+  arcLaunchesEnabled,
   arcCreationFeeWeiFor,
 } from '@/lib/contracts-arc'
 import {
@@ -94,6 +95,8 @@ export function ArcCreateForm() {
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
   const configured = arcInstantEnabled()
   const reflectionLive = arcReflectionEnabled()
+  /** Public creates gated until NEXT_PUBLIC_ARC_LAUNCHES_ENABLED=1. */
+  const launchesLive = arcLaunchesEnabled()
   const busy = step !== 'idle' && step !== 'done'
   const isReflection = launchType === 'reflection'
   const rewardsOk =
@@ -111,6 +114,10 @@ export function ArcCreateForm() {
 
   const onSubmit = async () => {
     if (!address) return
+    if (!launchesLive) {
+      setError('Token launches are temporarily paused — check back soon.')
+      return
+    }
     if (isReflection && !reflectionLive) {
       setError('Reflection factory isn’t live on Arc yet — pick Instant Launch to ship today.')
       return
@@ -250,6 +257,7 @@ export function ArcCreateForm() {
   }
 
   const canSubmit =
+    launchesLive &&
     isConnected &&
     !wrongChain &&
     name.trim().length > 0 &&
@@ -287,18 +295,64 @@ export function ArcCreateForm() {
   ]
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-7 items-start">
+    <div
+      className={
+        launchesLive
+          ? 'grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-7 items-start'
+          : 'grid grid-cols-1 gap-7 items-start max-w-3xl'
+      }
+    >
       {/* Main form card */}
       <div className="border border-hair rounded-[28px] bg-s1 p-6 sm:p-8">
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em]">Launch your token</h1>
         <p className="mt-2.5 mb-0 text-[15px] text-t2 leading-relaxed">
-          Fixed supply of 1B. One transaction, straight onto Uniswap V3. Launch-token LP fees
-          auto-burn.
+          {launchesLive
+            ? 'Fixed supply of 1B. One transaction, straight onto Uniswap V3. Launch-token LP fees auto-burn.'
+            : 'Fixed supply of 1B · Uniswap V3 Instant + Reflection paths. Public launches opening soon.'}
         </p>
 
-        {/* Launch type cards */}
+        {/* Launch type cards — all "Soon" until NEXT_PUBLIC_ARC_LAUNCHES_ENABLED=1 */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-[26px]">
           {LAUNCH_TYPES.map((lt) => {
+            if (!launchesLive) {
+              return (
+                <div
+                  key={lt.key}
+                  className="relative text-left p-5 rounded-[22px] opacity-60 cursor-not-allowed"
+                  style={{ background: 'var(--s2)', border: '1px solid var(--hair)' }}
+                >
+                  <span
+                    className="absolute top-4 right-4 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide"
+                    style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.5)' }}
+                  >
+                    Soon
+                  </span>
+                  <span
+                    className="flex items-center justify-center w-[38px] h-[38px] rounded-xl text-[17px]"
+                    style={{ background: 'rgba(255,255,255,0.06)' }}
+                  >
+                    {lt.icon}
+                  </span>
+                  <h3 className="mt-3.5 mb-1 text-[17px] font-semibold tracking-tightish text-white">
+                    {lt.title}
+                  </h3>
+                  <p className="m-0 text-[13px] font-semibold" style={{ color: 'rgba(255,255,255,0.34)' }}>
+                    {lt.tagline}
+                  </p>
+                  <span className="mt-3.5 flex flex-col gap-2">
+                    {lt.points.map((p) => (
+                      <span
+                        key={p}
+                        className="text-[13px] leading-snug"
+                        style={{ color: 'rgba(255,255,255,0.34)' }}
+                      >
+                        — {p}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              )
+            }
             const on = launchType === lt.key
             return (
               <button
@@ -358,7 +412,7 @@ export function ArcCreateForm() {
             )
           })}
 
-          {/* RWA paired tokens — placeholder, not selectable yet */}
+          {/* RWA paired tokens — always placeholder */}
           <div
             className="relative text-left p-5 rounded-[22px] opacity-60 cursor-not-allowed"
             style={{ background: 'var(--s2)', border: '1px solid var(--hair)' }}
@@ -391,6 +445,18 @@ export function ArcCreateForm() {
           </div>
         </div>
 
+        {!launchesLive ? (
+          <div className="mt-6 rounded-[22px] border border-hair bg-s2 px-5 py-6 text-center">
+            <p className="m-0 text-[15px] font-semibold tracking-tightish text-white">
+              Launches coming soon
+            </p>
+            <p className="mt-2 mb-0 text-[13px] text-t2 leading-relaxed max-w-md mx-auto">
+              Instant, Reflection, and RWA paired launches are paused while we finish polishing.
+              Trading existing tokens stays live.
+            </p>
+          </div>
+        ) : (
+          <>
         {isReflection && (
           <div className="mt-3 p-5 rounded-[22px] bg-s2 border border-lime-line space-y-4">
             <div className="flex flex-col gap-1">
@@ -625,9 +691,12 @@ export function ArcCreateForm() {
         <p className="mt-3.5 mb-0 text-xs text-t3 text-center leading-relaxed">
           Creation fee 0.10 USDC · gas on Arc · launch-token LP fees auto-burn · pair USDC
         </p>
+          </>
+        )}
       </div>
 
-      {/* Sticky preview */}
+      {/* Sticky preview — only when launches are open */}
+      {launchesLive && (
       <div className="lg:sticky lg:top-[88px] flex flex-col gap-4">
         <div className="border border-hair rounded-[28px] bg-s1 p-5">
           <span className="text-[11px] font-semibold tracking-[0.06em] uppercase text-t3">
@@ -681,6 +750,7 @@ export function ArcCreateForm() {
           ))}
         </div>
       </div>
+      )}
     </div>
   )
 }
