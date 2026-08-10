@@ -57,6 +57,7 @@ export interface PoolToken {
 /** Denylist — hide test/spam tokens. New tokens show automatically unless added here. */
 export const HIDDEN_TOKENS = new Set<string>([
   '0x233861f8cd3c0ab8599627934eda42d5a8259140', // Darc Coin — legacy-factory smoke-test launch
+  '0xfe93ca9f3c7d562490191c31da7c64a3932ce255', // hidden per platform owner request
 ])
 
 /** Case-insensitive match for EVM addresses (0x…). */
