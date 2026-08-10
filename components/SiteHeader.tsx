@@ -82,12 +82,20 @@ export function SiteHeader() {
       {isConnected && address ? (
         <div className="flex items-center gap-2">
           {!wrongChain && (
-            <Link
-              href={`/creator/${address}`}
-              className="hidden sm:inline-flex h-9 items-center px-3 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
-            >
-              Profile
-            </Link>
+            <>
+              <Link
+                href="/portfolio"
+                className="hidden sm:inline-flex h-9 items-center px-3 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
+              >
+                Portfolio
+              </Link>
+              <Link
+                href={`/creator/${address}`}
+                className="hidden sm:inline-flex h-9 items-center px-3 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
+              >
+                Profile
+              </Link>
+            </>
           )}
           <button
             type="button"
