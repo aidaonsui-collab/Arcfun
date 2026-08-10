@@ -175,9 +175,6 @@ function HomeInner() {
                   live
                 </span>
               </div>
-              <span className="text-[13px] font-medium text-t2">
-                {loading ? 'Loading…' : 'Updated every block'}
-              </span>
             </div>
             <div className="rail-scroll flex gap-3 pb-1">
               {rail.map((t) => (
