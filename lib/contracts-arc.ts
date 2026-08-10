@@ -142,10 +142,18 @@ export const ARC_RPC_INFRA_HINT =
   'answers eth_call, then hard-refresh and retry.'
 
 /**
- * Primary mainnet default: MetaMask Infura Arc when keyed; otherwise baracat until
- * NEXT_PUBLIC_ARC_RPC or NEXT_PUBLIC_INFURA_API_KEY is set in deploy env.
+ * Primary mainnet default: baracat, not Infura, despite Infura being configured (keyed) in prod.
+ *
+ * 2026-08-10: measured directly against production — every RPC call succeeds through Infura, no
+ * errors anywhere, just ~2s per call. Since nothing throws, isArcRpcInfraError/fallback() never
+ * moves past it: Infura IS the "working" transport, it's just slow right now. A catalog build
+ * needs several sequential round trips (enumerate token count → enumerate addresses → per-token
+ * details), each eating that ~2s, which is exactly how arcfun.co ended up taking 6-9s to load a
+ * 2-3 token catalog while a real indexer loads in ~1s. baracat measured well under 1s for the same
+ * calls in the same investigation. Keeping Infura in the fallback list (see ARC_RPC_URLS below),
+ * just not leading with it while it's the slow one — flip this back if that ever reverses.
  */
-const ARC_MAINNET_RPC_DEFAULT = ARC_INFURA_RPC || ARC_BARACAT_RPC
+const ARC_MAINNET_RPC_DEFAULT = ARC_BARACAT_RPC
 
 /** Ordered public/mainnet RPC candidates for wagmi fallback transports. */
 export const ARC_RPC_URLS: string[] = (() => {
@@ -160,10 +168,11 @@ export const ARC_RPC_URLS: string[] = (() => {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  // Infura first (MetaMask Arc), then public fallbacks.
+  // baracat first (see ARC_MAINNET_RPC_DEFAULT above for why), Infura kept as a fallback, then
+  // the read-only-safe-calls-only theleak tail.
   const defaults = ARC_IS_TESTNET
     ? [ARC_TESTNET_RPC]
-    : [ARC_INFURA_RPC, ARC_BARACAT_RPC, ARC_THELEAK_RPC].filter(Boolean)
+    : [ARC_BARACAT_RPC, ARC_INFURA_RPC, ARC_THELEAK_RPC].filter(Boolean)
   const seen = new Set<string>()
   const out: string[] = []
   for (const u of [primary, ...extras, ...defaults]) {
