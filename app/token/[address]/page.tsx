@@ -12,7 +12,8 @@ import type { PoolToken } from '@/lib/tokens'
 import type { EvmTradesResult } from '@/lib/evm-trades'
 import type { EvmHoldersResult } from '@/lib/evm-holders'
 import { ArcDexTradePanel } from '@/components/ArcDexTradePanel'
-import { TokenChart } from '@/components/TokenChart'
+import { TokenChart, type ChartTradeMarker } from '@/components/TokenChart'
+import type { TraderMeta } from '@/lib/arc-trader-meta'
 import { ARC_EXPLORER, ARC } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
 import { buildCandles, RANGE_BUCKET_SEC } from '@/lib/candles'
@@ -37,6 +38,7 @@ export default function TokenPage() {
   const [pool, setPool] = useState<PoolToken | null>(null)
   const [trades, setTrades] = useState<EvmTradesResult | null>(null)
   const [holders, setHolders] = useState<EvmHoldersResult | null>(null)
+  const [traderMeta, setTraderMeta] = useState<Record<string, TraderMeta>>({})
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('Activity')
   const [range, setRange] = useState<Range>('1D')
@@ -106,6 +108,55 @@ export default function TokenPage() {
     }, 8_000)
     return () => clearInterval(id)
   }, [load, loadTrades])
+
+  // Opt-in chart PFPs: only wallets with ArcFun profile + avatarUrl
+  useEffect(() => {
+    const list = trades?.trades ?? []
+    if (list.length === 0) {
+      setTraderMeta({})
+      return
+    }
+    const addrs = Array.from(new Set(list.map((t) => t.trader.toLowerCase()).filter(Boolean)))
+    if (addrs.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/arc/traders/meta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: addrs }),
+        })
+        if (!res.ok) return
+        const data = (await res.json()) as { traders?: Record<string, TraderMeta> }
+        if (!cancelled) setTraderMeta(data.traders || {})
+      } catch {
+        /* keep prior */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [trades])
+
+  const chartMarkers: ChartTradeMarker[] = useMemo(() => {
+    const out: ChartTradeMarker[] = []
+    for (const t of trades?.trades ?? []) {
+      const meta = traderMeta[t.trader.toLowerCase()]
+      if (!meta?.avatarUrl) continue
+      if (!(t.priceUsd > 0) || !(t.ts > 0)) continue
+      out.push({
+        time: t.ts,
+        price: t.priceUsd,
+        isBuy: t.isBuy,
+        avatarUrl: meta.avatarUrl,
+        trader: meta.addressChecksum || t.trader,
+        displayName: meta.displayName,
+        twitter: meta.twitter,
+        valueUsd: t.valueUsd,
+      })
+    }
+    return out
+  }, [trades, traderMeta])
 
   const volWindowSec = useMemo(() => {
     if (volRange === '1H') return 3600
@@ -336,7 +387,7 @@ export default function TokenPage() {
               </div>
 
               <div className="relative mt-[18px] rounded-2xl overflow-hidden">
-                <TokenChart candles={candles} height={280} />
+                <TokenChart candles={candles} height={280} markers={chartMarkers} />
               </div>
             </div>
 
@@ -423,7 +474,9 @@ export default function TokenPage() {
                   {!(trades?.trades?.length) ? (
                     <p className="text-sm text-t3 text-center py-10">No trades yet.</p>
                   ) : (
-                    trades!.trades.slice(0, 40).map((t, i) => (
+                    trades!.trades.slice(0, 40).map((t, i) => {
+                      const tm = traderMeta[t.trader.toLowerCase()]
+                      return (
                       <a
                         key={`${t.txHash}-${i}`}
                         href={`${explorer}/tx/${t.txHash}`}
@@ -432,11 +485,27 @@ export default function TokenPage() {
                         className="grid grid-cols-[1.4fr_.7fr_1fr_1fr_.8fr] gap-3 px-3 py-3.5 border-b border-hair2 text-sm items-center tabular-nums hover:bg-white/[0.02]"
                       >
                         <span className="flex items-center gap-2.5 min-w-0">
-                          <span
-                            className="w-[18px] h-[18px] rounded-full shrink-0"
-                            style={{ background: walletHue(t.trader) }}
-                          />
-                          <span className="text-t2 truncate">{shortAddr(t.trader)}</span>
+                          {tm?.avatarUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={tm.avatarUrl}
+                              alt=""
+                              className="w-[18px] h-[18px] rounded-full shrink-0 object-cover border"
+                              style={{
+                                borderColor: t.isBuy ? 'var(--limeT)' : 'var(--coral)',
+                              }}
+                            />
+                          ) : (
+                            <span
+                              className="w-[18px] h-[18px] rounded-full shrink-0"
+                              style={{ background: walletHue(t.trader) }}
+                            />
+                          )}
+                          <span className="text-t2 truncate">
+                            {tm?.twitter
+                              ? `@${tm.twitter}`
+                              : tm?.displayName || shortAddr(t.trader)}
+                          </span>
                         </span>
                         <span
                           className="font-semibold"
@@ -450,7 +519,7 @@ export default function TokenPage() {
                         </span>
                         <span className="text-right text-t3 text-[13px]">{ageLabel(t.ts)} ago</span>
                       </a>
-                    ))
+                    )})
                   )}
                 </div>
               )}

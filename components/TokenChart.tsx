@@ -1,13 +1,11 @@
 'use client'
 
 /**
- * Candlestick + volume chart via TradingView's lightweight-charts (open-source, Apache-2.0 —
- * not the paid Charting Library). Colors/layout matched by inspecting RadarDEX's rendered
- * chart directly (same library, same pixel colors sampled off their canvas):
- *   background #0F2137, grid disabled (same color as bg), up #26C281, down #F0616D,
- *   volume bars same hues at ~33% opacity, overlaid in the bottom of the same pane.
+ * Candlestick + volume chart via TradingView lightweight-charts.
+ * Optional opt-in trader PFP markers (wallets with ArcFun profile + avatar).
  */
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import {
   createChart,
   ColorType,
@@ -18,6 +16,7 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts'
 import type { Candle } from '@/lib/candles'
+import { fmtUsd, shortAddr } from '@/lib/ui-format'
 
 const BG = '#0F2137'
 const UP = '#26C281'
@@ -25,12 +24,21 @@ const DOWN = '#F0616D'
 const UP_VOL = 'rgba(63, 213, 147, 0.33)'
 const DOWN_VOL = 'rgba(255, 99, 117, 0.33)'
 
-/**
- * lightweight-charts defaults to 2-decimal price precision, which rounds meme-coin-scale
- * prices (e.g. 9.4e-10) straight to 0 and breaks the whole axis. Derive enough decimal
- * places from the price's magnitude to keep ~3 significant digits visible, same problem
- * every DEX chart (RadarDEX included) has to solve for sub-cent tokens.
- */
+const PFP_SIZE = 28
+const MAX_PFPS = 48
+const MIN_USD = 0.5
+
+export type ChartTradeMarker = {
+  time: number
+  price: number
+  isBuy: boolean
+  avatarUrl: string
+  trader: string
+  displayName?: string
+  twitter?: string
+  valueUsd?: number
+}
+
 function priceFormatFor(price: number): { precision: number; minMove: number } {
   if (!(price > 0)) return { precision: 2, minMove: 0.01 }
   const magnitude = Math.floor(Math.log10(price))
@@ -38,11 +46,57 @@ function priceFormatFor(price: number): { precision: number; minMove: number } {
   return { precision, minMove: Math.pow(10, -precision) }
 }
 
-export function TokenChart({ candles, height = 280 }: { candles: Candle[]; height?: number }) {
+type Pos = { left: number; top: number; marker: ChartTradeMarker }
+
+export function TokenChart({
+  candles,
+  height = 280,
+  markers = [],
+}: {
+  candles: Candle[]
+  height?: number
+  /** Opt-in PFPs only — callers filter to wallets with avatarUrl */
+  markers?: ChartTradeMarker[]
+}) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
+  const [positions, setPositions] = useState<Pos[]>([])
+  const [hover, setHover] = useState<ChartTradeMarker | null>(null)
+
+  const cappedMarkers = useMemo(() => {
+    const sorted = [...markers]
+      .filter((m) => m.avatarUrl && m.time > 0 && m.price > 0)
+      .filter((m) => (m.valueUsd == null ? true : m.valueUsd >= MIN_USD))
+      .sort((a, b) => b.time - a.time)
+      .slice(0, MAX_PFPS)
+    return sorted
+  }, [markers])
+
+  const layoutMarkers = useCallback(() => {
+    const chart = chartRef.current
+    const series = candleSeriesRef.current
+    const el = containerRef.current
+    if (!chart || !series || !el) {
+      setPositions([])
+      return
+    }
+    const ts = chart.timeScale()
+    const next: Pos[] = []
+    for (const m of cappedMarkers) {
+      const x = ts.timeToCoordinate(m.time as UTCTimestamp)
+      const y = series.priceToCoordinate(m.price)
+      if (x == null || y == null) continue
+      if (Number.isNaN(x) || Number.isNaN(y)) continue
+      next.push({
+        left: x - PFP_SIZE / 2,
+        top: y - PFP_SIZE / 2,
+        marker: m,
+      })
+    }
+    setPositions(next)
+  }, [cappedMarkers])
 
   useEffect(() => {
     const el = containerRef.current
@@ -80,18 +134,24 @@ export function TokenChart({ candles, height = 280 }: { candles: Candle[]; heigh
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
-      priceScaleId: '', // overlay on its own hidden scale, not the price axis
+      priceScaleId: '',
     })
     volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
     volumeSeriesRef.current = volumeSeries
 
+    const onRange = () => layoutMarkers()
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onRange)
+    chart.timeScale().subscribeVisibleTimeRangeChange(onRange)
+
     return () => {
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(onRange)
       chart.remove()
       chartRef.current = null
       candleSeriesRef.current = null
       volumeSeriesRef.current = null
     }
-  }, [])
+  }, [layoutMarkers])
 
   useEffect(() => {
     const candleSeries = candleSeriesRef.current
@@ -117,16 +177,6 @@ export function TokenChart({ candles, height = 280 }: { candles: Candle[]; heigh
         color: c.close >= c.open ? UP_VOL : DOWN_VOL,
       })),
     )
-    // autoSize's ResizeObserver hasn't necessarily applied the container's real width by the
-    // time setData() returns on first mount — computing bar spacing against a stale/placeholder
-    // width squeezes every bar into a sliver. One rAF is enough to land after that resize.
-    //
-    // fitContent() stretches whatever bars exist to fill the full container width — great for a
-    // chart with plenty of bars, but a thinly-traded token with only a handful of real candles
-    // (even after candles.ts's gap-backfill) would get blown up into a few giant blocks instead
-    // of rendering at a normal, fixed bar width. Only fit when there are enough bars that fitting
-    // actually means "zoom out slightly"; otherwise keep the fixed barSpacing and just pin the
-    // view to the right (real-time) edge.
     const raf = requestAnimationFrame(() => {
       const chart = chartRef.current
       if (!chart) return
@@ -135,9 +185,112 @@ export function TokenChart({ candles, height = 280 }: { candles: Candle[]; heigh
       } else {
         chart.timeScale().scrollToRealTime()
       }
+      layoutMarkers()
     })
     return () => cancelAnimationFrame(raf)
-  }, [candles])
+  }, [candles, layoutMarkers])
 
-  return <div ref={containerRef} style={{ height, width: '100%' }} />
+  useEffect(() => {
+    layoutMarkers()
+  }, [cappedMarkers, layoutMarkers])
+
+  return (
+    <div className="relative" style={{ height, width: '100%' }}>
+      <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
+
+      {/* PFP overlay — opt-in profiles only */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        {positions.map((p, i) => (
+          <button
+            key={`${p.marker.trader}-${p.marker.time}-${i}`}
+            type="button"
+            className="pointer-events-auto absolute rounded-full border-2 overflow-hidden shadow-lg transition-transform hover:scale-110 focus:scale-110 focus:outline-none"
+            style={{
+              left: p.left,
+              top: p.top,
+              width: PFP_SIZE,
+              height: PFP_SIZE,
+              borderColor: p.marker.isBuy ? UP : DOWN,
+              zIndex: 5,
+              padding: 0,
+              background: '#1a1f2a',
+            }}
+            title={
+              p.marker.twitter
+                ? `@${p.marker.twitter}`
+                : p.marker.displayName || shortAddr(p.marker.trader)
+            }
+            onClick={(e) => {
+              e.stopPropagation()
+              setHover(p.marker)
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={p.marker.avatarUrl}
+              alt=""
+              className="w-full h-full object-cover"
+              draggable={false}
+            />
+          </button>
+        ))}
+      </div>
+
+      {hover ? (
+        <div
+          className="absolute z-20 w-[240px] rounded-2xl border border-hair bg-s1/95 backdrop-blur-md shadow-2xl p-3.5"
+          style={{ right: 12, top: 12 }}
+        >
+          <div className="flex items-start gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={hover.avatarUrl}
+              alt=""
+              className="w-10 h-10 rounded-full object-cover border-2 shrink-0"
+              style={{ borderColor: hover.isBuy ? UP : DOWN }}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="m-0 text-sm font-semibold truncate">
+                {hover.twitter ? `@${hover.twitter}` : hover.displayName || shortAddr(hover.trader)}
+              </p>
+              <p className="m-0 text-[11px] text-t3 tabular-nums truncate">{shortAddr(hover.trader)}</p>
+            </div>
+            <button
+              type="button"
+              className="text-t3 hover:text-white text-xs"
+              onClick={() => setHover(null)}
+            >
+              ✕
+            </button>
+          </div>
+          <div
+            className="mt-3 rounded-xl px-3 py-2.5 border"
+            style={{
+              borderColor: hover.isBuy ? 'rgba(38,194,129,0.35)' : 'rgba(240,97,109,0.35)',
+              background: hover.isBuy ? 'rgba(38,194,129,0.08)' : 'rgba(240,97,109,0.08)',
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <span
+                className="text-xs font-bold tracking-wide"
+                style={{ color: hover.isBuy ? UP : DOWN }}
+              >
+                {hover.isBuy ? 'BUY' : 'SELL'}
+              </span>
+              <span className="text-sm font-semibold tabular-nums">
+                {hover.valueUsd != null ? fmtUsd(hover.valueUsd) : '—'}
+              </span>
+            </div>
+          </div>
+          <Link
+            href={`/creator/${hover.trader}`}
+            className="mt-3 flex items-center justify-between text-[12px] font-semibold text-lime-t hover:text-white"
+            onClick={() => setHover(null)}
+          >
+            View full profile →
+          </Link>
+        </div>
+      ) : null}
+    </div>
+  )
 }
