@@ -650,7 +650,7 @@ export function ArcCreateForm() {
                 0s
               </span>
               <span className="absolute top-2.5 right-2.5 px-2 py-1 rounded-[9px] bg-black/55 text-[11px] font-semibold text-lime-t">
-                {isReflection ? '◈ Reflect' : '⚡ Instant'}
+                {isReflection ? '◈ Reflect' : 'Uni V3'}
               </span>
             </div>
             <div className="px-4 py-3.5 flex flex-col gap-1.5">
