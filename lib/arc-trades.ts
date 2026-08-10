@@ -239,9 +239,22 @@ async function persistTrades(key: string, ascendingNew: EvmTrade[], newCursor: b
   }
 }
 
-export async function fetchArcTrades(token: Address): Promise<EvmTradesResult> {
+export interface FetchArcTradesOpts {
+  /** Page size. Defaults to MAX_TRADES (50). */
+  limit?: number
+  /** How many of the newest trades to skip — 0 is page 1, `limit` is page 2, etc. */
+  offset?: number
+}
+
+export async function fetchArcTrades(
+  token: Address,
+  opts: FetchArcTradesOpts = {},
+): Promise<EvmTradesResult> {
+  const limit = opts.limit && opts.limit > 0 ? Math.min(opts.limit, TRADES_CAP) : MAX_TRADES
+  const offset = opts.offset && opts.offset > 0 ? opts.offset : 0
   const key = token.toLowerCase()
-  const hit = mem.get(key)
+  const cacheKey = `${key}:${offset}:${limit}`
+  const hit = mem.get(cacheKey)
   if (hit && Date.now() - hit.at < FRESH_MS) return hit.result
 
   try {
@@ -275,16 +288,25 @@ export async function fetchArcTrades(token: Address): Promise<EvmTradesResult> {
     }
     // else: cursor >= head, already fully caught up — nothing to scan, read straight from KV.
 
+    // Stored ascending (oldest→newest); newest page (offset 0) is the tail of the list. Redis
+    // LRANGE with negative indices counts from the end, so page N's ascending slice is
+    // [-(offset+limit), -(offset+1)] — clamped to the list start automatically for an
+    // out-of-range negative start (e.g. a deep offset on a short list just returns fewer rows).
     let ascending: EvmTrade[] | null = null
+    let total: number | null = null
     try {
-      // Already-deserialized objects, not JSON strings — see persistTrades' doc comment.
-      ascending = await kv.lrange<EvmTrade>(tradesKvKey(key), -MAX_TRADES, -1)
+      ;[ascending, total] = await Promise.all([
+        // Already-deserialized objects, not JSON strings — see persistTrades' doc comment.
+        kv.lrange<EvmTrade>(tradesKvKey(key), -(offset + limit), -(offset + 1)),
+        kv.llen(tradesKvKey(key)),
+      ])
     } catch (e) {
       console.warn('[arc-trades] kv read trades', summarizeRpcError(e))
     }
     // KV unavailable (or nothing stored yet) — fall back to whatever this request just scanned
-    // live, so a KV outage degrades gracefully instead of returning nothing.
-    if (ascending === null) ascending = (foundThisCall ?? []).slice(-MAX_TRADES)
+    // live, so a KV outage degrades gracefully instead of returning nothing. Only meaningful for
+    // page 1 (offset 0); a KV outage on a deeper page just returns empty, same as "no more pages."
+    if (ascending === null) ascending = offset === 0 ? (foundThisCall ?? []).slice(-limit) : []
 
     // Newest first, matching the API's existing contract
     const trimmed = [...ascending].reverse()
@@ -298,8 +320,9 @@ export async function fetchArcTrades(token: Address): Promise<EvmTradesResult> {
       trades: trimmed,
       stats: buildStats(trimmed),
       pricePoints,
+      ...(total != null ? { total } : {}),
     }
-    mem.set(key, { result, at: Date.now() })
+    mem.set(cacheKey, { result, at: Date.now() })
     return result
   } catch (e) {
     console.error('[arc-trades]', summarizeRpcError(e))

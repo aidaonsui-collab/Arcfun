@@ -45,4 +45,7 @@ export interface EvmTradesResult {
   trades: EvmTrade[]
   stats: EvmTradeStats
   pricePoints: PricePoint[]
+  /** Total trades stored for this token (all pages), when known — omitted when a page couldn't
+   *  be sized (e.g. KV unavailable, falling back to whatever was scanned live this request). */
+  total?: number
 }

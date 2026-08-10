@@ -32,6 +32,8 @@ type Tab = 'Activity' | 'holders' | 'traders'
 type Range = '5M' | '15M' | '1H' | '1D' | '1W'
 type VolRange = '1H' | '6H' | '24H'
 
+const ACT_PAGE_SIZE = 40
+
 export default function TokenPage() {
   const params = useParams()
   const token = ((params?.address as string) ?? '') as Address
@@ -45,6 +47,7 @@ export default function TokenPage() {
   const [range, setRange] = useState<Range>('5M')
   const [volRange, setVolRange] = useState<VolRange>('1H')
   const [copied, setCopied] = useState(false)
+  const [actPage, setActPage] = useState(0)
 
   const copyAddress = useCallback(() => {
     if (!token) return
@@ -72,12 +75,15 @@ export default function TokenPage() {
   const loadTrades = useCallback(async () => {
     if (!token) return
     try {
-      const res = await fetch(`/api/arc/${token}/trades`, { cache: 'no-store' })
+      const res = await fetch(
+        `/api/arc/${token}/trades?limit=${ACT_PAGE_SIZE}&offset=${actPage * ACT_PAGE_SIZE}`,
+        { cache: 'no-store' },
+      )
       if (res.ok) setTrades((await res.json()) as EvmTradesResult)
     } catch {
       /* keep prior */
     }
-  }, [token])
+  }, [token, actPage])
 
   const loadHolders = useCallback(async () => {
     if (!token) return
@@ -471,9 +477,11 @@ export default function TokenPage() {
                     <span className="text-right">Time</span>
                   </div>
                   {!(trades?.trades?.length) ? (
-                    <p className="text-sm text-t3 text-center py-10">No trades yet.</p>
+                    <p className="text-sm text-t3 text-center py-10">
+                      {actPage > 0 ? 'No more trades.' : 'No trades yet.'}
+                    </p>
                   ) : (
-                    trades!.trades.slice(0, 40).map((t, i) => {
+                    trades!.trades.map((t, i) => {
                       const tm = traderMeta[t.trader.toLowerCase()]
                       return (
                       <a
@@ -519,6 +527,34 @@ export default function TokenPage() {
                         <span className="text-right text-t3 text-[13px]">{ageLabel(t.ts)} ago</span>
                       </a>
                     )})
+                  )}
+                  {(actPage > 0 || (trades?.trades?.length ?? 0) === ACT_PAGE_SIZE) && (
+                    <div className="flex items-center justify-between pt-3 px-1">
+                      <button
+                        type="button"
+                        disabled={actPage === 0}
+                        onClick={() => setActPage((p) => Math.max(0, p - 1))}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-t2 border border-hair disabled:opacity-30 disabled:pointer-events-none hover:border-lime-line hover:text-white transition-colors"
+                      >
+                        ← Prev
+                      </button>
+                      <span className="text-xs text-t3">
+                        Page {actPage + 1}
+                        {trades?.total ? ` of ${Math.max(1, Math.ceil(trades.total / ACT_PAGE_SIZE))}` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={
+                          trades?.total != null
+                            ? (actPage + 1) * ACT_PAGE_SIZE >= trades.total
+                            : (trades?.trades?.length ?? 0) < ACT_PAGE_SIZE
+                        }
+                        onClick={() => setActPage((p) => p + 1)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-t2 border border-hair disabled:opacity-30 disabled:pointer-events-none hover:border-lime-line hover:text-white transition-colors"
+                      >
+                        Next →
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
