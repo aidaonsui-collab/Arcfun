@@ -41,7 +41,7 @@ export default function TokenPage() {
   const [traderMeta, setTraderMeta] = useState<Record<string, TraderMeta>>({})
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('Activity')
-  const [range, setRange] = useState<Range>('1D')
+  const [range, setRange] = useState<Range>('5M')
   const [volRange, setVolRange] = useState<VolRange>('1H')
   const [copied, setCopied] = useState(false)
 
@@ -386,7 +386,7 @@ export default function TokenPage() {
                 </div>
               </div>
 
-              <div className="relative mt-[18px] rounded-2xl overflow-hidden">
+              <div className="relative mt-[18px] rounded-2xl overflow-visible">
                 <TokenChart candles={candles} height={280} markers={chartMarkers} />
               </div>
             </div>

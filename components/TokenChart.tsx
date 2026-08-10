@@ -3,6 +3,9 @@
 /**
  * Candlestick + volume chart via TradingView lightweight-charts.
  * Optional opt-in trader PFP markers (wallets with ArcFun profile + avatar).
+ *
+ * Marker X positions snap to the nearest candle time — trade timestamps rarely land on a
+ * bucket boundary, and timeToCoordinate() returns null for times not in the series data.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
@@ -26,7 +29,7 @@ const DOWN_VOL = 'rgba(255, 99, 117, 0.33)'
 
 const PFP_SIZE = 28
 const MAX_PFPS = 48
-const MIN_USD = 0.5
+const MIN_USD = 0.01
 
 export type ChartTradeMarker = {
   time: number
@@ -46,6 +49,21 @@ function priceFormatFor(price: number): { precision: number; minMove: number } {
   return { precision, minMove: Math.pow(10, -precision) }
 }
 
+/** Snap trade ts to nearest series bar time so timeToCoordinate succeeds. */
+function nearestBarTime(barTimes: number[], t: number): number | null {
+  if (!barTimes.length) return null
+  let best = barTimes[0]
+  let bestD = Math.abs(best - t)
+  for (let i = 1; i < barTimes.length; i++) {
+    const d = Math.abs(barTimes[i] - t)
+    if (d < bestD) {
+      best = barTimes[i]
+      bestD = d
+    }
+  }
+  return best
+}
+
 type Pos = { left: number; top: number; marker: ChartTradeMarker }
 
 export function TokenChart({
@@ -55,48 +73,73 @@ export function TokenChart({
 }: {
   candles: Candle[]
   height?: number
-  /** Opt-in PFPs only — callers filter to wallets with avatarUrl */
   markers?: ChartTradeMarker[]
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
+  const candlesRef = useRef(candles)
+  candlesRef.current = candles
+
   const [positions, setPositions] = useState<Pos[]>([])
   const [hover, setHover] = useState<ChartTradeMarker | null>(null)
 
   const cappedMarkers = useMemo(() => {
-    const sorted = [...markers]
-      .filter((m) => m.avatarUrl && m.time > 0 && m.price > 0)
+    return [...markers]
+      .filter((m) => m.avatarUrl && m.time > 0 && m.price > 0 && Number.isFinite(m.price))
       .filter((m) => (m.valueUsd == null ? true : m.valueUsd >= MIN_USD))
       .sort((a, b) => b.time - a.time)
       .slice(0, MAX_PFPS)
-    return sorted
   }, [markers])
+
+  const cappedRef = useRef(cappedMarkers)
+  cappedRef.current = cappedMarkers
 
   const layoutMarkers = useCallback(() => {
     const chart = chartRef.current
     const series = candleSeriesRef.current
-    const el = containerRef.current
-    if (!chart || !series || !el) {
+    if (!chart || !series) {
       setPositions([])
       return
     }
+    const bars = candlesRef.current
+    const barTimes = bars.map((c) => c.time)
+    if (!barTimes.length) {
+      setPositions([])
+      return
+    }
+
     const ts = chart.timeScale()
     const next: Pos[] = []
-    for (const m of cappedMarkers) {
-      const x = ts.timeToCoordinate(m.time as UTCTimestamp)
-      const y = series.priceToCoordinate(m.price)
-      if (x == null || y == null) continue
-      if (Number.isNaN(x) || Number.isNaN(y)) continue
+    const stackAtX = new Map<number, number>()
+
+    for (const m of cappedRef.current) {
+      const barT = nearestBarTime(barTimes, m.time)
+      if (barT == null) continue
+      const x = ts.timeToCoordinate(barT as UTCTimestamp)
+      let y = series.priceToCoordinate(m.price)
+      // If price is slightly outside the current scale, pin to mid-candle
+      if (y == null || Number.isNaN(y)) {
+        const bar = bars.find((c) => c.time === barT)
+        if (bar) y = series.priceToCoordinate(bar.close)
+      }
+      if (x == null || y == null || Number.isNaN(x) || Number.isNaN(y)) continue
+
+      const xKey = Math.round(x)
+      const stack = stackAtX.get(xKey) ?? 0
+      stackAtX.set(xKey, stack + 1)
+      const stackOffset = stack * 6
+
       next.push({
         left: x - PFP_SIZE / 2,
-        top: y - PFP_SIZE / 2,
+        top: y - PFP_SIZE / 2 - stackOffset,
         marker: m,
       })
     }
     setPositions(next)
-  }, [cappedMarkers])
+  }, [])
 
   useEffect(() => {
     const el = containerRef.current
@@ -142,8 +185,10 @@ export function TokenChart({
     const onRange = () => layoutMarkers()
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange)
     chart.timeScale().subscribeVisibleTimeRangeChange(onRange)
+    window.addEventListener('resize', onRange)
 
     return () => {
+      window.removeEventListener('resize', onRange)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
       chart.timeScale().unsubscribeVisibleTimeRangeChange(onRange)
       chart.remove()
@@ -185,21 +230,22 @@ export function TokenChart({
       } else {
         chart.timeScale().scrollToRealTime()
       }
-      layoutMarkers()
+      // Second frame: coordinates settle after fit/scroll
+      requestAnimationFrame(() => layoutMarkers())
     })
     return () => cancelAnimationFrame(raf)
   }, [candles, layoutMarkers])
 
   useEffect(() => {
-    layoutMarkers()
+    const t = window.setTimeout(() => layoutMarkers(), 50)
+    return () => clearTimeout(t)
   }, [cappedMarkers, layoutMarkers])
 
   return (
-    <div className="relative" style={{ height, width: '100%' }}>
+    <div ref={wrapRef} className="relative" style={{ height, width: '100%' }}>
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
 
-      {/* PFP overlay — opt-in profiles only */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 overflow-visible z-10">
         {positions.map((p, i) => (
           <button
             key={`${p.marker.trader}-${p.marker.time}-${i}`}
@@ -211,7 +257,7 @@ export function TokenChart({
               width: PFP_SIZE,
               height: PFP_SIZE,
               borderColor: p.marker.isBuy ? UP : DOWN,
-              zIndex: 5,
+              zIndex: 5 + i,
               padding: 0,
               background: '#1a1f2a',
             }}
@@ -253,7 +299,9 @@ export function TokenChart({
               <p className="m-0 text-sm font-semibold truncate">
                 {hover.twitter ? `@${hover.twitter}` : hover.displayName || shortAddr(hover.trader)}
               </p>
-              <p className="m-0 text-[11px] text-t3 tabular-nums truncate">{shortAddr(hover.trader)}</p>
+              <p className="m-0 text-[11px] text-t3 tabular-nums truncate">
+                {shortAddr(hover.trader)}
+              </p>
             </div>
             <button
               type="button"
