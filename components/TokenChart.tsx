@@ -59,7 +59,7 @@ export function TokenChart({ candles, height = 280 }: { candles: Candle[]; heigh
         horzLines: { color: BG },
       },
       rightPriceScale: { borderVisible: false },
-      timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
+      timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false, barSpacing: 10 },
       crosshair: {
         vertLine: { color: 'rgba(255,255,255,0.25)', labelBackgroundColor: '#1C3552' },
         horzLine: { color: 'rgba(255,255,255,0.25)', labelBackgroundColor: '#1C3552' },
@@ -118,10 +118,24 @@ export function TokenChart({ candles, height = 280 }: { candles: Candle[]; heigh
       })),
     )
     // autoSize's ResizeObserver hasn't necessarily applied the container's real width by the
-    // time setData() returns on first mount — fitContent() then computes bar spacing against a
-    // stale/placeholder width and squeezes every bar into a sliver. One rAF is enough to land
-    // after that resize.
-    const raf = requestAnimationFrame(() => chartRef.current?.timeScale().fitContent())
+    // time setData() returns on first mount — computing bar spacing against a stale/placeholder
+    // width squeezes every bar into a sliver. One rAF is enough to land after that resize.
+    //
+    // fitContent() stretches whatever bars exist to fill the full container width — great for a
+    // chart with plenty of bars, but a thinly-traded token with only a handful of real candles
+    // (even after candles.ts's gap-backfill) would get blown up into a few giant blocks instead
+    // of rendering at a normal, fixed bar width. Only fit when there are enough bars that fitting
+    // actually means "zoom out slightly"; otherwise keep the fixed barSpacing and just pin the
+    // view to the right (real-time) edge.
+    const raf = requestAnimationFrame(() => {
+      const chart = chartRef.current
+      if (!chart) return
+      if (candles.length > 60) {
+        chart.timeScale().fitContent()
+      } else {
+        chart.timeScale().scrollToRealTime()
+      }
+    })
     return () => cancelAnimationFrame(raf)
   }, [candles])
 

@@ -27,7 +27,7 @@ import {
 } from '@/lib/ui-format'
 
 type Tab = 'Activity' | 'holders' | 'traders'
-type Range = '1H' | '1D' | '1W'
+type Range = '5M' | '15M' | '1H' | '1D' | '1W'
 type VolRange = '1H' | '6H' | '24H'
 
 export default function TokenPage() {
@@ -314,7 +314,7 @@ export default function TokenPage() {
                   </span>
                 </div>
                 <div className="flex gap-1 p-1 bg-s2 border border-hair rounded-xl">
-                  {(['1H', '1D', '1W'] as Range[]).map((r) => (
+                  {(['5M', '15M', '1H', '1D', '1W'] as Range[]).map((r) => (
                     <button
                       key={r}
                       type="button"
