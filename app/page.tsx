@@ -81,7 +81,10 @@ function HomeInner() {
       .slice(0, 8)
   }, [tokens])
 
-  const stack = rail.slice(0, 3)
+  const stack = useMemo(
+    () => [...tokens].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 3),
+    [tokens],
+  )
   const liveCount = tokens.length
   const sortTabs: SortKey[] = ['Trending', 'New', 'Top MC']
 
@@ -114,18 +117,20 @@ function HomeInner() {
           </div>
 
           {stack.length > 0 && (
-            <div className="hidden lg:block absolute right-14 top-[52px] w-72 h-[260px] pointer-events-none">
+            <div className="hidden lg:block absolute right-14 top-[52px] w-72 h-[260px]">
               {stack.map((t, i) => {
-                const seed = t.coinType || t.poolId || t.symbol
+                const address = t.coinType || t.poolId
+                const seed = address || t.symbol
                 const { tile } = tileGradient(seed)
                 const chg = changeParts(t.priceChange24h)
                 const initial = (t.symbol || t.name || '?').charAt(0).toUpperCase()
                 const transform = `translateY(${i * 62}px) rotate(${i * 1.6 - 1.6}deg) scale(${1 - i * 0.045})`
                 const shade = `rgba(0,0,0,${0.18 + i * 0.14})`
                 return (
-                  <div
+                  <Link
                     key={t.id || seed}
-                    className="absolute left-0 right-0 top-0 h-[118px] rounded-[22px] overflow-hidden border border-white/10 shadow-[0_22px_48px_rgba(0,0,0,0.55)]"
+                    href={`/token/${address}`}
+                    className="absolute left-0 right-0 top-0 h-[118px] rounded-[22px] overflow-hidden border border-white/10 shadow-[0_22px_48px_rgba(0,0,0,0.55)] cursor-pointer hover:brightness-110 transition-[filter]"
                     style={{ background: tile, transform, zIndex: 30 - i * 10 }}
                   >
                     <div className="absolute inset-0" style={{ background: shade }} />
@@ -153,7 +158,7 @@ function HomeInner() {
                         <span className="text-[11px] font-semibold text-white/70">{t.symbol}</span>
                       </div>
                     </div>
-                  </div>
+                  </Link>
                 )
               })}
             </div>
