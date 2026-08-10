@@ -4,6 +4,10 @@
 import { getAddress, isAddress, type Address } from 'viem'
 import { buildArcCatalog } from '@/lib/arc-instant-tokens'
 import { isHiddenToken, type PoolToken } from '@/lib/tokens'
+import { getCreatorMeta, type CreatorMeta } from '@/lib/arc-creator-meta'
+import { getFollowCounts } from '@/lib/arc-followers'
+import { listCreatorFeePositions, type CreatorFeePosition } from '@/lib/arc-creator-fees'
+import { computeCreatorPnl, type CreatorPnl } from '@/lib/arc-creator-pnl'
 
 export type CreatorProfile = {
   address: Address
@@ -26,6 +30,11 @@ export type CreatorProfile = {
     ageHint: string
   } | null
   tokens: PoolToken[]
+  meta: CreatorMeta
+  followers: number
+  following: number
+  feePositions: CreatorFeePosition[]
+  pnl: CreatorPnl | null
   source: string
   at: number
 }
@@ -57,8 +66,18 @@ function sortForProfile(tokens: PoolToken[]): PoolToken[] {
 
 /**
  * Build creator profile from the live Arc catalog (same source as home grid).
+ * @param opts.includeFees — load locker fee positions (extra RPC)
+ * @param opts.includePnl — scan recent trades for wallet PnL (extra RPC)
+ * @param opts.pnlRange — trade window for PnL
  */
-export async function buildCreatorProfile(walletRaw: string): Promise<CreatorProfile | null> {
+export async function buildCreatorProfile(
+  walletRaw: string,
+  opts?: {
+    includeFees?: boolean
+    includePnl?: boolean
+    pnlRange?: CreatorPnl['range']
+  },
+): Promise<CreatorProfile | null> {
   if (!isAddress(walletRaw)) return null
   const addressChecksum = getAddress(walletRaw)
   const address = addressChecksum as Address
@@ -96,6 +115,17 @@ export async function buildCreatorProfile(walletRaw: string): Promise<CreatorPro
     }
   }
 
+  const [meta, counts, feePositions, pnl] = await Promise.all([
+    getCreatorMeta(address).catch(() => ({}) as CreatorMeta),
+    getFollowCounts(address).catch(() => ({ followers: 0, following: 0 })),
+    opts?.includeFees !== false
+      ? listCreatorFeePositions(mine).catch(() => [] as CreatorFeePosition[])
+      : Promise.resolve([] as CreatorFeePosition[]),
+    opts?.includePnl !== false
+      ? computeCreatorPnl(address, mine, opts?.pnlRange ?? '1W').catch(() => null)
+      : Promise.resolve(null),
+  ])
+
   return {
     address,
     addressChecksum,
@@ -105,6 +135,11 @@ export async function buildCreatorProfile(walletRaw: string): Promise<CreatorPro
     topCoin: top,
     latest,
     tokens: mine,
+    meta,
+    followers: counts.followers,
+    following: counts.following,
+    feePositions,
+    pnl,
     source,
     at: Date.now(),
   }

@@ -11,7 +11,7 @@ import { arcInstantEnabled, arcCurveEnabled, arcReflectionEnabled } from '@/lib/
 export const dynamic = 'force-dynamic'
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ address: string }> },
 ) {
   const { address } = await params
@@ -28,14 +28,22 @@ export async function GET(
     )
   }
 
+  const url = new URL(req.url)
+  const light = url.searchParams.get('light') === '1'
+  const pnlRange = (url.searchParams.get('pnl') as '1D' | '1W' | '1M' | 'ALL') || '1W'
+
   try {
-    const profile = await buildCreatorProfile(raw)
+    const profile = await buildCreatorProfile(raw, {
+      includeFees: !light,
+      includePnl: !light,
+      pnlRange: ['1D', '1W', '1M', 'ALL'].includes(pnlRange) ? pnlRange : '1W',
+    })
     if (!profile) {
       return NextResponse.json({ ok: false, error: 'invalid address' }, { status: 400 })
     }
     return jsonSafe(
       { ok: true, profile },
-      { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } },
+      { headers: { 'Cache-Control': light ? 'public, s-maxage=15' : 'public, s-maxage=20, stale-while-revalidate=40' } },
     )
   } catch (e) {
     console.error('[api/arc/creator]', summarizeRpcError(e))
