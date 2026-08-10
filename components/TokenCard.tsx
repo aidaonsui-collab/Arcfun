@@ -18,7 +18,6 @@ export function TokenCard({
   const rankLabel =
     rank != null ? (rank + 1 < 10 ? `0${rank + 1}` : String(rank + 1)) : null
   const age = ageLabel(token.createdAt ?? token.lastTradeAt)
-  const creator = token.creatorShort || (token.creator ? `${token.creator.slice(0, 6)}…` : '')
 
   return (
     <Link
@@ -44,14 +43,9 @@ export function TokenCard({
           <span className="px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-white">
             {age}
           </span>
-          {creator ? (
-            <span className="px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-medium text-white/80">
-              {creator}
-            </span>
-          ) : null}
         </span>
         {(token.instant || token.instantLaunch) && (
-          <span className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-lime-t">
+          <span className="absolute top-2.5 right-2.5 flex items-center gap-1 px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-lime-t whitespace-nowrap">
             ⚡ Instant
           </span>
         )}
