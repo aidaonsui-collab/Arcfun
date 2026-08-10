@@ -2,8 +2,8 @@
  * Arc Instant trade tape — Uniswap V3 Swap events on TOKEN/USDC pools.
  * Arc RPCs often cap eth_getLogs to 10_000 blocks — scan newest→oldest in chunks.
  */
-import { formatUnits, parseAbiItem, type Address, type Log } from 'viem'
-import { arcPublicClient } from './contracts-arc'
+import { erc20Abi as erc20DecimalsAbi, formatUnits, parseAbiItem, type Address, type Log } from 'viem'
+import { ARC, arcPublicClient } from './contracts-arc'
 import { fetchArcPoolToken } from './arc-instant-tokens'
 import {
   type EvmTrade,
@@ -60,18 +60,22 @@ const mem = new Map<string, { result: EvmTradesResult; at: number }>()
  * Instant-only resolvePool silently returned "no trades" for Reflection/curve tokens even when
  * they had a live, tradeable pool.
  */
-async function resolvePool(token: Address): Promise<{ pool: Address; tokenIs0: boolean } | null> {
+async function resolvePool(
+  token: Address,
+): Promise<{ pool: Address; tokenIs0: boolean; tokenDecimals: number } | null> {
   try {
     const client = arcPublicClient()
     const t = await fetchArcPoolToken(token)
     const pool = t?.instantMeta?.uniPool as Address | undefined
     if (!pool || pool === ZERO) return null
-    const token0 = (await client.readContract({
-      address: pool,
-      abi: [T0],
-      functionName: 'token0',
-    })) as Address
-    return { pool, tokenIs0: token0.toLowerCase() === token.toLowerCase() }
+    const [token0, tokenDecimals] = await Promise.all([
+      client.readContract({ address: pool, abi: [T0], functionName: 'token0' }) as Promise<Address>,
+      client
+        .readContract({ address: token, abi: erc20DecimalsAbi, functionName: 'decimals' })
+        .then((d) => Number(d))
+        .catch(() => ARC.TOKEN_DECIMALS) as Promise<number>,
+    ])
+    return { pool, tokenIs0: token0.toLowerCase() === token.toLowerCase(), tokenDecimals }
   } catch {
     return null
   }
@@ -120,7 +124,7 @@ export async function fetchArcTrades(token: Address): Promise<EvmTradesResult> {
   try {
     const orient = await resolvePool(token)
     if (!orient) return empty
-    const { pool, tokenIs0 } = orient
+    const { pool, tokenIs0, tokenDecimals } = orient
     const client = arcPublicClient()
     const head = await client.getBlockNumber()
 
@@ -175,7 +179,10 @@ export async function fetchArcTrades(token: Address): Promise<EvmTradesResult> {
           const usdcAmt = abs(usdcDelta)
           if (tokenAmt === 0n || usdcAmt === 0n) continue
 
-          const tokenHuman = Number(formatUnits(tokenAmt, 6))
+          // Token side uses the launch token's real decimals (18dp for current launches, 6dp for
+          // legacy pre–LaunchToken18 ones like the original AFUN test token) — this used to be
+          // hardcoded to 6, which silently produced raw-wei-scale garbage for any 18dp token.
+          const tokenHuman = Number(formatUnits(tokenAmt, tokenDecimals))
           const usdcHuman = Number(formatUnits(usdcAmt, 6))
           const price = tokenHuman > 0 ? usdcHuman / tokenHuman : 0
           const ts = tsMap.get((log.blockNumber ?? 0n).toString()) ?? 0
