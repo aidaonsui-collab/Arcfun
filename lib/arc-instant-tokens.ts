@@ -782,12 +782,25 @@ export async function fetchArcCurvePoolTokens(): Promise<PoolToken[]> {
   }
 }
 
+/** TEMP diagnostic timing — pinpointing where arcfun.co's ~10-14s catalog load actually goes
+ *  (confirmed no RPC errors are being thrown, so it's latency not failures). Remove once found. */
+async function timed<T>(label: string, p: Promise<T>): Promise<T> {
+  const t0 = Date.now()
+  try {
+    return await p
+  } finally {
+    console.warn(`[catalog-timing] ${label} ${Date.now() - t0}ms`)
+  }
+}
+
 export async function buildArcCatalog(): Promise<{ tokens: PoolToken[]; source: string }> {
+  const t0 = Date.now()
   const [instant, reflection, curve] = await Promise.all([
-    fetchArcInstantPoolTokens().catch(() => [] as PoolToken[]),
-    fetchArcReflectionPoolTokens().catch(() => [] as PoolToken[]),
-    fetchArcCurvePoolTokens().catch(() => [] as PoolToken[]),
+    timed('instant', fetchArcInstantPoolTokens().catch(() => [] as PoolToken[])),
+    timed('reflection', fetchArcReflectionPoolTokens().catch(() => [] as PoolToken[])),
+    timed('curve', fetchArcCurvePoolTokens().catch(() => [] as PoolToken[])),
   ])
+  console.warn(`[catalog-timing] total ${Date.now() - t0}ms`)
   const byId = new Map<string, PoolToken>()
   for (const t of [...instant, ...reflection, ...curve]) {
     const id = (t.coinType || t.poolId || t.id || '').toLowerCase()
