@@ -30,6 +30,10 @@ export interface PoolToken {
   coinType: string
   moonbagsPackageId?: string
   volume1h: number
+  /** Rolling USD volume windows — catalog may only populate volume1h today. */
+  volume6h?: number
+  volume12h?: number
+  volume24h?: number
   priceChange24h: number
   lastTradeAt?: number
   age: string
@@ -56,6 +60,26 @@ export interface PoolToken {
     dexId?: 0 | 1
   }
   dexVenue?: 'v3' | 'v4'
+}
+
+export type VolumeWindow = '1H' | '6H' | '12H' | '24H'
+
+/** Best available USD volume for a time window (falls back to shorter windows). */
+export function volumeForWindow(token: PoolToken, window: VolumeWindow): number {
+  const v1 = token.volume1h ?? 0
+  const v6 = token.volume6h ?? 0
+  const v12 = token.volume12h ?? 0
+  const v24 = token.volume24h ?? 0
+  switch (window) {
+    case '1H':
+      return v1
+    case '6H':
+      return v6 || v1
+    case '12H':
+      return v12 || v6 || v1
+    case '24H':
+      return v24 || v12 || v6 || v1
+  }
 }
 
 /** True when token was launched via Instant Reflection factory. */

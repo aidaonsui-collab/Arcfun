@@ -4,12 +4,15 @@ import { Suspense, useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
-import type { PoolToken } from '@/lib/tokens'
+import type { PoolToken, VolumeWindow } from '@/lib/tokens'
+import { volumeForWindow } from '@/lib/tokens'
 import { TokenCard, TokenRailCard } from '@/components/TokenCard'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
 import { changeParts, fmtUsd, tileGradient } from '@/lib/ui-format'
 
-type SortKey = 'Trending' | 'New' | 'Top MC'
+type SortKey = 'Top volume' | 'New' | 'Top MC'
+
+const VOL_WINDOWS: VolumeWindow[] = ['1H', '6H', '12H', '24H']
 
 function HomeInner() {
   const searchParams = useSearchParams()
@@ -17,7 +20,8 @@ function HomeInner() {
 
   const [tokens, setTokens] = useState<PoolToken[]>([])
   const [loading, setLoading] = useState(true)
-  const [sort, setSort] = useState<SortKey>('Trending')
+  const [sort, setSort] = useState<SortKey>('Top MC')
+  const [volWindow, setVolWindow] = useState<VolumeWindow>('24H')
   const [filter, setFilter] = useState(q)
 
   useEffect(() => {
@@ -62,15 +66,19 @@ function HomeInner() {
     } else if (sort === 'Top MC') {
       list.sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0))
     } else {
+      // Top volume — selected window; fall back to last activity when volumes are empty.
       list.sort((a, b) => {
-        const ta = b.lastTradeAt ?? b.createdAt ?? 0
-        const tb = a.lastTradeAt ?? a.createdAt ?? 0
-        if (ta !== tb) return ta - tb
+        const va = volumeForWindow(a, volWindow)
+        const vb = volumeForWindow(b, volWindow)
+        if (va !== vb) return vb - va
+        const ta = a.lastTradeAt ?? a.createdAt ?? 0
+        const tb = b.lastTradeAt ?? b.createdAt ?? 0
+        if (ta !== tb) return tb - ta
         return (b.marketCap ?? 0) - (a.marketCap ?? 0)
       })
     }
     return list
-  }, [tokens, filter, sort])
+  }, [tokens, filter, sort, volWindow])
 
   const rail = useMemo(() => {
     return [...tokens]
@@ -86,7 +94,7 @@ function HomeInner() {
     [tokens],
   )
   const liveCount = tokens.length
-  const sortTabs: SortKey[] = ['Trending', 'New', 'Top MC']
+  const sortTabs: SortKey[] = ['Top volume', 'New', 'Top MC']
 
   return (
     <main className="min-h-screen text-white pt-16 pb-16">
@@ -187,7 +195,7 @@ function HomeInner() {
         <section id="all-launches" className="mt-11">
           <div className="flex items-center justify-between gap-5 flex-wrap">
             <h2 className="m-0 text-[21px] font-semibold tracking-tightish">All launches</h2>
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <div className="flex gap-1 p-1 bg-s1 border border-hair rounded-[14px]">
                 {sortTabs.map((s) => (
                   <button
@@ -204,6 +212,24 @@ function HomeInner() {
                   </button>
                 ))}
               </div>
+              {sort === 'Top volume' && (
+                <div className="flex items-center gap-1 p-1 bg-s1 border border-hair rounded-[14px]">
+                  {VOL_WINDOWS.map((w) => (
+                    <button
+                      key={w}
+                      type="button"
+                      onClick={() => setVolWindow(w)}
+                      className="min-w-[40px] px-2.5 py-[7px] rounded-[10px] text-[13px] font-medium tabular-nums tracking-tightish transition-colors"
+                      style={{
+                        background: volWindow === w ? 'rgba(255,255,255,0.12)' : 'transparent',
+                        color: volWindow === w ? '#fff' : 'rgba(255,255,255,0.52)',
+                      }}
+                    >
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="h-[38px] flex items-center gap-2 px-3 bg-s1 border border-hair rounded-[14px]">
                 <span className="w-[13px] h-[13px] border-[1.6px] border-t3 rounded-full" />
                 <input
