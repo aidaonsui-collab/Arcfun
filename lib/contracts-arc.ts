@@ -11,7 +11,7 @@
  *   NEXT_PUBLIC_ARC_CHAIN_ID=5042
  *   NEXT_PUBLIC_ARC_RPC=https://arc-mainnet.infura.io/v3/<PROJECT_ID>
  *   # or set NEXT_PUBLIC_INFURA_API_KEY and we build the URL
- *   NEXT_PUBLIC_ARC_EXPLORER=https://arcscan.app
+ *   NEXT_PUBLIC_ARC_EXPLORER=https://arc-scan.io
  *   NEXT_PUBLIC_ARC_ENABLED=1
  *
  * 2026-08-03: Railway fortest RPC is DEAD. Public baracat rate-limits under burst (Cloudflare
@@ -248,7 +248,7 @@ export function arcCreationFeeWeiFor(creator: string | undefined | null): bigint
 /** Same rule as the RPC: no testnet explorer fallback once off the testnet chain id. */
 export const ARC_EXPLORER =
   process.env.NEXT_PUBLIC_ARC_EXPLORER ||
-  (ARC_IS_TESTNET ? ARC_TESTNET_EXPLORER : ARC_MAINNET_CHAIN_ID === ARC_CHAIN_ID ? 'https://arcscan.app' : '')
+  (ARC_IS_TESTNET ? ARC_TESTNET_EXPLORER : ARC_MAINNET_CHAIN_ID === ARC_CHAIN_ID ? 'https://arc-scan.io' : '')
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 

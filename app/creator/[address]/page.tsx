@@ -221,7 +221,7 @@ export default function CreatorPage() {
     })
   }
 
-  const explorer = ARC_EXPLORER || 'https://arcscan.app'
+  const explorer = ARC_EXPLORER || 'https://arc-scan.io'
   const seed = profile?.addressChecksum || raw || 'creator'
   const { tile, mono } = tileGradient(seed)
   const displayName = profile?.meta?.displayName?.trim() || profile?.short || 'Creator'
