@@ -32,9 +32,9 @@ export const OTC_DEFAULTS = {
 /** Default Arc reserve TTL for fills (must be within 5m–2h on-chain). */
 export const OTC_RESERVE_TTL_SEC = 30 * 60
 
-/** Default platform fee (3%). ROBIN holders may fill at ROBIN_OTC_FEE_BPS. */
-export const OTC_DEFAULT_FEE_BPS = 300
-/** Discounted fee for ≥0.01% $ROBIN supply holders. */
+/** Default platform fee (2%). On-chain payment escrow is source of truth via feeBps(). */
+export const OTC_DEFAULT_FEE_BPS = 200
+/** Discounted fee for ≥0.01% $ROBIN supply holders (when oracle voucher is used). */
 export const OTC_ROBIN_FEE_BPS = 100
 
 function envAddr(...keys: string[]): Address {

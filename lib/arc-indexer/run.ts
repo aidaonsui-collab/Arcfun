@@ -441,7 +441,7 @@ export async function enrichTokensWithIndexVolume<
 /** Live OTC book from index + fee mult. */
 export async function getIndexedOtcBook() {
   const offers = await listOtcOffers()
-  const feeBps = await fetchOtcFeeBps().catch(() => 300)
+  const feeBps = await fetchOtcFeeBps().catch(() => 200)
   return offers
     .filter((o) => o.active && BigInt(o.remaining || '0') > 0n)
     .map((o) => {
