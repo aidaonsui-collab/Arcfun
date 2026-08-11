@@ -86,6 +86,7 @@ export function InstantOtcOrders() {
       setPurchases(all)
       setOffers(makerOffers)
     } catch (e) {
+      // Keep prior purchases/offers when Arc/Base RPC scan fails mid-poll.
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
@@ -94,7 +95,8 @@ export function InstantOtcOrders() {
 
   useEffect(() => {
     void refresh()
-    const t = setInterval(() => void refresh(), 20_000)
+    // 30s — full OfferCreated scan is heavy; aggressive polls amplify 429s and empty lists.
+    const t = setInterval(() => void refresh(), 30_000)
     return () => clearInterval(t)
   }, [refresh])
 

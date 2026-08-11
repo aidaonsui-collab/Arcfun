@@ -14,7 +14,7 @@ import {
   type Hex,
 } from 'viem'
 import { arbitrum, base, mainnet } from 'viem/chains'
-import { ARC, arcChain } from '@/lib/contracts-arc'
+import { ARC, arcPublicClient } from '@/lib/contracts-arc'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 
@@ -289,11 +289,13 @@ export function paymentClient(chain: OtcPaymentChain) {
   })
 }
 
-const arcClient = () =>
-  createPublicClient({
-    chain: arcChain,
-    transport: http(process.env.NEXT_PUBLIC_ARC_RPC || process.env.ARC_RPC || ''),
-  })
+/**
+ * Shared Arc RPC client with multi-endpoint fallback (baracat / Infura / theleak).
+ * RobinBridge used a single `NEXT_PUBLIC_ARC_RPC || ''` transport — empty URL or a
+ * quota-exhausted Infura project made OfferCreated scans return empty and offers
+ * "disappear" until a hard refresh hit a working node.
+ */
+const arcClient = () => arcPublicClient()
 
 /** Local quote (matches PaymentEscrow._quote). */
 export function quoteFill(
@@ -553,6 +555,8 @@ async function fetchAllOfferCreatedLogs(
   }
 
   const results: OfferCreatedLog[] = []
+  let failedChunks = 0
+  let okChunks = 0
   for (let i = 0; i < ranges.length; i += ARC_LOG_CHUNK_CONCURRENCY) {
     const batch = ranges.slice(i, i + ARC_LOG_CHUNK_CONCURRENCY)
     const batchLogs = await Promise.all(
@@ -567,18 +571,38 @@ async function fetchAllOfferCreatedLogs(
             ...(maker ? { args: { maker } } : {}),
           }),
         )
-          .then((logs) => logs as unknown as OfferCreatedLog[])
+          .then((logs) => {
+            okChunks++
+            return logs as unknown as OfferCreatedLog[]
+          })
           .catch((err) => {
             // A chunk that fails after every retry used to vanish silently into an empty array —
             // exactly how the 2026-08-10 chunk-size regression hid EVERY offer for days with no
             // signal anywhere. Still degrade gracefully (one bad chunk shouldn't blank the whole
             // list), but log it so a systemic failure like that one is visible, not silent.
-            console.warn(`[robin-otc] OfferCreated scan chunk ${from}-${to} failed:`, (err as Error)?.message ?? err)
+            failedChunks++
+            console.warn(
+              `[arc-otc] OfferCreated scan chunk ${from}-${to} failed:`,
+              (err as Error)?.message ?? err,
+            )
             return [] as OfferCreatedLog[]
           }),
       ),
     )
     for (const logs of batchLogs) results.push(...logs)
+  }
+  // If the RPC rate-limited / rejected the entire scan, do not return a clean [] —
+  // callers treat that as "no offers" and wipe the UI. Surface as a hard error so
+  // the panel keeps prior state.
+  if (okChunks === 0 && failedChunks > 0) {
+    throw new Error(
+      `Arc RPC failed all ${failedChunks} OfferCreated log chunks — try again or switch RPC`,
+    )
+  }
+  if (failedChunks > 0 && failedChunks >= okChunks) {
+    console.warn(
+      `[arc-otc] OfferCreated scan degraded: ${failedChunks} failed / ${okChunks} ok chunks`,
+    )
   }
   return results
 }

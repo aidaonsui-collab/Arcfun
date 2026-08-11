@@ -160,17 +160,18 @@ export function InstantOtcPanel() {
       })
       void refreshRobin()
     } catch (e) {
+      // Keep prior offers on RPC / scan failure — never flash an empty book.
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
   }, [enabled, refreshRobin])
 
-  // Poll faster when any offer has pending fills so tiles clear after settle.
+  // Poll slower by default to avoid Arc getLogs 429s; faster only while fills pending.
   const hasAnyPending = offers.some((o) => (o.pendingReserved ?? 0n) > 0n)
   useEffect(() => {
     void refresh()
-    const ms = hasAnyPending ? 6_000 : 15_000
+    const ms = hasAnyPending ? 12_000 : 30_000
     const t = setInterval(() => void refresh(), ms)
     return () => clearInterval(t)
   }, [refresh, hasAnyPending])
