@@ -146,11 +146,52 @@ export function InstantOtcPanel() {
     setLoading(true)
     setErr(null)
     try {
-      const [list, fee, stats] = await Promise.all([
-        fetchOtcOffers(),
-        fetchOtcFeeBps(),
-        fetchOtcDeskStats(),
-      ])
+      // Prefer Arc event indexer (fast). Fall back to live log scan if empty/unavailable.
+      let list: Awaited<ReturnType<typeof fetchOtcOffers>> = []
+      try {
+        const res = await fetch('/api/otc/offers', { cache: 'no-store' })
+        if (res.ok) {
+          const data = (await res.json()) as {
+            offers?: Array<{
+              offerId: `0x${string}`
+              maker: `0x${string}`
+              sellerPayment: `0x${string}`
+              premiumBps: number
+              remaining: string | number
+              active: boolean
+              allInMult?: number
+              available?: string | number
+              hasPending?: boolean
+            }>
+          }
+          if (data.offers?.length) {
+            list = data.offers.map((o) => {
+              const remaining = BigInt(o.remaining ?? 0)
+              const available =
+                o.available != null ? BigInt(o.available) : remaining
+              return {
+                offerId: o.offerId,
+                maker: o.maker,
+                sellerPayment: o.sellerPayment,
+                premiumBps: o.premiumBps,
+                remaining,
+                active: o.active,
+                allInMult: o.allInMult,
+                available,
+                pendingReserved: 0n,
+                hasPending: !!o.hasPending,
+              }
+            })
+          }
+        }
+      } catch {
+        /* index optional */
+      }
+      if (!list.length) {
+        list = await fetchOtcOffers()
+      }
+
+      const [fee, stats] = await Promise.all([fetchOtcFeeBps(), fetchOtcDeskStats()])
       setOffers(list)
       setFeeBps(fee)
       setDeskStats(stats)

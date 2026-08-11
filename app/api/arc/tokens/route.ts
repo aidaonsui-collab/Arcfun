@@ -20,6 +20,14 @@ export async function GET() {
   try {
     let { tokens, source } = await buildArcCatalog()
     tokens = tokens.filter((t) => !isHiddenToken(t.coinType ?? t.poolId))
+    // Overlay volume windows from Arc event indexer when available.
+    try {
+      const { enrichTokensWithIndexVolume } = await import('@/lib/arc-indexer/run')
+      tokens = await enrichTokensWithIndexVolume(tokens)
+      source = `${source}+idx`
+    } catch {
+      /* indexer optional */
+    }
     return jsonSafe(
       { ok: true, source, at: Date.now(), tokens },
       { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } },

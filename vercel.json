@@ -3,6 +3,10 @@
     {
       "path": "/api/arc/keeper/reflect",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/arc/indexer/run",
+      "schedule": "*/2 * * * *"
     }
   ]
 }

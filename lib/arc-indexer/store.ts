@@ -1,0 +1,154 @@
+/**
+ * Arc indexer persistence — Vercel KV (`arcfun:idx:*`).
+ * Degrades gracefully when KV is missing (local dev without Upstash).
+ */
+import { kv } from '@vercel/kv'
+import type { Address, Hex } from 'viem'
+import type { IndexedOtcOffer, IndexedToken, IndexedVolume, IndexerState } from './types'
+import { summarizeRpcError } from '@/lib/rpc-error'
+
+const STATE_KEY = 'arcfun:idx:state'
+const TOKEN_SET = 'arcfun:idx:tokens'
+const tokenKey = (t: string) => `arcfun:idx:token:${t.toLowerCase()}`
+const volumeKey = (t: string) => `arcfun:idx:vol:${t.toLowerCase()}`
+const OTC_OFFER_SET = 'arcfun:idx:otc:offers'
+const otcOfferKey = (id: string) => `arcfun:idx:otc:offer:${id.toLowerCase()}`
+
+export function kvConfigured(): boolean {
+  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN)
+}
+
+async function safeGet<T>(key: string): Promise<T | null> {
+  try {
+    return (await kv.get<T>(key)) ?? null
+  } catch (e) {
+    console.warn('[arc-indexer] kv get', key, summarizeRpcError(e))
+    return null
+  }
+}
+
+async function safeSet(key: string, value: unknown, ex?: number): Promise<void> {
+  try {
+    if (ex != null) await kv.set(key, value, { ex })
+    else await kv.set(key, value)
+  } catch (e) {
+    console.warn('[arc-indexer] kv set', key, summarizeRpcError(e))
+  }
+}
+
+export async function loadState(): Promise<IndexerState> {
+  const s = await safeGet<IndexerState>(STATE_KEY)
+  if (s?.version === 1) return s
+  return {
+    version: 1,
+    factoryCursor: '0',
+    otcCursor: '0',
+    swapRotate: 0,
+    updatedAt: 0,
+  }
+}
+
+export async function saveState(state: IndexerState): Promise<void> {
+  await safeSet(STATE_KEY, { ...state, updatedAt: Date.now() })
+}
+
+export async function upsertToken(row: IndexedToken): Promise<void> {
+  const id = row.token.toLowerCase()
+  try {
+    await kv.sadd(TOKEN_SET, id)
+  } catch (e) {
+    console.warn('[arc-indexer] sadd token', summarizeRpcError(e))
+  }
+  await safeSet(tokenKey(id), row)
+}
+
+export async function getToken(token: Address | string): Promise<IndexedToken | null> {
+  return safeGet<IndexedToken>(tokenKey(String(token)))
+}
+
+export async function listTokenAddresses(): Promise<string[]> {
+  try {
+    const members = await kv.smembers(TOKEN_SET)
+    return (members as string[]).map((m) => m.toLowerCase())
+  } catch (e) {
+    console.warn('[arc-indexer] smembers tokens', summarizeRpcError(e))
+    return []
+  }
+}
+
+export async function listIndexedTokens(): Promise<IndexedToken[]> {
+  const ids = await listTokenAddresses()
+  if (!ids.length) return []
+  const rows = await Promise.all(ids.map((id) => getToken(id)))
+  return rows.filter((r): r is IndexedToken => !!r?.token)
+}
+
+export async function setVolume(token: Address | string, vol: IndexedVolume): Promise<void> {
+  await safeSet(volumeKey(String(token)), vol, 7 * 24 * 3600)
+}
+
+export async function getVolume(token: Address | string): Promise<IndexedVolume | null> {
+  return safeGet<IndexedVolume>(volumeKey(String(token)))
+}
+
+/** Batch volume for catalog enrichment. */
+export async function getVolumesMap(
+  tokens: string[],
+): Promise<Record<string, IndexedVolume>> {
+  const out: Record<string, IndexedVolume> = {}
+  await Promise.all(
+    tokens.map(async (t) => {
+      const v = await getVolume(t)
+      if (v) out[t.toLowerCase()] = v
+    }),
+  )
+  return out
+}
+
+export async function upsertOtcOffer(row: IndexedOtcOffer): Promise<void> {
+  const id = row.offerId.toLowerCase()
+  try {
+    await kv.sadd(OTC_OFFER_SET, id)
+  } catch (e) {
+    console.warn('[arc-indexer] sadd otc', summarizeRpcError(e))
+  }
+  await safeSet(otcOfferKey(id), row)
+}
+
+export async function removeOtcOffer(offerId: Hex | string): Promise<void> {
+  const id = String(offerId).toLowerCase()
+  try {
+    await kv.srem(OTC_OFFER_SET, id)
+    await kv.del(otcOfferKey(id))
+  } catch (e) {
+    console.warn('[arc-indexer] del otc', summarizeRpcError(e))
+  }
+}
+
+export async function listOtcOffers(): Promise<IndexedOtcOffer[]> {
+  try {
+    const ids = (await kv.smembers(OTC_OFFER_SET)) as string[]
+    if (!ids?.length) return []
+    const rows = await Promise.all(ids.map((id) => safeGet<IndexedOtcOffer>(otcOfferKey(id))))
+    return rows.filter((r): r is IndexedOtcOffer => !!r?.offerId)
+  } catch (e) {
+    console.warn('[arc-indexer] list otc', summarizeRpcError(e))
+    return []
+  }
+}
+
+export async function tokenCount(): Promise<number> {
+  try {
+    return Number(await kv.scard(TOKEN_SET)) || 0
+  } catch {
+    return 0
+  }
+}
+
+export async function otcOfferCount(): Promise<number> {
+  try {
+    return Number(await kv.scard(OTC_OFFER_SET)) || 0
+  } catch {
+    return 0
+  }
+}
