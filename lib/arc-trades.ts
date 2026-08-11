@@ -33,20 +33,18 @@ const T0 = parseAbiItem('function token0() view returns (address)')
 
 const CHUNK = 9_000n
 /**
- * How far back to seed a token's cursor the first time this store has ever seen it — ~3.5 days at
- * ~1s/block, 6x the old live-only scanner's ~14h window. This is only ever a *starting point*, not
- * a scan-in-one-shot size: cold start seeds the cursor here and then falls through to the exact
- * same bounded catch-up path warm tokens use (see CATCHUP_MAX_BLOCKS), so a deep backfill spreads
- * across however many requests it takes instead of risking one request scanning 300k blocks (~33
- * chunked eth_getLogs calls) and timing out. Once indexed, a token is never lost again regardless
- * of how long it goes quiet — this bound only limits how far back a token's *first-ever* index
- * reaches.
+ * How far back a token's FIRST-EVER scan reaches — ~3.5 days at ~1s/block, 6x the old live-only
+ * scanner's ~14h window. Scanned in full, all the way to `head`, in that one cold-start request
+ * (not bounded by CATCHUP_MAX_BLOCKS below) — see the isColdStart branch in fetchArcTrades for why
+ * a bounded first scan silently missed a brand-new token's most recent trades. Once indexed, a
+ * token is never lost again regardless of how long it goes quiet afterward — this bound only
+ * limits how far back a token's *first-ever* index reaches.
  */
 const DEEP_BACKFILL_BLOCKS = 300_000n
-/** Per-request cap on how far a scan (cold-start or warm catch-up) advances. Bounds a single
- *  request's duration regardless of how large the gap is — a token idle for months, or seen for
- *  the first time, just catches up over however many page loads it takes instead of one huge scan
- *  that risks a serverless timeout. */
+/** Per-request cap on how far a WARM (already-indexed) token's catch-up scan advances. Bounds a
+ *  single request's duration if a token's been idle a long time since its last visit — it just
+ *  catches up over however many page loads it takes instead of one huge scan that risks a
+ *  serverless timeout. Does not apply to the one-time cold-start scan (see DEEP_BACKFILL_BLOCKS). */
 const CATCHUP_MAX_BLOCKS = 200_000n
 const MAX_TRADES = 50
 /** How many trades to retain per token in KV. */
@@ -272,16 +270,26 @@ export async function fetchArcTrades(
       console.warn('[arc-trades] kv read cursor', summarizeRpcError(e))
     }
 
-    // First time this store has ever seen this token — seed the cursor DEEP_BACKFILL_BLOCKS back
-    // and let the bounded catch-up below walk it forward, same as a warm token. Never scans the
-    // whole backfill window in one request.
-    if (cursor === null) {
-      cursor = head >= DEEP_BACKFILL_BLOCKS ? head - DEEP_BACKFILL_BLOCKS : 0n
-    }
+    const isColdStart = cursor === null
 
     let foundThisCall: EvmTrade[] | null = null
-    if (cursor < head) {
-      const from = cursor + 1n
+    if (isColdStart) {
+      // First time this store has ever seen this token — scan the FULL DEEP_BACKFILL_BLOCKS
+      // window in one shot, all the way to `head`, not just a CATCHUP_MAX_BLOCKS-bounded slice of
+      // it. This used to seed the cursor 300k back and then only scan 200k forward from there —
+      // which left the most recent 100k blocks (DEEP_BACKFILL_BLOCKS - CATCHUP_MAX_BLOCKS)
+      // completely unscanned on a token's very first view. A brand-new, actively-traded token
+      // (all its history within the last 100k blocks) would show zero trades on its first ever
+      // page load, self-healing only on a second visit once the cursor caught up. One-time cost —
+      // ~34 chunked eth_getLogs calls worst case — is worth paying once per token to never miss
+      // recent activity on a cold view.
+      const from = head >= DEEP_BACKFILL_BLOCKS ? head - DEEP_BACKFILL_BLOCKS + 1n : 0n
+      foundThisCall = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, head)
+      await persistTrades(key, foundThisCall, head)
+    } else if (cursor! < head) {
+      // Warm — only scan the gap since the last time anyone loaded this token, capped per
+      // request so a token idle a long time just catches up over however many page loads it takes.
+      const from = cursor! + 1n
       const to = from + CATCHUP_MAX_BLOCKS - 1n > head ? head : from + CATCHUP_MAX_BLOCKS - 1n
       foundThisCall = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, to)
       await persistTrades(key, foundThisCall, to)
