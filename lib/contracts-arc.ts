@@ -245,10 +245,22 @@ export function arcCreationFeeWeiFor(creator: string | undefined | null): bigint
   return ARC_CREATION_FEE_WEI
 }
 
-/** Same rule as the RPC: no testnet explorer fallback once off the testnet chain id. */
-export const ARC_EXPLORER =
-  process.env.NEXT_PUBLIC_ARC_EXPLORER ||
-  (ARC_IS_TESTNET ? ARC_TESTNET_EXPLORER : ARC_MAINNET_CHAIN_ID === ARC_CHAIN_ID ? 'https://arc-scan.io' : '')
+/**
+ * Block explorer base URL (no trailing slash).
+ * Mainnet default: https://arc-scan.io (working public Arc explorer).
+ * Ignores deprecated `arcscan.app` env values — that host was still baked into
+ * NEXT_PUBLIC_ARC_EXPLORER on some deploys and overrode the new default.
+ */
+function resolveArcExplorer(): string {
+  if (ARC_IS_TESTNET) {
+    return process.env.NEXT_PUBLIC_ARC_EXPLORER?.trim() || ARC_TESTNET_EXPLORER
+  }
+  const raw = (process.env.NEXT_PUBLIC_ARC_EXPLORER || '').trim().replace(/\/$/, '')
+  if (raw && !/arcscan\.app/i.test(raw)) return raw
+  return ARC_MAINNET_CHAIN_ID === ARC_CHAIN_ID ? 'https://arc-scan.io' : ''
+}
+
+export const ARC_EXPLORER = resolveArcExplorer()
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 

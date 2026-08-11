@@ -483,14 +483,17 @@ export default function TokenPage() {
                     trades!.trades.map((t, i) => {
                       const tm = traderMeta[t.trader.toLowerCase()]
                       return (
-                      <a
+                      <div
                         key={`${t.txHash}-${i}`}
-                        href={`${explorer}/tx/${t.txHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className="grid grid-cols-[1.4fr_.7fr_1fr_1fr_.8fr] gap-3 px-3 py-3.5 border-b border-hair2 text-sm items-center tabular-nums hover:bg-white/[0.02]"
                       >
-                        <span className="flex items-center gap-2.5 min-w-0">
+                        <a
+                          href={`${explorer}/address/${t.trader}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2.5 min-w-0 hover:text-white"
+                          title="View wallet on explorer"
+                        >
                           {tm?.avatarUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -512,19 +515,42 @@ export default function TokenPage() {
                               ? `@${tm.twitter}`
                               : tm?.displayName || shortAddr(t.trader)}
                           </span>
-                        </span>
-                        <span
+                        </a>
+                        <a
+                          href={`${explorer}/tx/${t.txHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="font-semibold"
                           style={{ color: t.isBuy ? 'var(--limeT)' : 'var(--coral)' }}
+                          title="View transaction"
                         >
                           {t.isBuy ? 'Buy' : 'Sell'}
-                        </span>
-                        <span className="font-medium">{fmtUsd(t.valueUsd)}</span>
-                        <span className="text-t2 truncate">
+                        </a>
+                        <a
+                          href={`${explorer}/tx/${t.txHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium hover:text-white"
+                        >
+                          {fmtUsd(t.valueUsd)}
+                        </a>
+                        <a
+                          href={`${explorer}/tx/${t.txHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-t2 truncate hover:text-white"
+                        >
                           {t.tokenAmount != null ? String(t.tokenAmount) : '—'}
-                        </span>
-                        <span className="text-right text-t3 text-[13px]">{ageLabel(t.ts)} ago</span>
-                      </a>
+                        </a>
+                        <a
+                          href={`${explorer}/tx/${t.txHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-right text-t3 text-[13px] hover:text-white"
+                        >
+                          {ageLabel(t.ts)} ago
+                        </a>
+                      </div>
                     )})
                   )}
                   {((trades?.trades?.length ?? 0) > 0 || actPage > 0) && (
