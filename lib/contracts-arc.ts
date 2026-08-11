@@ -131,7 +131,18 @@ export function isArcRpcInfraError(err: unknown): boolean {
     raw.includes('not able to process your request') || // thirdweb: no node behind the chain (-32603)
     raw.includes('contact thirdweb support') ||
     raw.includes('project id') ||
-    raw.includes('-32600')
+    raw.includes('-32600') ||
+    // 2026-08-11: baracat itself went down (Cloudflare 502 "Bad gateway") while it was the
+    // configured primary. None of the patterns above matched a plain HTTP-layer failure, so
+    // shouldThrow saw it as "the contract reverted" and stopped right there — fallback() never
+    // got to try Infura/theleak at all, which is worse than the slow-Infura problem this file's
+    // primary-ordering comment was written to fix. A non-2xx HTTP response (502/503/504/522/524,
+    // Cloudflare or otherwise) is unambiguously "this endpoint is broken," not "the call reverted."
+    raw.includes('http request failed') ||
+    raw.includes('bad gateway') ||
+    raw.includes('gateway timeout') ||
+    raw.includes('service unavailable') ||
+    /\bstatus:\s*5\d\d\b/.test(raw)
   )
 }
 
