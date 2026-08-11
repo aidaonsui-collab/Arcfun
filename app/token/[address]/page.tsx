@@ -15,7 +15,7 @@ import { ArcDexTradePanel } from '@/components/ArcDexTradePanel'
 import { TokenChart, type ChartTradeMarker } from '@/components/TokenChart'
 import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import type { TraderMeta } from '@/lib/arc-trader-meta'
-import { ARC_EXPLORER, ARC } from '@/lib/contracts-arc'
+import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
 import { buildCandles, RANGE_BUCKET_SEC } from '@/lib/candles'
 import {
@@ -28,7 +28,7 @@ import {
   walletHue,
 } from '@/lib/ui-format'
 
-type Tab = 'Activity' | 'holders' | 'traders'
+type Tab = 'Activity' | 'holders'
 type Range = '5M' | '15M' | '1H' | '1D' | '1W'
 type VolRange = '1H' | '6H' | '24H'
 
@@ -208,7 +208,6 @@ export default function TokenPage() {
   const actTabs: { id: Tab; label: string }[] = [
     { id: 'Activity', label: 'Activity' },
     { id: 'holders', label: holderCount ? `${holderCount} holders` : 'Holders' },
-    { id: 'traders', label: 'Top traders' },
   ]
 
   if (loading && !pool) {
@@ -592,22 +591,6 @@ export default function TokenPage() {
                 </div>
               )}
 
-              {tab === 'traders' && (
-                <div className="px-6 py-10 text-sm text-t3 text-center">
-                  Top-trader leaderboard needs a volume index — coming next.
-                  <p className="mt-3 text-xs">
-                    {pool.launchKind === 'reflection' || pool.reflection
-                      ? 'Reflection'
-                      : pool.launchKind === 'curve'
-                        ? 'Curve'
-                        : 'Instant'}{' '}
-                    · Factory {(pool.moonbagsPackageId || ARC.INSTANT_FACTORY).slice(0, 10)}… ·{' '}
-                    {pool.instantMeta?.uniPool
-                      ? `pool ${pool.instantMeta.uniPool.slice(0, 10)}…`
-                      : 'Uni V3'}
-                  </p>
-                </div>
-              )}
             </div>
           </div>
 
