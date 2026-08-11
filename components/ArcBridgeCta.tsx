@@ -1,8 +1,10 @@
 'use client'
 
 /**
- * Compact "need USDC?" note — static pointer to external on-ramp (no in-app CCTP desk).
+ * Compact "need USDC?" note — points at Arc OTC (Instant OTC desk).
  */
+import Link from 'next/link'
+
 export function ArcBridgeCta({
   compact = false,
   reason = 'Need USDC on Arc?',
@@ -13,7 +15,11 @@ export function ArcBridgeCta({
   if (compact) {
     return (
       <span className="text-[11px] text-t3">
-        Bridge USDC to Arc via Circle CCTP or an exchange.
+        Get USDC via{' '}
+        <Link href="/otc" className="text-lime-t hover:underline">
+          Arc OTC
+        </Link>
+        .
       </span>
     )
   }
@@ -22,8 +28,11 @@ export function ArcBridgeCta({
     <div className="rounded-[18px] border border-lime-line bg-lime-soft px-3 py-2.5">
       <p className="text-xs font-semibold text-lime-t">{reason}</p>
       <p className="text-[11px] text-t2 mt-0.5 leading-relaxed">
-        Bring USDC to Arc mainnet (chain 5042) via Circle CCTP or any exchange that supports Arc
-        withdrawals, then come back to trade.
+        Buy Arc USDC with Base or Arbitrum USDC on{' '}
+        <Link href="/otc" className="text-lime-t font-semibold hover:underline">
+          Arc OTC
+        </Link>
+        — escrowed desk (not Circle CCTP).
       </p>
     </div>
   )

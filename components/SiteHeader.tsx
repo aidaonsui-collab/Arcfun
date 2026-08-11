@@ -12,6 +12,14 @@ import { formatUnits } from 'viem'
 import { BrandMark } from '@/components/BrandMark'
 import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
 
+/** Chains used by Arc launchpad + Arc OTC payment spokes. */
+const SUPPORTED_CHAIN_IDS = new Set([
+  ARC_CHAIN_ID,
+  1, // Ethereum (OTC, when live)
+  8453, // Base
+  42161, // Arbitrum
+])
+
 function short(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
 }
@@ -29,13 +37,14 @@ export function SiteHeader() {
   const { address, isConnected, chainId } = useAccount()
   const { connect, connectors, isPending } = useConnect()
   const { disconnect } = useDisconnect()
-  const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
+  const onArc = isConnected && chainId === ARC_CHAIN_ID
+  const wrongChain = isConnected && chainId != null && !SUPPORTED_CHAIN_IDS.has(chainId)
   const [q, setQ] = useState('')
 
   const { data: bal } = useBalance({
     address,
     chainId: ARC_CHAIN_ID,
-    query: { enabled: !!address && chainId === ARC_CHAIN_ID },
+    query: { enabled: !!address && onArc },
   })
 
   const onSearch = (e: FormEvent) => {
@@ -73,6 +82,13 @@ export function SiteHeader() {
       <div className="flex-1" />
 
       <Link
+        href="/otc"
+        className="hidden sm:inline-flex h-9 items-center px-3 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
+      >
+        Arc OTC
+      </Link>
+
+      <Link
         href="/create"
         className="hidden sm:inline-flex h-9 items-center px-[18px] rounded-xl bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
       >
@@ -105,13 +121,13 @@ export function SiteHeader() {
                 ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
                 : 'border-hair bg-s2 text-white hover:bg-s3'
             }`}
-            title={wrongChain ? 'Wrong network — click to disconnect' : 'Disconnect'}
+            title={wrongChain ? 'Unsupported network — click to disconnect' : 'Disconnect'}
           >
             {wrongChain ? (
               'Wrong network'
             ) : (
               <>
-                <span>{fmtBal(bal?.value)}</span>
+                {onArc ? <span>{fmtBal(bal?.value)}</span> : <span className="text-t3 text-xs">{short(address)}</span>}
                 <span
                   className="w-6 h-6 rounded-lg shrink-0"
                   style={{ background: 'linear-gradient(140deg,#6DB3F2,#1D5FA8)' }}

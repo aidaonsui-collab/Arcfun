@@ -5,15 +5,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { WagmiProvider, createConfig, http, fallback } from 'wagmi'
 import { injected, walletConnect } from 'wagmi/connectors'
+import { base, arbitrum, mainnet } from 'wagmi/chains'
 import { arcChain, ARC_RPC_URLS } from '@/lib/contracts-arc'
 
-// Single site-wide Wagmi config — ArcFun only ever talks to Arc mainnet (5042).
-// - injected(): desktop extensions (MetaMask, Rabby, …) via EIP-6963
-// - walletConnect(): mobile QR/deep-link when NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is set
+// Multi-chain: Arc (launchpad) + Base/ARB/ETH (Arc OTC payment spokes).
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
 
 const wagmiConfig = createConfig({
-  chains: [arcChain],
+  chains: [arcChain, base, arbitrum, mainnet],
   connectors: [
     injected(),
     ...(wcProjectId
@@ -32,11 +31,22 @@ const wagmiConfig = createConfig({
       : []),
   ],
   transports: {
-    // Arc public RPCs rate-limit / reject heavy estimateGas; fallback list softens outages.
     [arcChain.id]:
       ARC_RPC_URLS.length > 1
         ? fallback(ARC_RPC_URLS.map((u) => http(u, { timeout: 20_000 })))
         : http(ARC_RPC_URLS[0] || arcChain.rpcUrls.default.http[0], { timeout: 20_000 }),
+    [base.id]: http(process.env.NEXT_PUBLIC_BASE_RPC || 'https://mainnet.base.org', {
+      timeout: 20_000,
+    }),
+    [arbitrum.id]: http(
+      process.env.NEXT_PUBLIC_ARB_RPC ||
+        process.env.NEXT_PUBLIC_ARBITRUM_RPC ||
+        'https://arb1.arbitrum.io/rpc',
+      { timeout: 20_000 },
+    ),
+    [mainnet.id]: http(process.env.NEXT_PUBLIC_ETH_RPC || 'https://ethereum.publicnode.com', {
+      timeout: 20_000,
+    }),
   },
   ssr: true,
 })

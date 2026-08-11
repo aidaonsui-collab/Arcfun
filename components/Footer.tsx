@@ -18,6 +18,9 @@ export function Footer() {
           . Full supply on Uniswap V3 from block one; launch-token LP fees are auto-burned.
         </p>
         <div className="flex items-center gap-5 font-medium text-t2">
+          <Link href="/otc" className="hover:text-white">
+            Arc OTC
+          </Link>
           <Link href="/create" className="hover:text-white">
             Launch
           </Link>
