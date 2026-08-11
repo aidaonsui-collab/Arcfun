@@ -528,7 +528,7 @@ export default function TokenPage() {
                       </a>
                     )})
                   )}
-                  {(actPage > 0 || (trades?.trades?.length ?? 0) === ACT_PAGE_SIZE) && (
+                  {((trades?.trades?.length ?? 0) > 0 || actPage > 0) && (
                     <div className="flex items-center justify-between pt-3 px-1">
                       <button
                         type="button"
