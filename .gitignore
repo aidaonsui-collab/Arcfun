@@ -11,3 +11,9 @@ node_modules
 next-env.d.ts
 *.tsbuildinfo
 .DS_Store
+
+# Graph / Goldsky subgraph build artifacts
+subgraph/**/node_modules
+subgraph/**/generated
+subgraph/**/build
+subgraph/**/package-lock.json

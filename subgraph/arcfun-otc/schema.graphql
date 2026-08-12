@@ -1,0 +1,50 @@
+# ArcFun Instant OTC — Arc liquidity desk (OfferCreated book)
+
+type OtcOffer @entity(immutable: false) {
+  id: ID! # offerId hex
+  maker: Bytes!
+  sellerPayment: Bytes!
+  premiumBps: Int!
+  """Initial amount at create (USDC 6dp)."""
+  amount: BigInt!
+  """Last known free remaining (updated on Delivered)."""
+  remaining: BigInt!
+  active: Boolean!
+  createdAt: BigInt!
+  createdBlock: BigInt!
+  createdTx: Bytes!
+  updatedAt: BigInt!
+  deliveries: [OtcDelivery!]! @derivedFrom(field: "offer")
+}
+
+type OtcReservation @entity(immutable: false) {
+  id: ID! # reservationId hex
+  offer: OtcOffer!
+  reserver: Bytes!
+  amount: BigInt!
+  expiresAt: BigInt!
+  released: Boolean!
+  createdAt: BigInt!
+  createdBlock: BigInt!
+  createdTx: Bytes!
+}
+
+type OtcDelivery @entity(immutable: true) {
+  id: ID! # fillId hex
+  offer: OtcOffer!
+  recipient: Bytes!
+  amount: BigInt!
+  remainingAfter: BigInt!
+  reservationId: Bytes!
+  createdAt: BigInt!
+  createdBlock: BigInt!
+  createdTx: Bytes!
+}
+
+type DeskStat @entity(immutable: false) {
+  id: ID! # "global"
+  openOffers: Int!
+  totalCreated: Int!
+  totalDelivered: Int!
+  lastUpdated: BigInt!
+}

@@ -1,0 +1,48 @@
+# ArcFun Instant OTC — Arc mainnet liquidity desk
+#
+# Goldsky network slug: arc (mainnet 5042). If deploy rejects the network name,
+# try `arc-mainnet` in this file and redeploy.
+#
+# Deploy:
+#   cd subgraph/arcfun-otc && npm i && npm run codegen && npm run build
+#   goldsky subgraph deploy arcfun-otc/1.0.0 --path .
+#
+# Free Starter = 3 always-on subgraphs. Pause a Robinpad slot if deploy fails:
+#   goldsky subgraph pause robinpad-stable/1.0.0
+
+specVersion: 0.0.4
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum
+    name: RobinOtcLiquidity
+    network: arc
+    source:
+      address: "0xBD06241e272d05449A034abc0cfd558905c4aE3e"
+      abi: RobinOtcLiquidity
+      # Known deploy floor used by ArcFun indexer (see lib/bridge/robin-otc.ts)
+      startBlock: 14000000
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - OtcOffer
+        - OtcReservation
+        - OtcDelivery
+        - DeskStat
+      abis:
+        - name: RobinOtcLiquidity
+          file: ./abis/RobinOtcLiquidity.json
+      eventHandlers:
+        - event: OfferCreated(indexed bytes32,indexed address,address,uint32,uint256)
+          handler: handleOfferCreated
+        - event: OfferCancelled(indexed bytes32,uint256)
+          handler: handleOfferCancelled
+        - event: Reserved(indexed bytes32,indexed bytes32,indexed address,uint256,uint64)
+          handler: handleReserved
+        - event: ReservationReleased(indexed bytes32,uint256)
+          handler: handleReservationReleased
+        - event: Delivered(indexed bytes32,indexed bytes32,indexed address,uint256,uint256,bytes32)
+          handler: handleDelivered
+      file: ./src/liquidity.ts

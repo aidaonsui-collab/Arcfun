@@ -1,0 +1,170 @@
+[
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "name": "offerId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "name": "maker",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "name": "sellerPayment",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "name": "premiumBps",
+        "type": "uint32"
+      },
+      {
+        "indexed": false,
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "OfferCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "name": "offerId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "name": "refunded",
+        "type": "uint256"
+      }
+    ],
+    "name": "OfferCancelled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "name": "reservationId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "name": "offerId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "name": "reserver",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "name": "amount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "name": "expiresAt",
+        "type": "uint64"
+      }
+    ],
+    "name": "Reserved",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "name": "reservationId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "ReservationReleased",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "name": "offerId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "name": "fillId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "name": "recipient",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "name": "amount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "name": "remaining",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "name": "reservationId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "Delivered",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      {
+        "name": "offerId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "offers",
+    "outputs": [
+      {
+        "name": "maker",
+        "type": "address"
+      },
+      {
+        "name": "sellerPayment",
+        "type": "address"
+      },
+      {
+        "name": "premiumBps",
+        "type": "uint32"
+      },
+      {
+        "name": "remaining",
+        "type": "uint256"
+      },
+      {
+        "name": "active",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

@@ -1,6 +1,6 @@
 /**
- * GET  /api/otc/offers — indexed OTC book (fast KV read).
- * POST /api/otc/offers — optimistic ingest after createOffer (keeps UI instant like Unstable).
+ * GET  /api/otc/offers — OTC book (Goldsky preferred → KV indexer fallback).
+ * POST /api/otc/offers — optimistic ingest after createOffer (keeps UI instant).
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { isAddress, type Address, type Hex } from 'viem'
@@ -9,11 +9,38 @@ import { upsertOtcOffer } from '@/lib/arc-indexer/store'
 import { jsonSafe } from '@/lib/json-safe'
 import { ROBIN_OTC_LIQUIDITY, LIQUIDITY_ABI } from '@/lib/bridge/robin-otc'
 import { arcPublicClient } from '@/lib/contracts-arc'
+import {
+  fetchGoldskyOtcOffers,
+  goldskyOtcConfigured,
+} from '@/lib/goldsky-otc'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
+    // Prefer Goldsky when configured (sub-second GraphQL vs KV lag).
+    if (goldskyOtcConfigured()) {
+      const gs = await fetchGoldskyOtcOffers()
+      if (gs !== null) {
+        // Empty book is valid when Goldsky is healthy.
+        return jsonSafe(
+          {
+            ok: true,
+            source: 'goldsky',
+            at: Date.now(),
+            offers: gs,
+          },
+          {
+            headers: {
+              'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
+            },
+          },
+        )
+      }
+      // Fall through to KV on Goldsky failure
+      console.warn('[otc/offers] goldsky miss, falling back to arc-indexer')
+    }
+
     const offers = await getIndexedOtcBook()
     return jsonSafe(
       {
@@ -22,8 +49,11 @@ export async function GET() {
         at: Date.now(),
         offers,
       },
-      // Short cache so create → list feels near-instant after ingest
-      { headers: { 'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15' } },
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
+        },
+      },
     )
   } catch (e) {
     return NextResponse.json(
@@ -40,6 +70,7 @@ export async function GET() {
 /**
  * Body: { offerId: 0x… }
  * Reads live offers() on Arc and upserts into KV so other clients see it without waiting for cron.
+ * Goldsky will catch up via chain events; this keeps create → list instant.
  */
 export async function POST(req: NextRequest) {
   try {
