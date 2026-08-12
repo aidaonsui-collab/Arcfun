@@ -831,32 +831,44 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
                 const available = o.available ?? o.remaining
                 const pending = o.pendingReserved ?? 0n
                 const locked = available <= 0n
+                const tier = premiumTier(o.premiumBps)
+                const hue = makerHue(o.maker)
                 return (
                   <div
                     key={o.offerId}
-                    className={`otc-offer-card${locked ? ' pending' : ''}${o.hasPending ? ' has-pending' : ''}`}
+                    className={`otc-offer-card tier-${tier}${locked ? ' pending' : ''}${o.hasPending ? ' has-pending' : ''}`}
                   >
                     <div className="otc-offer-body">
                       <div className="otc-offer-tag-row">
-                        <div className="otc-offer-tag">Premium</div>
+                        <div className="otc-offer-tag">
+                          <span className={`otc-tier-dot tier-${tier}`} aria-hidden="true" />
+                          Premium
+                        </div>
                         {o.hasPending && (
                           <span className="otc-badge pending">
                             {locked ? 'pending' : 'partial pending'}
                           </span>
                         )}
                       </div>
-                      <div className="otc-offer-premium">{premiumLabel(o.premiumBps)}</div>
-                      <div className="otc-offer-allin">
+                      <div className="otc-offer-stats">
+                        <div className="otc-offer-premium">{premiumLabel(o.premiumBps)}</div>
+                        {o.allInMult != null && (
+                          <div className="otc-offer-allin-stat">
+                            <strong>{o.allInMult.toFixed(2)}×</strong>
+                            <span>all-in</span>
+                          </div>
+                        )}
+                      </div>
+                      <p className="otc-offer-explain">
                         {o.allInMult != null ? (
                           <>
-                            <strong>{o.allInMult.toFixed(2)}×</strong> all-in — you pay{' '}
-                            {o.allInMult.toFixed(2)} USDC per 1 USDC received, premium +{' '}
-                            {effectiveFeeBps / 100}% platform fee.
+                            Pay {o.allInMult.toFixed(2)} USDC per 1 USDC received — premium +{' '}
+                            {effectiveFeeBps / 100}% fee.
                           </>
                         ) : (
                           <>Premium + {feeBps / 100}% platform fee at fill.</>
                         )}
-                      </div>
+                      </p>
                       <div className="otc-offer-rows">
                         <div className="otc-offer-row">
                           <span className="lbl">Available</span>
@@ -872,7 +884,14 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
                         )}
                         <div className="otc-offer-row">
                           <span className="lbl">Maker</span>
-                          <span className="otc-maker-chip">{short(o.maker)}</span>
+                          <span className="otc-maker-chip">
+                            <span
+                              className="otc-maker-dot"
+                              aria-hidden="true"
+                              style={{ background: `hsl(${hue}, 65%, 55%)` }}
+                            />
+                            {short(o.maker)}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -882,7 +901,7 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
                       </button>
                     ) : (
                       <button type="button" className="otc-offer-buy" onClick={() => openFill(o)}>
-                        Buy USDC on Arc
+                        Fill this offer <span aria-hidden="true">→</span>
                       </button>
                     )}
                   </div>
@@ -1242,6 +1261,28 @@ function FillStepRow({
       </span>
     </li>
   )
+}
+
+/**
+ * Cheap / mid / rich premium bucket — purely a visual signal (colored accent on the offer card)
+ * so a scanning eye can spot the good deals without reading every number. Breakpoints are a
+ * starting guess tuned to what the desk has actually listed so far (mostly 13-20%); revisit if the
+ * distribution shifts once more makers post.
+ */
+function premiumTier(premiumBps: number): 'cheap' | 'mid' | 'rich' {
+  if (premiumBps < 1000) return 'cheap'
+  if (premiumBps <= 2000) return 'mid'
+  return 'rich'
+}
+
+/** Deterministic hue from an address — gives each maker a small color identity on their offer
+ *  card instead of every maker looking identical, without needing any new data. */
+function makerHue(addr: string): number {
+  let h = 0
+  for (let i = 0; i < addr.length; i++) {
+    h = (h * 31 + addr.charCodeAt(i)) >>> 0
+  }
+  return h % 360
 }
 
 function formatUsdCompact(raw: bigint): string {
