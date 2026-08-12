@@ -37,7 +37,7 @@ const ZERO_BYTES32 =
 export type OtcKeeperTickResult = {
   spoke: string
   fillId: string
-  action: 'skip' | 'locked' | 'delivered' | 'settled' | 'error'
+  action: 'skip' | 'locked' | 'delivered' | 'settled' | 'released' | 'error'
   detail?: string
   txHash?: string
 }
@@ -179,6 +179,15 @@ const liquidityAbi = [
     ],
     outputs: [],
   },
+  {
+    // Per RobinOtcLiquidity.sol: "Reserver anytime; anyone after expiry." — the keeper wallet
+    // needs no special role to call this, same as any wallet would.
+    type: 'function',
+    name: 'releaseReservation',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'reservationId', type: 'bytes32' }],
+    outputs: [],
+  },
 ] as const
 
 const fillCreatedEvent = parseAbiItem(
@@ -285,7 +294,80 @@ export async function runOtcKeeperTick(opts?: {
             args: [fillId],
           })
           const status = Number(fill[9])
+          const reservationId = fill[10] as Hex
+
+          const arcDelivered = async (): Promise<boolean> => {
+            try {
+              return await arcPub.readContract({
+                address: liquidity,
+                abi: liquidityAbi,
+                functionName: 'delivered',
+                args: [fillId],
+              })
+            } catch {
+              return false
+            }
+          }
+
+          /**
+           * Recover the maker's Arc liquidity from a reservation that can never be delivered
+           * against — either because it already expired, or because the payment side is done
+           * (Settled/Refunded) and no further deliver() attempt will ever happen for this fillId.
+           * releaseReservation() needs no special role once expired ("Reserver anytime; anyone
+           * after expiry" — RobinOtcLiquidity.sol) and is a no-op-safe call: it reverts harmlessly
+           * if the reservation is already consumed/released, which safeReleaseReservation treats
+           * as success rather than an error.
+           *
+           * Found live 2026-08-12: two real fills (0x1e47a8e7…, 0x13ae3cd3…) reached Settled with
+           * delivered()==false — the old code path skipped Settled fills outright (never checked
+           * their reservation at all), so 2.0 USDC of maker liquidity sat locked indefinitely with
+           * nothing ever recovering it. This closes that gap for both the already-terminal case
+           * (checked below, before the status skip) and the in-flight case (called from the
+           * reservationExpired branches further down, so a fill that expires mid-flight gets its
+           * reservation released in the same tick its payment side gets unlocked for refund).
+           */
+          const safeReleaseReservation = async (reason: string) => {
+            if (!reservationId || reservationId.toLowerCase() === ZERO_BYTES32) return
+            if (dryRun) {
+              results.push({ spoke: spoke.id, fillId, action: 'released', detail: `dry-run: ${reason}` })
+              return
+            }
+            try {
+              const hash = await arcWallet.writeContract({
+                account,
+                chain: arcWallet.chain,
+                address: liquidity,
+                abi: liquidityAbi,
+                functionName: 'releaseReservation',
+                args: [reservationId],
+                gas: 120_000n,
+              })
+              await waitReceipt(arcPub as PublicClient, hash, 'releaseReservation')
+              results.push({ spoke: spoke.id, fillId, action: 'released', detail: reason, txHash: hash })
+            } catch (relErr) {
+              const relMsg = relErr instanceof Error ? relErr.message : String(relErr)
+              // "done" (already consumed/released) or "not allowed" (not yet expired) are expected
+              // outcomes of a permissionless sweep racing another caller or the TTL — not failures.
+              if (/done|not allowed/i.test(relMsg)) return
+              results.push({
+                spoke: spoke.id,
+                fillId,
+                action: 'error',
+                detail: `${reason} — releaseReservation failed: ${relMsg.slice(0, 160)}`,
+              })
+            }
+          }
+
           if (status === FILL_STATUS.Settled || status === FILL_STATUS.Refunded) {
+            // Settled-without-delivery is the dangerous case this fix targets — sweep it before
+            // skipping. Refunded fills never reserved successfully consumed inventory either way,
+            // but check the same path since it costs one extra read, not a new code path.
+            if (status === FILL_STATUS.Settled && reservationId && reservationId.toLowerCase() !== ZERO_BYTES32) {
+              const delivered = await arcDelivered()
+              if (!delivered) {
+                await safeReleaseReservation(`status=Settled but Arc delivered=false — recovering stale reservation`)
+              }
+            }
             results.push({ spoke: spoke.id, fillId, action: 'skip', detail: `status=${status}` })
             continue
           }
@@ -299,7 +381,6 @@ export async function runOtcKeeperTick(opts?: {
           const destRecipient = fill[3] as Address
           const sellerPayment = fill[4] as Address
           const premiumBps = Number(fill[5])
-          const reservationId = fill[10] as Hex
           if (!reservationId || reservationId.toLowerCase() === ZERO_BYTES32) {
             results.push({
               spoke: spoke.id,
@@ -308,19 +389,6 @@ export async function runOtcKeeperTick(opts?: {
               detail: 'fill missing reservationId (old payment contract?)',
             })
             continue
-          }
-
-          const arcDelivered = async (): Promise<boolean> => {
-            try {
-              return await arcPub.readContract({
-                address: liquidity,
-                abi: liquidityAbi,
-                functionName: 'delivered',
-                args: [fillId],
-              })
-            } catch {
-              return false
-            }
           }
 
           const safeUnlock = async (reason: string) => {
@@ -384,8 +452,10 @@ export async function runOtcKeeperTick(opts?: {
               // fall through to settle gate
             } else if (status === FILL_STATUS.Locked && !dryRun) {
               await safeUnlock('reservation expired on Arc before deliver')
+              await safeReleaseReservation('reservation expired on Arc before deliver')
               continue
             } else {
+              await safeReleaseReservation('reservation expired on Arc — buyer can refund after delay')
               results.push({
                 spoke: spoke.id,
                 fillId,
@@ -449,6 +519,7 @@ export async function runOtcKeeperTick(opts?: {
                 const simMsg = simErr instanceof Error ? simErr.message : String(simErr)
                 if (/expired|released|reservation/i.test(simMsg)) {
                   await safeUnlock(`deliver would revert: ${simMsg.slice(0, 160)}`)
+                  await safeReleaseReservation(`deliver would revert: ${simMsg.slice(0, 160)}`)
                   continue
                 }
               }
@@ -475,6 +546,7 @@ export async function runOtcKeeperTick(opts?: {
               if (!already) {
                 // CRITICAL: old bug was setting already=true after any receipt without status check
                 await safeUnlock('deliver tx mined but delivered[] still false (or reverted)')
+                await safeReleaseReservation('deliver tx mined but delivered[] still false (or reverted)')
                 continue
               }
               results.push({ spoke: spoke.id, fillId, action: 'delivered', txHash: hash })
@@ -492,6 +564,7 @@ export async function runOtcKeeperTick(opts?: {
                 already = true
               } else {
                 await safeUnlock(`deliver failed: ${deliverMsg.slice(0, 200)}`)
+                await safeReleaseReservation(`deliver failed: ${deliverMsg.slice(0, 200)}`)
                 continue
               }
             }
