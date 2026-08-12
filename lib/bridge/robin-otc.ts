@@ -673,19 +673,49 @@ export async function fetchRecentFills(opts?: {
               ...(opts?.buyer ? { args: { buyer: opts.buyer } } : {}),
             })
 
-            for (const log of logs) {
-              const fillId = log.args.fillId as Hex
-              if (!fillId) continue
-              const sk = `${chain.id}:${fillId.toLowerCase()}`
-              if (seen.has(sk)) continue
-              seen.add(sk)
-              try {
-                const row = await client.readContract({
+            // Batch the per-fill `fills()` reads via multicall instead of one sequential
+            // readContract per log. Found live 2026-08-12: a buyer filled successfully (settled
+            // on-chain, Arc-delivered) within seconds of checking "My orders" and it didn't show —
+            // most likely explanation is exactly this loop: N fills in a chunk meant N sequential
+            // round trips against a public RPC (mainnet.base.org) that already warns about 429s
+            // under polling in this file's other comments. allowFailure:true keeps the existing
+            // per-fill "skip on error" behavior — one bad fillId can't drop the whole batch.
+            const newIds = logs
+              .map((log) => log.args.fillId as Hex | undefined)
+              .filter((fillId): fillId is Hex => {
+                if (!fillId) return false
+                const sk = `${chain.id}:${fillId.toLowerCase()}`
+                if (seen.has(sk)) return false
+                seen.add(sk)
+                return true
+              })
+            if (newIds.length > 0) {
+              const results = await client.multicall({
+                contracts: newIds.map((fillId) => ({
                   address: chain.payment,
                   abi: PAYMENT_ABI,
-                  functionName: 'fills',
-                  args: [fillId],
-                })
+                  functionName: 'fills' as const,
+                  args: [fillId] as const,
+                })),
+                allowFailure: true,
+              })
+              for (let i = 0; i < newIds.length; i++) {
+                const fillId = newIds[i]
+                const r = results[i]
+                if (r.status !== 'success') continue
+                const row = r.result as readonly [
+                  Address,
+                  Hex,
+                  bigint,
+                  Address,
+                  Address,
+                  number,
+                  bigint,
+                  bigint,
+                  bigint,
+                  number,
+                  Hex,
+                ]
                 const status = Number(row[9]) as 0 | 1 | 2 | 3 | 4
                 if (opts?.status != null && status !== opts.status) continue
                 if (opts?.buyer && (row[0] as string).toLowerCase() !== opts.buyer.toLowerCase()) continue
@@ -710,8 +740,6 @@ export async function fetchRecentFills(opts?: {
                   refundDelaySec: refundDelay,
                   reservationId: (row[10] as Hex | undefined) ?? undefined,
                 })
-              } catch {
-                /* skip fill */
               }
             }
           } catch {
