@@ -459,6 +459,23 @@ export async function fetchOtcDeskStats(opts?: {
           return
         }
 
+        // Found live 2026-08-12: cursor[key] used to be set to `latest` unconditionally after
+        // this loop, even when every getContractEvents chunk below had thrown (public Base/ARB
+        // RPCs rate-limit under the polling this panel now does every 8-12s). A cursor that
+        // advances past a range it never actually read back means any FillSettled in that window
+        // is gone for good — the cursor never revisits it — so "Settled trades"/"Volume" silently
+        // stop moving on a transient RPC hiccup while the offer's real on-chain "Available" balance
+        // (a separate, server-indexed path) keeps updating fine.
+        //
+        // Fix accumulates into LOCAL totals for this pass only, and only merges them into the
+        // shared running totals (and advances the cursor) if every chunk in the pass succeeded.
+        // A partial pass — some chunks ok, one rate-limited — discards its local totals entirely
+        // rather than merging the successful chunks: the cursor stays put either way, so the next
+        // call re-scans this whole range from scratch, and merging the partial totals first would
+        // double-count whatever those already-successful chunks found on that retry.
+        let allChunksOk = true
+        let passTrades = 0
+        let passVolume = 0n
         let to = latest
         while (to >= fromStart) {
           const from = to >= chunkSize ? to - chunkSize + 1n : fromStart
@@ -474,18 +491,22 @@ export async function fetchOtcDeskStats(opts?: {
             for (const log of logs) {
               const proceeds = (log.args.proceeds as bigint) ?? 0n
               const fee = (log.args.fee as bigint) ?? 0n
-              settledTrades += 1
-              volumeUsdc += proceeds + fee
+              passTrades += 1
+              passVolume += proceeds + fee
             }
           } catch {
-            /* chunk fail — skip */
+            allChunksOk = false
           }
           if (rangeFrom <= fromStart) break
           to = rangeFrom - 1n
         }
-        cursor[key] = latest.toString()
+        if (allChunksOk) {
+          settledTrades += passTrades
+          volumeUsdc += passVolume
+          cursor[key] = latest.toString()
+        }
       } catch {
-        /* chain fail */
+        /* chain fail — cursor untouched, retried next call */
       }
     }),
   )
