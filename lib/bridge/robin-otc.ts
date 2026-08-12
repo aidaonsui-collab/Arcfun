@@ -242,6 +242,8 @@ export type OtcFill = {
   explorer: string
   refundDelaySec?: number
   reservationId?: Hex
+  /** Arc liquidity delivered[fillId] — false with status=settled means bad path (maker paid, no Arc credit). */
+  arcDelivered?: boolean
 }
 
 const FILL_STATUS_LABEL: Record<number, OtcFillStatus> = {
@@ -725,6 +727,32 @@ export async function fetchRecentFills(opts?: {
   )
 
   out.sort((a, b) => b.createdAt - a.createdAt)
+
+  // Enrich settled fills with Arc delivered[] so UI does not claim "Arc USDC delivered" falsely.
+  if (out.some((f) => f.status === 3)) {
+    try {
+      const arc = arcClient()
+      await Promise.all(
+        out
+          .filter((f) => f.status === 3)
+          .map(async (f) => {
+            try {
+              f.arcDelivered = (await arc.readContract({
+                address: ROBIN_OTC_LIQUIDITY,
+                abi: LIQUIDITY_ABI,
+                functionName: 'delivered',
+                args: [f.fillId],
+              })) as boolean
+            } catch {
+              f.arcDelivered = undefined
+            }
+          }),
+      )
+    } catch {
+      /* optional */
+    }
+  }
+
   return out
 }
 

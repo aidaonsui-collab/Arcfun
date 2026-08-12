@@ -24,7 +24,8 @@ export async function GET(req: NextRequest) {
 
   const dryRun = process.env.ARC_OTC_KEEPER_LIVE === '0'
   try {
-    const out = await runOtcKeeperTick({ dryRun, lookbackBlocks: 8_000n })
+    // Cap lookback at 9k — Base public RPC eth_getLogs limit is 10k; keeper chunks further.
+    const out = await runOtcKeeperTick({ dryRun, lookbackBlocks: 9_000n })
     if (!out.ok) {
       console.error('[keeper/otc]', out.error)
       return NextResponse.json({ ...out, ok: false }, { status: 500 })

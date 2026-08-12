@@ -2,24 +2,18 @@
  * Arc OTC desk keeper — settles Instant OTC fills (Base/ARB/ETH → Arc), on a schedule (see
  * app/api/arc/keeper/otc/route.ts + vercel.json cron).
  *
- * Ported from Robinpad's `lib/bridge/robin-otc-keeper-core.ts` (2026-08-12) — ArcFun's OTC panel
- * (app/otc) shares the exact same on-chain contracts as Robinpad (same liquidity escrow, same
- * Base/ARB payment escrows — see lib/bridge/robin-otc.ts's OTC_DEFAULTS), so this is a second,
- * independent keeper against the SAME contracts, not a separate desk. Found live 2026-08-12:
- * Robinpad's own keeper cron (runs every minute) had been 500ing on every tick for 25+ minutes
- * straight after working fine right before that — a buyer's fill sat stuck `pending` the whole
- * time with nothing settling it. Running ArcFun's own copy means a single keeper going down
- * doesn't leave every fill (from either frontend) stuck until someone notices.
+ * Flow per fill (v4 payment = reserve + lock):
+ *   1. lock() on payment (blocks self-refund) BEFORE Arc
+ *   2. deliver(..., reservationId) on Arc liquidity — must succeed on-chain
+ *   3. settle() on payment ONLY if Arc delivered[fillId] is true
  *
- * Flow per fill (v4 payment contract = reserve + lock):
- *   1. lock() on the payment escrow (blocks self-refund) BEFORE touching Arc
- *   2. deliver(..., reservationId) on the Arc liquidity contract
- *   3. settle() on the payment escrow
- *
- * If deliver() fails, re-check Arc `delivered[fillId]` before ever calling unlock() — never
- * unlock a fill Arc already paid out (that would reopen the double-spend/refund race the
- * lock-before-deliver ordering exists to close). Per-fill try/catch so one bad fill can't abort
- * the whole spoke, and per-spoke try/catch so one broken payment chain can't abort the others.
+ * Hardening (2026-08-12, after live loss path: deliver reverted `expired` but settle still ran):
+ *   - NEVER settle unless Arc delivered[] is true (re-read after deliver tx)
+ *   - Reject deliver receipts with status !== success (old code treated any mined hash as success)
+ *   - Receipt timeouts (no infinite hang past reservation TTL)
+ *   - Chunked getLogs ≤9k (Base public RPC limit)
+ *   - Pre-check reservation expiry; unlock for refund instead of settle
+ *   - Simulate deliver when possible
  */
 import {
   createPublicClient,
@@ -158,6 +152,20 @@ const liquidityAbi = [
   },
   {
     type: 'function',
+    name: 'reservations',
+    stateMutability: 'view',
+    inputs: [{ name: 'reservationId', type: 'bytes32' }],
+    outputs: [
+      { name: 'offerId', type: 'bytes32' },
+      { name: 'reserver', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'expiresAt', type: 'uint64' },
+      { name: 'consumed', type: 'bool' },
+      { name: 'released', type: 'bool' },
+    ],
+  },
+  {
+    type: 'function',
     name: 'deliver',
     stateMutability: 'nonpayable',
     inputs: [
@@ -177,6 +185,22 @@ const fillCreatedEvent = parseAbiItem(
   'event FillCreated(bytes32 indexed fillId, address indexed buyer, bytes32 indexed offerId, uint256 destAmount, address destRecipient, address sellerPayment, uint32 premiumBps, uint256 sellerProceeds, uint256 serviceFee, bytes32 reservationId)',
 )
 
+const LOG_CHUNK = 9_000n
+const MAX_LOOKBACK = 9_000n
+const RECEIPT_TIMEOUT_MS = 90_000
+const RPC_HTTP_TIMEOUT_MS = 25_000
+
+async function waitReceipt(client: PublicClient, hash: Hex, label: string): Promise<void> {
+  const receipt = await client.waitForTransactionReceipt({
+    hash,
+    timeout: RECEIPT_TIMEOUT_MS,
+    pollingInterval: 2_000,
+  })
+  if (receipt.status !== 'success') {
+    throw new Error(`${label} tx reverted: ${hash}`)
+  }
+}
+
 export async function runOtcKeeperTick(opts?: {
   lookbackBlocks?: bigint
   dryRun?: boolean
@@ -188,7 +212,8 @@ export async function runOtcKeeperTick(opts?: {
   results: OtcKeeperTickResult[]
   error?: string
 }> {
-  const lookback = opts?.lookbackBlocks ?? 8_000n
+  const rawLookback = opts?.lookbackBlocks ?? 8_000n
+  const lookback = rawLookback > MAX_LOOKBACK ? MAX_LOOKBACK : rawLookback
   const dryRun = opts?.dryRun === true
 
   const pk = (process.env.ARC_OTC_KEEPER_KEY || process.env.ROBIN_OTC_KEEPER_KEY || '').trim()
@@ -203,8 +228,6 @@ export async function runOtcKeeperTick(opts?: {
   const key = (pk.startsWith('0x') ? pk : `0x${pk}`) as Hex
   const account = privateKeyToAccount(key)
 
-  // Reuse ArcFun's own hardened Arc RPC client (multi-endpoint fallback with correct 5xx/infra
-  // error classification — see lib/contracts-arc.ts) instead of building a fresh one inline.
   const arcPub = arcPublicClient()
   const arcWallet = arcServerWalletClient(key)
   const liquidity = ROBIN_OTC_LIQUIDITY
@@ -213,27 +236,47 @@ export async function runOtcKeeperTick(opts?: {
 
   for (const spoke of spokes) {
     try {
-      const pub = createPublicClient({ chain: spoke.chain, transport: http(spoke.rpc) }) as PublicClient
+      const spokeHttp = http(spoke.rpc, { timeout: RPC_HTTP_TIMEOUT_MS })
+      const pub = createPublicClient({
+        chain: spoke.chain,
+        transport: spokeHttp,
+      }) as PublicClient
       const wallet = createWalletClient({
         account,
         chain: spoke.chain,
-        transport: http(spoke.rpc),
+        transport: spokeHttp,
       }) as WalletClient
 
       const latest = await pub.getBlockNumber()
       const from = latest > lookback ? latest - lookback : 0n
-      const logs = await pub.getLogs({
-        address: spoke.payment,
-        event: fillCreatedEvent,
-        fromBlock: from,
-        toBlock: latest,
-      })
+      const logs: Awaited<ReturnType<typeof pub.getLogs>> = []
+      for (let cursor = from; cursor <= latest; ) {
+        const to = cursor + LOG_CHUNK - 1n > latest ? latest : cursor + LOG_CHUNK - 1n
+        try {
+          const part = await pub.getLogs({
+            address: spoke.payment,
+            event: fillCreatedEvent,
+            fromBlock: cursor,
+            toBlock: to,
+          })
+          logs.push(...part)
+        } catch (logErr) {
+          results.push({
+            spoke: spoke.id,
+            fillId: '',
+            action: 'error',
+            detail: `getLogs ${cursor}-${to}: ${logErr instanceof Error ? logErr.message : String(logErr)}`,
+          })
+        }
+        if (to === latest) break
+        cursor = to + 1n
+      }
 
       for (const log of logs) {
-        const fillId = log.args.fillId as Hex
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const fillId = (log as any).args?.fillId as Hex | undefined
         if (!fillId) continue
 
-        // Isolate each fill so one failure cannot abort the spoke.
         try {
           const fill = await pub.readContract({
             address: spoke.payment,
@@ -267,7 +310,93 @@ export async function runOtcKeeperTick(opts?: {
             continue
           }
 
-          // 1) lock BEFORE Arc — closes refund-after-deliver race
+          const arcDelivered = async (): Promise<boolean> => {
+            try {
+              return await arcPub.readContract({
+                address: liquidity,
+                abi: liquidityAbi,
+                functionName: 'delivered',
+                args: [fillId],
+              })
+            } catch {
+              return false
+            }
+          }
+
+          const safeUnlock = async (reason: string) => {
+            try {
+              const unlockHash = await wallet.writeContract({
+                account,
+                chain: spoke.chain,
+                address: spoke.payment,
+                abi: paymentAbi,
+                functionName: 'unlock',
+                args: [fillId],
+                gas: 100_000n,
+              })
+              await waitReceipt(pub, unlockHash, 'unlock')
+              results.push({
+                spoke: spoke.id,
+                fillId,
+                action: 'error',
+                detail: `${reason} — unlocked for buyer refund`,
+                txHash: unlockHash,
+              })
+            } catch (unlockErr) {
+              const unlockMsg = unlockErr instanceof Error ? unlockErr.message : String(unlockErr)
+              results.push({
+                spoke: spoke.id,
+                fillId,
+                action: 'error',
+                detail: `${reason} — unlock FAILED (stuck Locked): ${unlockMsg}`,
+              })
+            }
+          }
+
+          // Pre-check Arc reservation expiry before locking/delivering
+          let reservationExpired = false
+          try {
+            const r = await arcPub.readContract({
+              address: liquidity,
+              abi: liquidityAbi,
+              functionName: 'reservations',
+              args: [reservationId],
+            })
+            const expiresAt = Number(
+              (r as { expiresAt?: bigint | number }).expiresAt ?? (Array.isArray(r) ? r[3] : 0),
+            )
+            const consumed = Boolean(
+              (r as { consumed?: boolean }).consumed ?? (Array.isArray(r) ? r[4] : false),
+            )
+            const released = Boolean(
+              (r as { released?: boolean }).released ?? (Array.isArray(r) ? r[5] : false),
+            )
+            const now = Math.floor(Date.now() / 1000)
+            if (released || consumed || (expiresAt > 0 && now >= expiresAt)) {
+              reservationExpired = true
+            }
+          } catch {
+            /* continue; deliver will revert if bad */
+          }
+
+          if (reservationExpired) {
+            if (await arcDelivered()) {
+              // fall through to settle gate
+            } else if (status === FILL_STATUS.Locked && !dryRun) {
+              await safeUnlock('reservation expired on Arc before deliver')
+              continue
+            } else {
+              results.push({
+                spoke: spoke.id,
+                fillId,
+                action: 'error',
+                detail: 'reservation expired on Arc — NOT settling; buyer can refund after delay',
+              })
+              continue
+            }
+          }
+
+          // 1) lock BEFORE Arc
           if (status === FILL_STATUS.Pending) {
             if (dryRun) {
               results.push({ spoke: spoke.id, fillId, action: 'locked', detail: 'dry-run lock' })
@@ -281,18 +410,13 @@ export async function runOtcKeeperTick(opts?: {
                 args: [fillId],
                 gas: 100_000n,
               })
-              await pub.waitForTransactionReceipt({ hash: lockHash })
+              await waitReceipt(pub, lockHash, 'lock')
               results.push({ spoke: spoke.id, fillId, action: 'locked', txHash: lockHash })
             }
           }
 
-          // 2) Arc deliver (if not already)
-          let already = await arcPub.readContract({
-            address: liquidity,
-            abi: liquidityAbi,
-            functionName: 'delivered',
-            args: [fillId],
-          })
+          // 2) Arc deliver
+          let already = await arcDelivered()
 
           if (!already) {
             if (dryRun) {
@@ -300,77 +424,89 @@ export async function runOtcKeeperTick(opts?: {
                 spoke: spoke.id,
                 fillId,
                 action: 'delivered',
-                detail: `dry-run deliver amount=${destAmount} reserve=${reservationId.slice(0, 10)}…`,
+                detail: `dry-run deliver amount=${destAmount}`,
               })
               continue
             }
             try {
+              try {
+                await arcPub.simulateContract({
+                  account,
+                  address: liquidity,
+                  abi: liquidityAbi,
+                  functionName: 'deliver',
+                  args: [
+                    offerId,
+                    fillId,
+                    destAmount,
+                    destRecipient,
+                    sellerPayment,
+                    premiumBps,
+                    reservationId,
+                  ],
+                })
+              } catch (simErr) {
+                const simMsg = simErr instanceof Error ? simErr.message : String(simErr)
+                if (/expired|released|reservation/i.test(simMsg)) {
+                  await safeUnlock(`deliver would revert: ${simMsg.slice(0, 160)}`)
+                  continue
+                }
+              }
+
               const hash = await arcWallet.writeContract({
                 account,
                 chain: arcWallet.chain,
                 address: liquidity,
                 abi: liquidityAbi,
                 functionName: 'deliver',
-                args: [offerId, fillId, destAmount, destRecipient, sellerPayment, premiumBps, reservationId],
+                args: [
+                  offerId,
+                  fillId,
+                  destAmount,
+                  destRecipient,
+                  sellerPayment,
+                  premiumBps,
+                  reservationId,
+                ],
                 gas: 300_000n,
               })
-              await arcPub.waitForTransactionReceipt({ hash })
-              results.push({ spoke: spoke.id, fillId, action: 'delivered', txHash: hash })
-              already = true
-            } catch (deliverErr) {
-              const deliverMsg = deliverErr instanceof Error ? deliverErr.message : String(deliverErr)
-
-              // Safe unlock: only if Arc did NOT pay (re-read delivered).
-              let arcPaid = false
-              try {
-                arcPaid = await arcPub.readContract({
-                  address: liquidity,
-                  abi: liquidityAbi,
-                  functionName: 'delivered',
-                  args: [fillId],
-                })
-              } catch {
-                /* treat as unknown — do not unlock */
+              await waitReceipt(arcPub as PublicClient, hash, 'deliver')
+              already = await arcDelivered()
+              if (!already) {
+                // CRITICAL: old bug was setting already=true after any receipt without status check
+                await safeUnlock('deliver tx mined but delivered[] still false (or reverted)')
+                continue
               }
-
+              results.push({ spoke: spoke.id, fillId, action: 'delivered', txHash: hash })
+            } catch (deliverErr) {
+              const deliverMsg =
+                deliverErr instanceof Error ? deliverErr.message : String(deliverErr)
+              const arcPaid = await arcDelivered()
               if (arcPaid) {
                 results.push({
                   spoke: spoke.id,
                   fillId,
                   action: 'error',
-                  detail: `deliver reported error but Arc delivered=true — NOT unlocking (retry settle): ${deliverMsg}`,
+                  detail: `deliver error but Arc delivered=true — will settle: ${deliverMsg.slice(0, 120)}`,
                 })
-                // fall through to settle attempt
+                already = true
               } else {
-                try {
-                  const unlockHash = await wallet.writeContract({
-                    account,
-                    chain: spoke.chain,
-                    address: spoke.payment,
-                    abi: paymentAbi,
-                    functionName: 'unlock',
-                    args: [fillId],
-                    gas: 100_000n,
-                  })
-                  await pub.waitForTransactionReceipt({ hash: unlockHash })
-                  results.push({
-                    spoke: spoke.id,
-                    fillId,
-                    action: 'error',
-                    detail: `deliver failed, unlocked for refund: ${deliverMsg}`,
-                  })
-                } catch (unlockErr) {
-                  const unlockMsg = unlockErr instanceof Error ? unlockErr.message : String(unlockErr)
-                  results.push({
-                    spoke: spoke.id,
-                    fillId,
-                    action: 'error',
-                    detail: `deliver failed AND unlock failed — stuck Locked, needs owner.unlock(): ${deliverMsg} / ${unlockMsg}`,
-                  })
-                }
+                await safeUnlock(`deliver failed: ${deliverMsg.slice(0, 200)}`)
                 continue
               }
             }
+          }
+
+          // 3) SETTLE — hard gate: Arc must show delivered
+          const paidOnArc = already || (await arcDelivered())
+          if (!paidOnArc) {
+            results.push({
+              spoke: spoke.id,
+              fillId,
+              action: 'error',
+              detail: 'REFUSING settle — Arc delivered=false (would pay maker without buyer Arc USDC)',
+            })
+            continue
           }
 
           if (dryRun) {
@@ -378,7 +514,6 @@ export async function runOtcKeeperTick(opts?: {
             continue
           }
 
-          // 3) settle payment
           const sh = await wallet.writeContract({
             account,
             chain: spoke.chain,
@@ -388,7 +523,7 @@ export async function runOtcKeeperTick(opts?: {
             args: [fillId],
             gas: 200_000n,
           })
-          await pub.waitForTransactionReceipt({ hash: sh })
+          await waitReceipt(pub, sh, 'settle')
           results.push({ spoke: spoke.id, fillId, action: 'settled', txHash: sh })
         } catch (e) {
           results.push({

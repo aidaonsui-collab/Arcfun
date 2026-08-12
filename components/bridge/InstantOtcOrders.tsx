@@ -489,8 +489,17 @@ function FillCard({
           unlocks, or settle completes.
         </p>
       )}
-      {fill.status === 3 && (
+      {fill.status === 3 && fill.arcDelivered === true && (
         <p className="otc-order-hint">Settled — maker paid, Arc USDC delivered.</p>
+      )}
+      {fill.status === 3 && fill.arcDelivered === false && (
+        <p className="otc-order-hint" style={{ color: 'var(--coral, #ff7a62)' }}>
+          Settled on payment chain only — Arc delivery did not complete. Contact support for
+          make-good; refund is not available after settle.
+        </p>
+      )}
+      {fill.status === 3 && fill.arcDelivered == null && (
+        <p className="otc-order-hint">Settled on payment chain (verifying Arc delivery…).</p>
       )}
       {fill.status === 4 && (
         <p className="otc-order-hint">Refunded — escrow returned to buyer.</p>
