@@ -10,6 +10,7 @@ import {
   useDisconnect,
   useSwitchChain,
   useWriteContract,
+  useSignTypedData,
   usePublicClient,
 } from 'wagmi'
 import { isAddress, type Address } from 'viem'
@@ -35,7 +36,8 @@ import {
   fetchOtcDeskStats,
   OTC_DEFAULT_FEE_BPS,
   OTC_ROBIN_FEE_BPS,
-  OTC_RESERVE_TTL_SEC,
+  RESERVE_AUTH_TYPES,
+  reserveAuthDomain,
   encodeEventTopics,
   type OtcOffer,
   type OtcPaymentChain,
@@ -51,6 +53,7 @@ export function InstantOtcPanel() {
   const { disconnect } = useDisconnect()
   const { switchChainAsync } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
+  const { signTypedDataAsync } = useSignTypedData()
 
   const paymentOptions = useMemo(() => livePaymentChains(), [])
   const [payId, setPayId] = useState<OtcPaymentChainId>(() => defaultPaymentChainId())
@@ -82,6 +85,9 @@ export function InstantOtcPanel() {
   const [sellerPayment, setSellerPayment] = useState('')
   const [busy, setBusy] = useState(false)
   const [deskStats, setDeskStats] = useState<OtcDeskStats>({ settledTrades: 0, volumeUsdc: 0n })
+  /** Buy-flow progress for the step list in the fill modal — 'sign' is a free EIP-712
+   *  authorization (see onFill), 'approve'/'confirm' are the two real on-chain signatures. */
+  const [fillStep, setFillStep] = useState<'idle' | 'sign' | 'approve' | 'confirm' | 'done'>('idle')
 
   const enabled = robinOtcEnabled()
   const openDepth = useMemo(() => sumOfferDepth(offers), [offers])
@@ -289,6 +295,7 @@ export function InstantOtcPanel() {
     setRecipientConfirmed(false)
     setStatus(null)
     setErr(null)
+    setFillStep('idle')
   }
 
   const makeArcPublicClient = async () => {
@@ -320,40 +327,55 @@ export function InstantOtcPanel() {
     setStatus(null)
     setBusy(true)
     let reservationId: Hex | null = null
-    let arcPub: Awaited<ReturnType<typeof makeArcPublicClient>> | null = null
     try {
       const dest = parseUsdc6(destAmt)
       const cap = selected.available ?? selected.remaining
       if (dest > cap) throw new Error('Amount exceeds free inventory on this offer')
 
-      // 1) Hard-reserve free Arc inventory so concurrent fills cannot over-subscribe.
-      setStatus('Switch to Arc & reserve inventory…')
-      await ensureArc()
-      arcPub = await makeArcPublicClient()
+      // 1) Free EIP-712 authorization — no gas, no Arc network switch. The keeper wallet submits
+      // the actual Arc reserve() from this (see app/api/otc/reserve/route.ts), so the same
+      // on-chain hard-reserve anti-oversell protection still runs before payment; the buyer just
+      // doesn't have to sign that specific transaction themselves. Cuts the buyer's real on-chain
+      // signatures from 3 (reserve + approve + fill) to 2 (approve + fill), matching what
+      // competitor desks like unstabletrade.com do in a single payment-chain tx.
+      setFillStep('sign')
+      setStatus('Sign to reserve inventory (free — no gas, no network switch)…')
+      const saltBytes = crypto.getRandomValues(new Uint8Array(32))
+      const salt = (`0x${Array.from(saltBytes)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')}`) as Hex
+      const authDeadline = BigInt(Math.floor(Date.now() / 1000) + 120)
+      const signature = await signTypedDataAsync({
+        domain: reserveAuthDomain(ROBIN_OTC_LIQUIDITY, ARC_CHAIN_ID),
+        types: RESERVE_AUTH_TYPES,
+        primaryType: 'ReserveRequest',
+        message: {
+          offerId: selected.offerId,
+          amount: dest,
+          buyer: address,
+          deadline: authDeadline,
+          salt,
+        },
+      })
+
       setStatus('Reserving Arc USDC inventory…')
-      const reserveTx = await writeContractAsync({
-        address: ROBIN_OTC_LIQUIDITY,
-        abi: LIQUIDITY_ABI,
-        functionName: 'reserve',
-        args: [selected.offerId, dest, OTC_RESERVE_TTL_SEC],
-        chainId: ARC_CHAIN_ID,
-        gas: 250_000n,
+      const reserveRes = await fetch('/api/otc/reserve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          offerId: selected.offerId,
+          amount: dest.toString(),
+          buyer: address,
+          deadline: authDeadline.toString(),
+          salt,
+          signature,
+        }),
       })
-      const reserveReceipt = await arcPub.waitForTransactionReceipt({ hash: reserveTx })
-      const reservedTopics = encodeEventTopics({
-        abi: LIQUIDITY_ABI,
-        eventName: 'Reserved',
-      })
-      const reservedTopic0 = (reservedTopics[0] as string | undefined)?.toLowerCase()
-      const reservedLog = reserveReceipt.logs.find(
-        (l) =>
-          l.topics[0]?.toLowerCase() === reservedTopic0 &&
-          l.address.toLowerCase() === ROBIN_OTC_LIQUIDITY.toLowerCase(),
-      )
-      if (!reservedLog?.topics[1]) {
-        throw new Error('Reserve succeeded but reservation id missing from logs')
+      const reserveJson = await reserveRes.json()
+      if (!reserveRes.ok || !reserveJson?.ok) {
+        throw new Error(reserveJson?.error || 'Failed to reserve Arc inventory')
       }
-      reservationId = reservedLog.topics[1] as Hex
+      reservationId = reserveJson.reservationId as Hex
 
       // Optimistic free inventory drop (hard reserve already on-chain).
       const offerKey = selected.offerId
@@ -373,6 +395,7 @@ export function InstantOtcPanel() {
       )
 
       // 2) Pay on Base/ARB with reservationId bound to the fill.
+      setFillStep('approve')
       setStatus(`Switch to ${payChain.name}…`)
       await ensurePayChain()
 
@@ -395,6 +418,7 @@ export function InstantOtcPanel() {
         await payClient.waitForTransactionReceipt({ hash: tx })
       }
 
+      setFillStep('confirm')
       setStatus(`Escrowing on ${payChain.name}…`)
       const useRobin =
         robinEligible &&
@@ -456,6 +480,7 @@ export function InstantOtcPanel() {
       }
       reservationId = null // bound to fill; do not release
 
+      setFillStep('done')
       setStatus(
         `Escrowed. Keeper delivers Arc USDC to ${short(recipientAddr)}. Offer shows pending until settled.`,
       )
@@ -467,28 +492,20 @@ export function InstantOtcPanel() {
       window.setTimeout(() => void refresh(), 2_500)
       window.setTimeout(() => void refresh(), 8_000)
     } catch (e) {
-      // If we reserved but payment fill failed, release free inventory back to the book.
-      if (reservationId) {
-        try {
-          setStatus('Fill failed — releasing Arc reservation…')
-          await ensureArc()
-          if (!arcPub) arcPub = await makeArcPublicClient()
-          const releaseTx = await writeContractAsync({
-            address: ROBIN_OTC_LIQUIDITY,
-            abi: LIQUIDITY_ABI,
-            functionName: 'releaseReservation',
-            args: [reservationId],
-            chainId: ARC_CHAIN_ID,
-            gas: 200_000n,
-          })
-          await arcPub.waitForTransactionReceipt({ hash: releaseTx })
-          setStatus(null)
-        } catch {
-          /* reservation auto-expires; surface original error */
-        }
-      }
-      setErr(e instanceof Error ? e.message : String(e))
+      // Arc-side reservation (if one was made) is owned by the keeper wallet now, not this
+      // buyer's wallet — it submitted reserve() on the buyer's behalf, so RobinOtcLiquidity's
+      // "reserver anytime; anyone after expiry" release gate means the buyer's own wallet can't
+      // self-release it here even if we offered a cleanup tx. Nothing is stuck either way: it
+      // auto-expires and the OTC keeper's stale-reservation sweep (lib/arc-otc-keeper.ts)
+      // releases it back to the book automatically on its next tick.
+      const msg = e instanceof Error ? e.message : String(e)
+      setErr(
+        reservationId
+          ? `${msg} — the reserved inventory releases back to the book automatically within ~30 minutes.`
+          : msg,
+      )
       setStatus(null)
+      setFillStep('idle')
       void refresh()
     } finally {
       setBusy(false)
@@ -996,6 +1013,27 @@ export function InstantOtcPanel() {
               {ctaLabel}
             </button>
 
+            {fillStep !== 'idle' && (
+              <ol className="otc-steps">
+                <FillStepRow
+                  label="Sign reservation"
+                  hint="free — no gas"
+                  active={fillStep === 'sign'}
+                  done={fillStep === 'approve' || fillStep === 'confirm' || fillStep === 'done'}
+                />
+                <FillStepRow
+                  label="Approve USDC"
+                  active={fillStep === 'approve'}
+                  done={fillStep === 'confirm' || fillStep === 'done'}
+                />
+                <FillStepRow
+                  label="Confirm purchase"
+                  active={fillStep === 'confirm'}
+                  done={fillStep === 'done'}
+                />
+              </ol>
+            )}
+
             {status && <p className="otc-status">{status}</p>}
             {err && <p className="otc-error">{err.slice(0, 280)}</p>}
 
@@ -1025,6 +1063,31 @@ function allInMultiplierSafe(premiumBps: number, feeBps: number): number {
 function short(a: string) {
   if (!a || a.length < 12) return a
   return `${a.slice(0, 6)}…${a.slice(-4)}`
+}
+
+/** One row of the buy-flow progress list (see fillStep state in InstantOtcPanel). */
+function FillStepRow({
+  label,
+  hint,
+  active,
+  done,
+}: {
+  label: string
+  hint?: string
+  active: boolean
+  done: boolean
+}) {
+  return (
+    <li className={`otc-step${done ? ' done' : ''}${active ? ' active' : ''}`}>
+      <span className="otc-step-mark" aria-hidden="true">
+        {done ? '✓' : active ? '…' : ''}
+      </span>
+      <span className="otc-step-label">
+        {label}
+        {hint && <span className="otc-step-hint"> ({hint})</span>}
+      </span>
+    </li>
+  )
 }
 
 function formatUsdCompact(raw: bigint): string {

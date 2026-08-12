@@ -14,7 +14,7 @@ import {
   type Hex,
 } from 'viem'
 import { arbitrum, base, mainnet } from 'viem/chains'
-import { ARC, arcPublicClient } from '@/lib/contracts-arc'
+import { ARC, ARC_CHAIN_ID, arcPublicClient } from '@/lib/contracts-arc'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 
@@ -31,6 +31,52 @@ export const OTC_DEFAULTS = {
 
 /** Default Arc reserve TTL for fills (must be within 5m–2h on-chain). */
 export const OTC_RESERVE_TTL_SEC = 30 * 60
+
+/**
+ * EIP-712 domain/types for a buyer-authorized Arc reserve() — verified server-side by
+ * app/api/otc/reserve/route.ts, NOT on-chain (RobinOtcLiquidity.reserve() has no signature check
+ * of its own; this is purely an app-layer gate on who the keeper wallet will spend gas for).
+ *
+ * 2026-08-12: added to cut the buyer's OTC purchase flow from 3 on-chain signatures to 2, matching
+ * competitor flows (unstabletrade.com does the equivalent in a single payment-chain tx). Instead of
+ * the buyer switching to Arc and signing reserve() themselves, they sign this free off-chain
+ * message and the already-funded keeper wallet (ARC_OTC_KEEPER_KEY) submits reserve() on their
+ * behalf. The on-chain hard-reserve anti-oversell protection in RobinOtcLiquidity.sol — the actual
+ * reason this step exists at all (see OTC_DEFAULTS.liquidity's "v3 liquidity: hard reserve on Arc"
+ * comment) — is completely unchanged; this only moves who signs/pays gas for that call, not what
+ * the contract enforces before payment.
+ *
+ * `salt` makes each authorization single-use (server-side replay guard); `deadline` bounds how
+ * long a signed authorization stays valid before it can be redeemed.
+ */
+export const RESERVE_AUTH_TYPES = {
+  ReserveRequest: [
+    { name: 'offerId', type: 'bytes32' },
+    { name: 'amount', type: 'uint256' },
+    { name: 'buyer', type: 'address' },
+    { name: 'deadline', type: 'uint256' },
+    { name: 'salt', type: 'bytes32' },
+  ],
+} as const
+
+export type ReserveAuthMessage = {
+  offerId: Hex
+  amount: bigint
+  buyer: Address
+  deadline: bigint
+  salt: Hex
+}
+
+/** verifyingContract is the liquidity escrow even though verification happens off-chain here —
+ *  standard EIP-712 domain separation practice, and keeps the signed payload chain-scoped. */
+export function reserveAuthDomain(verifyingContract: Address, chainId: number = ARC_CHAIN_ID) {
+  return {
+    name: 'ArcFun OTC Reserve',
+    version: '1',
+    chainId,
+    verifyingContract,
+  } as const
+}
 
 /** Default platform fee (2%). On-chain payment escrow is source of truth via feeBps(). */
 export const OTC_DEFAULT_FEE_BPS = 200
