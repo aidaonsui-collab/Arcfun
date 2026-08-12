@@ -416,7 +416,13 @@ export function InstantOtcPanel() {
               robinSig,
             ],
             chainId: payChain.chainId,
-            gas: 350_000n,
+            // 2026-08-12: a live mainnet fill measured eth_estimateGas at 316,850 for plain
+            // fillOffer (below) against real reservation/premium/recipient params — the old
+            // 300_000n cap was ~17k short and reverted out-of-gas (status 0, gasUsed==gasLimit,
+            // no state change, funds never moved). fillOfferRobin does one extra ecrecover +
+            // sig-replay bookkeeping path on top of the same fill logic, so it needs at least as
+            // much; both bumped to 500_000n for real margin instead of chasing the exact number.
+            gas: 500_000n,
           })
         : await writeContractAsync({
             address: payChain.payment,
@@ -431,7 +437,8 @@ export function InstantOtcPanel() {
               reservationId,
             ],
             chainId: payChain.chainId,
-            gas: 300_000n,
+            // See fillOfferRobin comment above — measured need was 316,850, 300_000n was too tight.
+            gas: 500_000n,
           })
       const receipt = await payClient.waitForTransactionReceipt({ hash: fillTx })
       const fillTopics = encodeEventTopics({
