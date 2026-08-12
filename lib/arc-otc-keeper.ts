@@ -617,12 +617,87 @@ export async function runOtcKeeperTick(opts?: {
     }
   }
 
+  await sweepKnownOrphanReservations(arcPub, arcWallet, account, liquidity, dryRun, results)
+
   return {
     ok: true,
     keeper: account.address,
     liquidity,
     spokes: spokes.map((s) => s.id),
     results,
+  }
+}
+
+/**
+ * Stopgap for reservations that `reserve()`d Arc inventory but never got as far as a mined
+ * `FillCreated` on the payment chain (e.g. the buyer's fillOffer reverted — out of gas, or any
+ * other pre-emit revert). The main sweep above only discovers stale reservations by walking
+ * FillCreated logs backward from a fillId, so an orphan like this is invisible to it — there is
+ * no event to key off. The durable fix is scanning Arc's own `Reserved` events directly, but Arc's
+ * public RPC has no working `eth_getLogs` path right now (baracat down, its only fallback has
+ * getLogs disabled) so that scan can't be built or verified against live data yet.
+ *
+ * In the meantime this is a manually-curated list of specific reservationIds already confirmed
+ * on-chain (via direct `reservations()` reads) to be reserved, unconsumed, unreleased. Safe to
+ * over-list: releaseReservation() reverts harmlessly on anything already consumed/released or not
+ * yet expired, and that revert is swallowed the same way the main sweep does it. Remove an entry
+ * once it shows `released: true` on-chain — this list is not meant to grow into a real index.
+ *
+ * Found 2026-08-12 investigating "$15 open liquidity but only a few trades succeeded":
+ *   0x9a9978c0…db201 — 1.5 USDC — from a fillOffer that reverted out-of-gas (fixed in PR #31)
+ *   before ArcFun's own gas limits were widened; the Arc-side reserve() had already landed.
+ */
+const KNOWN_ORPHAN_RESERVATIONS: readonly Hex[] = [
+  '0x9a9978c04dbbd1e4416f2fe2a0935ce415ea302e2491ab17498c98bd291db201',
+]
+
+async function sweepKnownOrphanReservations(
+  arcPub: ReturnType<typeof arcPublicClient>,
+  arcWallet: ReturnType<typeof arcServerWalletClient>,
+  account: ReturnType<typeof privateKeyToAccount>,
+  liquidity: Address,
+  dryRun: boolean,
+  results: OtcKeeperTickResult[],
+) {
+  for (const reservationId of KNOWN_ORPHAN_RESERVATIONS) {
+    if (dryRun) {
+      results.push({
+        spoke: 'arc',
+        fillId: reservationId,
+        action: 'released',
+        detail: 'dry-run: known-orphan sweep',
+      })
+      continue
+    }
+    try {
+      const hash = await arcWallet.writeContract({
+        account,
+        chain: arcWallet.chain,
+        address: liquidity,
+        abi: liquidityAbi,
+        functionName: 'releaseReservation',
+        args: [reservationId],
+        gas: 120_000n,
+      })
+      await waitReceipt(arcPub as PublicClient, hash, 'releaseReservation')
+      results.push({
+        spoke: 'arc',
+        fillId: reservationId,
+        action: 'released',
+        detail: 'known-orphan sweep',
+        txHash: hash,
+      })
+    } catch (relErr) {
+      const relMsg = relErr instanceof Error ? relErr.message : String(relErr)
+      // "done" = already recovered (expected steady state once this succeeds once) — not an error.
+      if (/done/i.test(relMsg)) continue
+      results.push({
+        spoke: 'arc',
+        fillId: reservationId,
+        action: 'error',
+        detail: `known-orphan sweep failed: ${relMsg.slice(0, 160)}`,
+      })
+    }
   }
 }
 
