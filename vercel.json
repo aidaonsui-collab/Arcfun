@@ -7,6 +7,10 @@
     {
       "path": "/api/arc/indexer/run",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/arc/keeper/otc",
+      "schedule": "* * * * *"
     }
   ]
 }
