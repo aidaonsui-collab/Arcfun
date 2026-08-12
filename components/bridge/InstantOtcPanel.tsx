@@ -370,14 +370,27 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
         throw new Error(`Minimum buy is ${formatUsdc6(OTC_MIN_BUY_USDC)} USDC`)
       }
 
-      // 1) Free EIP-712 authorization — no gas, no Arc network switch. The keeper wallet submits
-      // the actual Arc reserve() from this (see app/api/otc/reserve/route.ts), so the same
-      // on-chain hard-reserve anti-oversell protection still runs before payment; the buyer just
-      // doesn't have to sign that specific transaction themselves. Cuts the buyer's real on-chain
-      // signatures from 3 (reserve + approve + fill) to 2 (approve + fill), matching what
-      // competitor desks like unstabletrade.com do in a single payment-chain tx.
+      // 1) Free EIP-712 authorization — no gas. The keeper wallet submits the actual Arc
+      // reserve() from this (see app/api/otc/reserve/route.ts), so the same on-chain
+      // hard-reserve anti-oversell protection still runs before payment; the buyer just
+      // doesn't have to sign that specific transaction themselves. Cuts the buyer's real
+      // on-chain signatures from 3 (reserve + approve + fill) to 2 (approve + fill), matching
+      // what competitor desks like unstabletrade.com do in a single payment-chain tx.
+      //
+      // Still requires the wallet to be ON payChain first — the signed domain declares
+      // payChain.chainId (see reserveAuthDomain below), and a desktop extension wallet has no
+      // reason to already be sitting on that chain (it persists whatever was last active,
+      // often nothing to do with this dApp). Found live 2026-08-12: this step had no
+      // ensurePayChain() call of its own — only step 2 (approve) did — so on desktop the very
+      // first click could fire a signTypedData request whose domain named a chain the wallet
+      // wasn't on, the same class of silent-refusal bug fixed once already in the chainId-only
+      // form (PR #35). Switching here closes the gap for real instead of just picking the
+      // right chainId to put in the domain.
+      setStatus(`Switch to ${payChain.name}…`)
+      await ensurePayChain()
+
       setFillStep('sign')
-      setStatus('Sign to reserve inventory (free — no gas, no network switch)…')
+      setStatus('Sign to reserve inventory (free — no gas)…')
       const saltBytes = crypto.getRandomValues(new Uint8Array(32))
       const salt = (`0x${Array.from(saltBytes)
         .map((b) => b.toString(16).padStart(2, '0'))
