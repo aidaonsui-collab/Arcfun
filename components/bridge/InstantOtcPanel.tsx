@@ -36,6 +36,7 @@ import {
   fetchOtcDeskStats,
   OTC_DEFAULT_FEE_BPS,
   OTC_ROBIN_FEE_BPS,
+  OTC_MIN_BUY_USDC,
   RESERVE_AUTH_TYPES,
   reserveAuthDomain,
   encodeEventTopics,
@@ -266,12 +267,22 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
     try {
       const dest = parseUsdc6(destAmt)
       const cap = selected.available ?? selected.remaining
-      if (dest <= 0n || dest > cap) return null
+      if (dest <= 0n || dest > cap || dest < OTC_MIN_BUY_USDC) return null
       return quoteFill(dest, selected.premiumBps, effectiveFeeBps)
     } catch {
       return null
     }
   }, [selected, destAmt, effectiveFeeBps])
+
+  /** Below-minimum is a distinct case from "no quote yet" so the CTA/hint can say why. */
+  const belowMinBuy = useMemo(() => {
+    if (!destAmt) return false
+    try {
+      return parseUsdc6(destAmt) > 0n && parseUsdc6(destAmt) < OTC_MIN_BUY_USDC
+    } catch {
+      return false
+    }
+  }, [destAmt])
 
   const ensurePayChain = async () => {
     if (!payChain) throw new Error('No payment chain configured')
@@ -342,6 +353,9 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
       const dest = parseUsdc6(destAmt)
       const cap = selected.available ?? selected.remaining
       if (dest > cap) throw new Error('Amount exceeds free inventory on this offer')
+      if (dest < OTC_MIN_BUY_USDC) {
+        throw new Error(`Minimum buy is ${formatUsdc6(OTC_MIN_BUY_USDC)} USDC`)
+      }
 
       // 1) Free EIP-712 authorization — no gas, no Arc network switch. The keeper wallet submits
       // the actual Arc reserve() from this (see app/api/otc/reserve/route.ts), so the same
@@ -599,6 +613,7 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
   const ctaLabel = (() => {
     if (!isConnected) return 'Connect wallet'
     if (busy) return 'Confirm in wallet…'
+    if (belowMinBuy) return `Minimum buy ${formatUsdc6(OTC_MIN_BUY_USDC)} USDC`
     if (!destAmt || !quote) return 'Enter an amount'
     if (!recipientOk) return 'Enter a valid Arc recipient'
     if (useDifferentRecipient && recipientIsDifferent && !recipientConfirmed) {
@@ -985,7 +1000,8 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
                 <span className="otc-unit">USDC</span>
               </div>
               <span className="otc-field-hint">
-                Max {formatUsdc6(selected.available ?? selected.remaining)} USDC available
+                Min {formatUsdc6(OTC_MIN_BUY_USDC)} · Max{' '}
+                {formatUsdc6(selected.available ?? selected.remaining)} USDC available
                 {(selected.pendingReserved ?? 0n) > 0n
                   ? ` · ${formatUsdc6(selected.pendingReserved!)} pending settlement`
                   : ''}
