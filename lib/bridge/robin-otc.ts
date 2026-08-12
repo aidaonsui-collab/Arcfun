@@ -417,13 +417,14 @@ type StatsCache = {
  * Uses session cache + incremental scan so refreshes stay cheap.
  */
 export async function fetchOtcDeskStats(opts?: {
-  /** Max blocks to scan per call when no cache (default ~14d Base @ 2s). */
+  /** Max blocks to scan per call when no cache (default ~1d Base @ 2s — keep first paint light). */
   maxBlocks?: bigint
   chunkSize?: bigint
 }): Promise<OtcDeskStats> {
   if (!robinOtcEnabled()) return { settledTrades: 0, volumeUsdc: 0n }
 
-  const maxBlocks = opts?.maxBlocks ?? 500_000n
+  // Cold first load used to scan ~500k blocks on every payment chain (~minutes). Cap to ~1 day.
+  const maxBlocks = opts?.maxBlocks ?? 50_000n
   const chunkSize = opts?.chunkSize ?? PAYMENT_LOG_LOOKBACK
 
   let settledTrades = 0

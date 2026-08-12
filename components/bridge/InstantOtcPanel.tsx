@@ -158,78 +158,91 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
     void refreshRobin()
   }, [refreshRobin])
 
+  const mapApiOffers = (
+    raw: Array<{
+      offerId: `0x${string}`
+      maker: `0x${string}`
+      sellerPayment: `0x${string}`
+      premiumBps: number
+      remaining: string | number
+      active: boolean
+      allInMult?: number
+      available?: string | number
+      hasPending?: boolean
+    }>,
+  ): OtcOffer[] =>
+    raw.map((o) => {
+      const remaining = BigInt(o.remaining ?? 0)
+      const available = o.available != null ? BigInt(o.available) : remaining
+      return {
+        offerId: o.offerId,
+        maker: o.maker,
+        sellerPayment: o.sellerPayment,
+        premiumBps: o.premiumBps,
+        remaining,
+        active: o.active,
+        allInMult: o.allInMult,
+        available,
+        pendingReserved: 0n,
+        hasPending: !!o.hasPending,
+      }
+    })
+
   const refresh = useCallback(async () => {
     if (!enabled) return
     setLoading(true)
     setErr(null)
     try {
-      // Prefer Arc event indexer (fast). Fall back to live log scan if empty/unavailable.
-      let list: Awaited<ReturnType<typeof fetchOtcOffers>> = []
+      // Fast path: indexed book only. Do NOT fall back to full-chain getLogs on empty —
+      // that is multi-minute and makes Unstable feel instant while we freeze. Indexer +
+      // POST ingest keep the book warm; poll every few seconds.
+      let list: OtcOffer[] = []
+      let indexOk = false
       try {
         const res = await fetch('/api/otc/offers', { cache: 'no-store' })
         if (res.ok) {
           const data = (await res.json()) as {
-            offers?: Array<{
-              offerId: `0x${string}`
-              maker: `0x${string}`
-              sellerPayment: `0x${string}`
-              premiumBps: number
-              remaining: string | number
-              active: boolean
-              allInMult?: number
-              available?: string | number
-              hasPending?: boolean
-            }>
+            ok?: boolean
+            offers?: Parameters<typeof mapApiOffers>[0]
           }
-          if (data.offers?.length) {
-            list = data.offers.map((o) => {
-              const remaining = BigInt(o.remaining ?? 0)
-              const available =
-                o.available != null ? BigInt(o.available) : remaining
-              return {
-                offerId: o.offerId,
-                maker: o.maker,
-                sellerPayment: o.sellerPayment,
-                premiumBps: o.premiumBps,
-                remaining,
-                active: o.active,
-                allInMult: o.allInMult,
-                available,
-                pendingReserved: 0n,
-                hasPending: !!o.hasPending,
-              }
-            })
-          }
+          indexOk = data.ok !== false
+          if (data.offers?.length) list = mapApiOffers(data.offers)
         }
       } catch {
         /* index optional */
       }
-      if (!list.length) {
+      // Only heavy-scan if the API is completely down (not merely empty book).
+      if (!indexOk && !list.length) {
         list = await fetchOtcOffers()
       }
 
-      const [fee, stats] = await Promise.all([fetchOtcFeeBps(), fetchOtcDeskStats()])
       setOffers(list)
-      setFeeBps(fee)
-      setDeskStats(stats)
       setSelected((prev) => {
         if (!prev) return prev
         return list.find((o) => o.offerId === prev.offerId) ?? null
       })
+      setLoading(false)
+
+      // Stats / fee / voucher — background, never block the book paint
+      void Promise.all([fetchOtcFeeBps(), fetchOtcDeskStats()])
+        .then(([fee, stats]) => {
+          setFeeBps(fee)
+          setDeskStats(stats)
+        })
+        .catch(() => {})
       void refreshRobin()
     } catch (e) {
       // Keep prior offers on RPC / scan failure — never flash an empty book.
       setErr(e instanceof Error ? e.message : String(e))
-    } finally {
       setLoading(false)
     }
   }, [enabled, refreshRobin])
 
-  // Poll slower by default to avoid Arc getLogs 429s; faster only while fills pending.
+  // Poll book often so new offers appear in seconds (indexer + POST ingest).
   const hasAnyPending = offers.some((o) => (o.pendingReserved ?? 0n) > 0n)
   useEffect(() => {
     void refresh()
-    const ms = hasAnyPending ? 12_000 : 30_000
+    const ms = hasAnyPending ? 8_000 : 12_000
     const t = setInterval(() => void refresh(), ms)
     return () => clearInterval(t)
   }, [refresh, hasAnyPending])
@@ -597,7 +610,43 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
         chainId: ARC_CHAIN_ID,
         gas: 300_000n,
       })
-      await arcPub.waitForTransactionReceipt({ hash: tx })
+      const receipt = await arcPub.waitForTransactionReceipt({ hash: tx })
+      // Optimistic: parse OfferCreated and show immediately (Unstable-style).
+      const createdTopics = encodeEventTopics({
+        abi: LIQUIDITY_ABI,
+        eventName: 'OfferCreated',
+      })
+      const topic0 = (createdTopics[0] as string | undefined)?.toLowerCase()
+      const createdLog = receipt.logs.find(
+        (l) =>
+          l.topics[0]?.toLowerCase() === topic0 &&
+          l.address.toLowerCase() === ROBIN_OTC_LIQUIDITY.toLowerCase(),
+      )
+      const newOfferId = createdLog?.topics[1] as Hex | undefined
+      if (newOfferId && address) {
+        const optimistic: OtcOffer = {
+          offerId: newOfferId,
+          maker: address,
+          sellerPayment: payTo,
+          premiumBps,
+          remaining: amount,
+          active: true,
+          available: amount,
+          pendingReserved: 0n,
+          hasPending: false,
+          allInMult: allInMultiplierSafe(premiumBps, effectiveFeeBps),
+        }
+        setOffers((prev) => {
+          if (prev.some((o) => o.offerId.toLowerCase() === newOfferId.toLowerCase())) return prev
+          return [optimistic, ...prev]
+        })
+        // Push into server index so other clients / reloads see it without waiting for cron.
+        void fetch('/api/otc/offers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ offerId: newOfferId }),
+        }).catch(() => {})
+      }
       setStatus('Offer live.')
       setMakeAmt('')
       setMode('buy')
