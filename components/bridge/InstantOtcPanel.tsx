@@ -47,7 +47,7 @@ import {
 import type { Hex } from 'viem'
 type Mode = 'buy' | 'make'
 
-export function InstantOtcPanel() {
+export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } = {}) {
   const { address, isConnected, chainId } = useAccount()
   const { connect, connectors } = useConnect()
   const { disconnect } = useDisconnect()
@@ -88,6 +88,16 @@ export function InstantOtcPanel() {
   /** Buy-flow progress for the step list in the fill modal — 'sign' is a free EIP-712
    *  authorization (see onFill), 'approve'/'confirm' are the two real on-chain signatures. */
   const [fillStep, setFillStep] = useState<'idle' | 'sign' | 'approve' | 'confirm' | 'done'>('idle')
+  /** Populated on a successful fill so the modal can show an "Order placed" confirmation (fillId,
+   *  chain, link to the escrow tx) instead of just closing — same shape as competitor desks'
+   *  post-purchase screen, with a direct link into My orders instead of leaving the buyer to find
+   *  their fill on their own. */
+  const [lastFill, setLastFill] = useState<{
+    fillId: Hex
+    txHash: Hex
+    chainName: string
+    explorer: string
+  } | null>(null)
 
   const enabled = robinOtcEnabled()
   const openDepth = useMemo(() => sumOfferDepth(offers), [offers])
@@ -296,6 +306,7 @@ export function InstantOtcPanel() {
     setStatus(null)
     setErr(null)
     setFillStep('idle')
+    setLastFill(null)
   }
 
   const makeArcPublicClient = async () => {
@@ -493,13 +504,18 @@ export function InstantOtcPanel() {
       reservationId = null // bound to fill; do not release
 
       setFillStep('done')
-      setStatus(
-        `Escrowed. Keeper delivers Arc USDC to ${short(recipientAddr)}. Offer shows pending until settled.`,
-      )
+      setLastFill({
+        fillId: (fillLog?.topics[1] as Hex | undefined) ?? fillTx,
+        txHash: fillTx,
+        chainName: payChain.name,
+        explorer: payChain.explorer,
+      })
+      setStatus(null)
       setDestAmt('')
-      setFillOpen(false)
       setUseDifferentRecipient(false)
       setRecipientConfirmed(false)
+      // Modal stays open showing the "Order placed" confirmation (see fillStep === 'done' render
+      // below) — closeFill() is what actually dismisses it now, not this success path.
       await refresh()
       window.setTimeout(() => void refresh(), 2_500)
       window.setTimeout(() => void refresh(), 8_000)
@@ -888,7 +904,7 @@ export function InstantOtcPanel() {
             aria-labelledby="otc-fill-title"
           >
             <div className="otc-modal-head">
-              <h3 id="otc-fill-title">Fill offer</h3>
+              <h3 id="otc-fill-title">{fillStep === 'done' && lastFill ? 'Order placed' : 'Fill offer'}</h3>
               <button
                 type="button"
                 className="otc-modal-close"
@@ -900,14 +916,59 @@ export function InstantOtcPanel() {
               </button>
             </div>
 
-            <p className="otc-modal-sub">
-              {premiumLabel(selected.premiumBps)} premium · pay on <strong>{payChain.shortName}</strong>
-              {selected.allInMult != null && (
-                <> · {selected.allInMult.toFixed(2)}× all-in</>
-              )}
-            </p>
+            {fillStep === 'done' && lastFill ? (
+              <div className="otc-order-placed">
+                <div className="otc-order-placed-check" aria-hidden="true">
+                  ✓
+                </div>
+                <p className="otc-order-placed-msg">
+                  Payment escrowed. The desk now delivers Arc USDC to your recipient — typically
+                  within a minute.
+                </p>
+                <div className="otc-order-placed-row">
+                  <span className="lbl">Fill id</span>
+                  <span className="otc-maker-chip mono-sm" title={lastFill.fillId}>
+                    {short(lastFill.fillId)}
+                  </span>
+                </div>
+                <div className="otc-order-placed-row">
+                  <span className="lbl">{lastFill.chainName}</span>
+                  <a
+                    className="otc-maker-chip otc-link"
+                    href={`${lastFill.explorer}/tx/${lastFill.txHash}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {short(lastFill.txHash)}
+                  </a>
+                </div>
+                <div className="otc-order-placed-actions">
+                  <button type="button" className="ab-btn ab-btn-ghost" onClick={closeFill}>
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    className="otc-cta"
+                    onClick={() => {
+                      closeFill()
+                      onViewOrders?.()
+                    }}
+                  >
+                    Track order
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="otc-modal-sub">
+                  {premiumLabel(selected.premiumBps)} premium · pay on{' '}
+                  <strong>{payChain.shortName}</strong>
+                  {selected.allInMult != null && (
+                    <> · {selected.allInMult.toFixed(2)}× all-in</>
+                  )}
+                </p>
 
-            <label className="otc-field">
+                <label className="otc-field">
               <span>Amount to receive on Arc</span>
               <div className="otc-amount-row">
                 <input
@@ -1050,13 +1111,15 @@ export function InstantOtcPanel() {
             {status && <p className="otc-status">{status}</p>}
             {err && <p className="otc-error">{err.slice(0, 280)}</p>}
 
-            <p className="otc-modal-note">
-              Your payment sits in escrow until the desk delivers. If delivery doesn&apos;t happen,
-              you can reclaim it yourself after the timeout — no permission needed.
-            </p>
-            <p className="otc-modal-warn">
-              If USDC is frozen by Circle, funds may be unrecoverable.
-            </p>
+                <p className="otc-modal-note">
+                  Your payment sits in escrow until the desk delivers. If delivery doesn&apos;t
+                  happen, you can reclaim it yourself after the timeout — no permission needed.
+                </p>
+                <p className="otc-modal-warn">
+                  If USDC is frozen by Circle, funds may be unrecoverable.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}
