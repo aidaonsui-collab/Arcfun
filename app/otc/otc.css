@@ -1800,6 +1800,71 @@
   color: var(--ab-gold-hi);
 }
 
+/* ── Order placed (post-fill confirmation) ────────────────────────────────── */
+
+.otc-order-placed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 0.5rem 0 0;
+}
+
+.otc-order-placed-check {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ab-green-hi);
+  background: rgba(63, 209, 138, 0.14);
+  border: 1px solid rgba(63, 209, 138, 0.35);
+  margin: 0.25rem 0 1rem;
+}
+
+.otc-order-placed-msg {
+  margin: 0 0 1.1rem;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ab-muted);
+  max-width: 340px;
+}
+
+.otc-order-placed-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--ab-border);
+  font-size: 12.5px;
+}
+
+.otc-order-placed-row .lbl {
+  color: var(--ab-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10.5px;
+}
+
+.otc-order-placed-actions {
+  width: 100%;
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 1.2rem;
+}
+
+.otc-order-placed-actions .ab-btn-ghost {
+  flex: 1;
+}
+
+.otc-order-placed-actions .otc-cta {
+  flex: 2;
+}
+
 /* ── Pending offer + My orders ──────────────────────────────────────────── */
 
 .otc-offer-tag-row {

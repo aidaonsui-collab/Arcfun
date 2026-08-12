@@ -93,7 +93,11 @@ export default function ArcOtcPage() {
               </button>
             </div>
 
-            {tab === 'orders' ? <InstantOtcOrders /> : <InstantOtcPanel />}
+            {tab === 'orders' ? (
+              <InstantOtcOrders />
+            ) : (
+              <InstantOtcPanel onViewOrders={() => setTab('orders')} />
+            )}
           </>
         )}
 
