@@ -22,7 +22,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isAddress, isHex, verifyTypedData, type Address, type Hex } from 'viem'
 import { kv } from '@vercel/kv'
-import { arcPublicClient, arcServerWalletClient, ARC_CHAIN_ID } from '@/lib/contracts-arc'
+import { arcPublicClient, arcServerWalletClient } from '@/lib/contracts-arc'
 import {
   ROBIN_OTC_LIQUIDITY,
   LIQUIDITY_ABI,
@@ -30,6 +30,7 @@ import {
   reserveAuthDomain,
   OTC_RESERVE_TTL_SEC,
   encodeEventTopics,
+  livePaymentChains,
 } from '@/lib/bridge/robin-otc'
 
 export const dynamic = 'force-dynamic'
@@ -55,6 +56,7 @@ type ReserveBody = {
   deadline?: unknown
   salt?: unknown
   signature?: unknown
+  signChainId?: unknown
 }
 
 export async function POST(req: NextRequest) {
@@ -65,7 +67,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'invalid JSON body' }, { status: 400 })
   }
 
-  const { offerId, amount, buyer, deadline, salt, signature } = body || {}
+  const { offerId, amount, buyer, deadline, salt, signature, signChainId } = body || {}
 
   if (typeof offerId !== 'string' || !isHex(offerId) || offerId.length !== 66) {
     return NextResponse.json({ ok: false, error: 'invalid offerId' }, { status: 400 })
@@ -78,6 +80,13 @@ export async function POST(req: NextRequest) {
   }
   if (typeof signature !== 'string' || !isHex(signature)) {
     return NextResponse.json({ ok: false, error: 'invalid signature' }, { status: 400 })
+  }
+  // The domain the client actually signed against — see InstantOtcPanel.tsx's onFill comment for
+  // why this is the pay chain's id (whatever network the wallet was really connected to), not a
+  // hardcoded Arc chain id the wallet was never on.
+  const liveChainIds = new Set(livePaymentChains().map((c) => c.chainId))
+  if (typeof signChainId !== 'number' || !liveChainIds.has(signChainId)) {
+    return NextResponse.json({ ok: false, error: 'invalid signChainId' }, { status: 400 })
   }
 
   let amountBig: bigint
@@ -116,7 +125,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'rate limited — try again shortly' }, { status: 429 })
   }
 
-  const domain = reserveAuthDomain(ROBIN_OTC_LIQUIDITY, ARC_CHAIN_ID)
+  const domain = reserveAuthDomain(ROBIN_OTC_LIQUIDITY, signChainId)
   const message = {
     offerId: offerId as Hex,
     amount: amountBig,
