@@ -29,8 +29,10 @@ import {
   RESERVE_AUTH_TYPES,
   reserveAuthDomain,
   OTC_RESERVE_TTL_SEC,
+  OTC_MIN_BUY_USDC,
   encodeEventTopics,
   livePaymentChains,
+  formatUsdc6,
 } from '@/lib/bridge/robin-otc'
 
 export const dynamic = 'force-dynamic'
@@ -99,6 +101,12 @@ export async function POST(req: NextRequest) {
   }
   if (amountBig <= 0n) {
     return NextResponse.json({ ok: false, error: 'amount must be positive' }, { status: 400 })
+  }
+  if (amountBig < OTC_MIN_BUY_USDC) {
+    return NextResponse.json(
+      { ok: false, error: `minimum buy is ${formatUsdc6(OTC_MIN_BUY_USDC)} USDC` },
+      { status: 400 },
+    )
   }
 
   const now = Math.floor(Date.now() / 1000)

@@ -33,6 +33,15 @@ export const OTC_DEFAULTS = {
 export const OTC_RESERVE_TTL_SEC = 30 * 60
 
 /**
+ * Minimum buy size, in destAmount (Arc USDC, 6dp) — 1.00 USDC. Below this, gas + keeper overhead
+ * on a fill start eating a disproportionate share of the trade, and it's not worth a reservation
+ * slot. Enforced both client-side (InstantOtcPanel disables the CTA / shows the floor) and
+ * server-side (app/api/otc/reserve rejects it) — the server check is the one that actually matters
+ * since the client one is just UX, not a security boundary.
+ */
+export const OTC_MIN_BUY_USDC = 1_000_000n
+
+/**
  * EIP-712 domain/types for a buyer-authorized Arc reserve() — verified server-side by
  * app/api/otc/reserve/route.ts, NOT on-chain (RobinOtcLiquidity.reserve() has no signature check
  * of its own; this is purely an app-layer gate on who the keeper wallet will spend gas for).
