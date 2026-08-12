@@ -345,8 +345,19 @@ export function InstantOtcPanel() {
         .map((b) => b.toString(16).padStart(2, '0'))
         .join('')}`) as Hex
       const authDeadline = BigInt(Math.floor(Date.now() / 1000) + 120)
+      // Domain chainId is whatever chain the wallet is ACTUALLY connected to right now (the pay
+      // chain, e.g. Base) — not Arc. This authorization is verified off-chain (app/api/otc/reserve
+      // never checks it against any live network), so the domain's chainId is purely a
+      // domain-separation formality; it doesn't need to name Arc. Found live 2026-08-12: the first
+      // version hardcoded ARC_CHAIN_ID here, so every signature request declared a chainId the
+      // wallet wasn't actually on — several wallets warn on or outright refuse a signTypedData
+      // whose domain.chainId doesn't match the connected network, which read as the flow silently
+      // not responding to a click. otc-voucher's existing RobinOtcFee voucher already gets this
+      // right (its domain.chainId is always the payment chain the signature is used on) — matching
+      // that pattern here instead of introducing a second, wrong convention.
+      const signChainId = payChain.chainId
       const signature = await signTypedDataAsync({
-        domain: reserveAuthDomain(ROBIN_OTC_LIQUIDITY, ARC_CHAIN_ID),
+        domain: reserveAuthDomain(ROBIN_OTC_LIQUIDITY, signChainId),
         types: RESERVE_AUTH_TYPES,
         primaryType: 'ReserveRequest',
         message: {
@@ -369,6 +380,7 @@ export function InstantOtcPanel() {
           deadline: authDeadline.toString(),
           salt,
           signature,
+          signChainId,
         }),
       })
       const reserveJson = await reserveRes.json()
@@ -577,10 +589,11 @@ export function InstantOtcPanel() {
       return 'Confirm recipient address'
     }
     if (!payChain) return 'Select pay chain'
-    if (chainId !== ARC_CHAIN_ID && chainId !== payChain.chainId) {
-      return 'Reserve on Arc, then pay'
-    }
-    return `Confirm · reserve + pay ${payChain.shortName}`
+    // No Arc switch needed anymore — step 1 is a free off-chain signature (see onFill), so the
+    // only network the buyer ever needs to be on is the pay chain itself. The old version of this
+    // label checked ARC_CHAIN_ID here (a leftover from when step 1 really was an Arc transaction)
+    // and could tell the buyer to "Reserve on Arc" for a flow that no longer touches Arc at all.
+    return `Sign & pay on ${payChain.shortName}`
   })()
 
   if (!enabled) {
