@@ -1436,6 +1436,69 @@
   color: var(--ab-muted);
 }
 
+.otc-steps {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.otc-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ab-muted);
+}
+
+.otc-step-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--ab-border);
+  font-size: 10px;
+}
+
+.otc-step.done {
+  color: var(--ab-green-hi);
+}
+
+.otc-step.done .otc-step-mark {
+  border-color: var(--ab-green-hi);
+  color: var(--ab-green-hi);
+}
+
+.otc-step.active {
+  color: var(--ab-sky);
+}
+
+.otc-step.active .otc-step-mark {
+  border-color: var(--ab-sky);
+  color: var(--ab-sky);
+  animation: otc-step-pulse 1.1s ease-in-out infinite;
+}
+
+.otc-step-hint {
+  opacity: 0.7;
+}
+
+@keyframes otc-step-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
 .otc-status {
   margin: 0.9rem 0 0;
   font-size: 13px;
