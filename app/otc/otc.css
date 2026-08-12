@@ -1156,14 +1156,20 @@
   }
 }
 
+/* Tier accent hues — deliberately real colors of their own, not aliases of the site's blue
+ * (--ab-green/--ab-gold/--ab-sky all resolve to the same blue elsewhere in this file), so a cheap
+ * offer actually reads as "cheap" at a glance instead of every card looking identical. */
 .otc-offer-card {
+  --tier-hue: 205;
+  --tier-color: #7ec0f7;
   display: flex;
   flex-direction: column;
   text-align: left;
   width: 100%;
   padding: 0;
-  border-radius: 18px;
+  border-radius: 16px;
   border: 1px solid var(--ab-border);
+  border-left: 3px solid var(--tier-color);
   background: var(--ab-raised);
   color: inherit;
   overflow: hidden;
@@ -1171,54 +1177,101 @@
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
 }
 
+.otc-offer-card.tier-cheap {
+  --tier-color: #34d399;
+}
+
+.otc-offer-card.tier-mid {
+  --tier-color: #7ec0f7;
+}
+
+.otc-offer-card.tier-rich {
+  --tier-color: #f0b429;
+}
+
 .otc-offer-card:hover {
   border-color: var(--ab-border-strong);
+  border-left-color: var(--tier-color);
   background: var(--ab-raised-hi);
 }
 
 .otc-offer-card.selected {
   border-color: rgba(47, 132, 219, 0.55);
+  border-left-color: var(--tier-color);
   box-shadow:
     0 0 0 1px rgba(47, 132, 219, 0.2),
     0 10px 32px rgba(0, 0, 0, 0.28);
 }
 
 .otc-offer-body {
-  padding: 1.15rem 1.2rem 1rem;
+  padding: 1.1rem 1.2rem 0.9rem;
   flex: 1;
 }
 
 .otc-offer-tag {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--ab-faint);
-  margin-bottom: 0.35rem;
+}
+
+.otc-tier-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tier-color);
+  flex: none;
+}
+
+.otc-offer-stats {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  margin-top: 0.4rem;
 }
 
 .otc-offer-premium {
-  font-size: 2.15rem;
+  font-size: 2rem;
   font-weight: 700;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.03em;
   color: var(--ab-ink);
-  line-height: 1.05;
+  line-height: 1;
 }
 
-.otc-offer-allin {
-  margin-top: 0.55rem;
-  font-size: 12.5px;
+.otc-offer-allin-stat {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.otc-offer-allin-stat strong {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--tier-color);
+}
+
+.otc-offer-allin-stat span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ab-faint);
+}
+
+.otc-offer-explain {
+  margin: 0.55rem 0 0;
+  font-size: 12px;
   line-height: 1.45;
   color: var(--ab-muted);
 }
 
-.otc-offer-allin strong {
-  color: var(--ab-green-hi);
-  font-weight: 700;
-}
-
 .otc-offer-rows {
-  margin-top: 1rem;
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--ab-border);
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
@@ -1245,6 +1298,7 @@
 .otc-maker-chip {
   display: inline-flex;
   align-items: center;
+  gap: 0.35rem;
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
   border: 1px solid var(--ab-border);
@@ -1255,29 +1309,40 @@
   color: var(--ab-muted);
 }
 
+.otc-maker-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
 .otc-offer-buy {
   appearance: none;
-  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: calc(100% - 1.6rem);
+  margin: 0 0.8rem 0.8rem;
   border: none;
-  border-top: 1px solid var(--ab-border);
-  background: linear-gradient(180deg, rgba(47, 132, 219, 0.22), rgba(47, 132, 219, 0.14));
-  color: var(--ab-green-hi);
-  font-size: 14px;
+  border-radius: 11px;
+  background: linear-gradient(180deg, var(--tier-color), var(--ab-green));
+  color: #04140a;
+  font-size: 13.5px;
   font-weight: 800;
   letter-spacing: 0.01em;
-  padding: 0.95rem 1rem;
+  padding: 0.75rem 1rem;
   cursor: pointer;
   transition: 0.15s ease;
 }
 
 .otc-offer-buy:hover {
-  background: linear-gradient(180deg, rgba(47, 132, 219, 0.32), rgba(47, 132, 219, 0.2));
-  color: #fff;
+  filter: brightness(1.08);
+  transform: translateY(-1px);
 }
 
 .otc-offer-card.selected .otc-offer-buy {
-  background: linear-gradient(180deg, var(--ab-green-hi), var(--ab-green));
-  color: #04140a;
+  filter: brightness(1.1);
 }
 
 .otc-empty {
