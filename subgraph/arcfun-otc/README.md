@@ -2,13 +2,27 @@
 
 Indexes Arc Instant OTC liquidity at `0xBD0624…4aE3e` (OfferCreated book, reserves, deliveries).
 
-## Deploy
+## Status (2026-08)
+
+**Blocked on Goldsky network support.** Official Arc chain docs list:
+
+- Subgraphs: **testnet only** (`arc-testnet`) — **mainnet not enabled**
+- Deploy with `network: arc` / `arc-mainnet` fails:  
+  `Subgraph network not supported: no network arc found on chain ethereum`
+
+Until Goldsky enables Arc mainnet (chain id `5042`) for subgraphs, ArcFun serves the OTC book from the **KV arc-indexer** path (`GET /api/otc/offers` falls back automatically when `GOLDSKY_OTC_URL` is unset).
+
+Ask Goldsky: [sales@goldsky.com](mailto:sales@goldsky.com?subject=Arc%20mainnet%20subgraph%20support) (or Arc partner form if sponsored).
+
+## Deploy (once mainnet slug exists)
 
 ```bash
-# Free Starter is limited to 3 always-on subgraphs. If deploy fails, free a slot:
-#   goldsky subgraph pause robinpad-stable/1.0.0
+# Free Starter = 3 always-on subgraphs. Free a slot if needed:
+#   goldsky subgraph pause <name>/1.0.0
+#   goldsky subgraph delete <name>/1.0.0
 
 cd subgraph/arcfun-otc
+# Set network: in subgraph.yaml to the Goldsky slug they give you (e.g. arc or arc-mainnet)
 npm install
 npm run codegen
 npm run build
