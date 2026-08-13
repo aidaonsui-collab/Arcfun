@@ -33,7 +33,9 @@ type Range = '5M' | '15M' | '1H' | '1D' | '1W'
 type VolRange = '1H' | '6H' | '24H'
 type ChartScale = 'FDV' | 'Price'
 
-const ACT_PAGE_SIZE = 40
+/** Activity tape only — pools.trade style: 25/page, hard cap 50 rows. Chart uses the full KV tape. */
+const ACT_PAGE_SIZE = 25
+const ACT_MAX_ROWS = 50
 
 export default function TokenPage() {
   const params = useParams()
@@ -605,15 +607,24 @@ export default function TokenPage() {
                         ← Prev
                       </button>
                       <span className="text-xs text-t3">
-                        Page {actPage + 1}
-                        {trades?.total ? ` of ${Math.max(1, Math.ceil(trades.total / ACT_PAGE_SIZE))}` : ''}
+                        Page {actPage + 1} of{' '}
+                        {Math.max(
+                          1,
+                          Math.min(
+                            Math.ceil(ACT_MAX_ROWS / ACT_PAGE_SIZE),
+                            trades?.total != null
+                              ? Math.max(1, Math.ceil(Math.min(trades.total, ACT_MAX_ROWS) / ACT_PAGE_SIZE))
+                              : actPage + 1,
+                          ),
+                        )}
                       </span>
                       <button
                         type="button"
                         disabled={
-                          trades?.total != null
+                          (actPage + 1) * ACT_PAGE_SIZE >= ACT_MAX_ROWS ||
+                          (trades?.total != null
                             ? (actPage + 1) * ACT_PAGE_SIZE >= trades.total
-                            : (trades?.trades?.length ?? 0) < ACT_PAGE_SIZE
+                            : (trades?.trades?.length ?? 0) < ACT_PAGE_SIZE)
                         }
                         onClick={() => setActPage((p) => p + 1)}
                         className="px-3 py-1.5 rounded-lg text-xs font-semibold text-t2 border border-hair disabled:opacity-30 disabled:pointer-events-none hover:border-lime-line hover:text-white transition-colors"
