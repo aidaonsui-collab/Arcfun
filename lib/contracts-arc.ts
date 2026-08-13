@@ -182,10 +182,16 @@ export const ARC_RPC_URLS: string[] = (() => {
     .map((s) => s.trim())
     .filter(Boolean)
   // baracat first (see ARC_MAINNET_RPC_DEFAULT above for why), Infura kept as a fallback, then
-  // the read-only-safe-calls-only theleak tail.
+  // the read-only-safe-calls-only theleak tail. ARC_SCAN_RPC goes LAST, not second: it's a public
+  // RPC with no burst capacity, and catalog reads (fetchArcReflectionPoolTokens etc.) fan out many
+  // concurrent eth_calls. With baracat down 2026-08-13, putting arc-scan.org second sent that whole
+  // burst there, it 429'd ("Request exceeds defined limit"/"temporarily out of capacity"), and the
+  // reflection-pool tokens silently vanished from the home grid (buildArcCatalog swallows a failed
+  // source with `.catch(() => [])`). Infura/theleak tolerate the burst; arc-scan.org doesn't, so it
+  // only gets used once everything else has failed.
   const defaults = ARC_IS_TESTNET
     ? [ARC_TESTNET_RPC]
-    : [ARC_BARACAT_RPC, ARC_SCAN_RPC, ARC_INFURA_RPC, ARC_THELEAK_RPC].filter(Boolean)
+    : [ARC_BARACAT_RPC, ARC_INFURA_RPC, ARC_THELEAK_RPC, ARC_SCAN_RPC].filter(Boolean)
   const seen = new Set<string>()
   const out: string[] = []
   for (const u of [primary, ...extras, ...defaults]) {
