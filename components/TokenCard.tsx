@@ -19,8 +19,6 @@ export function TokenCard({
   const rankLabel =
     rank != null ? (rank + 1 < 10 ? `0${rank + 1}` : String(rank + 1)) : null
   const age = ageLabel(token.createdAt ?? token.lastTradeAt)
-  const creatorAddr = token.creatorFull || token.creator
-  const creator = token.creatorShort || (creatorAddr ? `${creatorAddr.slice(0, 6)}…` : '')
 
   return (
     <div className="group relative text-left border border-hair rounded-[20px] overflow-hidden bg-s1 flex flex-col transition-colors hover:border-lime-line">
@@ -41,19 +39,8 @@ export function TokenCard({
           </span>
         )}
         <span className="absolute top-2.5 left-2.5 right-2.5 flex items-start justify-between gap-1.5 pointer-events-auto z-10">
-          <span className="flex items-center gap-1.5 min-w-0">
-            <span className="shrink-0 px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-white">
-              {age}
-            </span>
-            {creator && creatorAddr ? (
-              <Link
-                href={`/creator/${creatorAddr}`}
-                className="min-w-0 max-w-[92px] truncate px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-medium text-white/80 hover:text-white hover:bg-black/65"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {creator}
-              </Link>
-            ) : null}
+          <span className="shrink-0 px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-white">
+            {age}
           </span>
           <LaunchKindBadge token={token} />
         </span>

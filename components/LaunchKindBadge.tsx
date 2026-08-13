@@ -38,16 +38,6 @@ export function LaunchKindBadge({
     )
   }
 
-  if (token.instant || token.instantLaunch || token.launchKind === 'instant') {
-    return (
-      <span
-        className={`${base} bg-black/50 border border-white/10 text-lime-t`}
-        title="Instant Uni V3 launch — full supply in pool"
-      >
-        Uni V3
-      </span>
-    )
-  }
-
+  // Instant / Uni V3 is the default product — no badge on tiles.
   return null
 }
