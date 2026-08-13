@@ -1,7 +1,6 @@
 /**
- * Bucket raw Arc Instant swaps (lib/arc-trades.ts) into OHLCV candles for the chart.
- * Real trade-derived data — replaces the old areaChartPaths() synthetic sparkline
- * (lib/ui-format.ts), which was seeded random noise, not price history.
+ * Bucket indexed swap tape into OHLCV — same shape pools.trade uses
+ * (interval candles across full history, carry last close through quiet buckets).
  */
 import type { EvmTrade } from './evm-trades'
 
@@ -14,23 +13,37 @@ export interface Candle {
   volume: number // USD
 }
 
-/** Bucket width (seconds) per chart range — tuned to the ~50-trade tape arc-trades.ts returns. */
+/**
+ * Interval (seconds) per chart control — these are candle widths, not "last N minutes".
+ * Matches pools.trade's 5m / 15m / 1h / 1d / 1w resolutions.
+ */
 export const RANGE_BUCKET_SEC = {
-  '5M': 300, // 5-minute candles
-  '15M': 900, // 15-minute candles
-  '1H': 60, // 1-minute candles
-  '1D': 900, // 15-minute candles
-  '1W': 3600, // 1-hour candles
+  '5M': 300,
+  '15M': 900,
+  '1H': 3_600,
+  '1D': 86_400,
+  '1W': 604_800,
 } as const
 
-/** Never backfill more than this many empty buckets — keeps an old/quiet token's chart from
- *  rendering thousands of flat bars if it just hasn't traded in a while. */
-const MAX_BACKFILL_BUCKETS = 400
+/** Cap empty carry-forward so a quiet token doesn't emit thousands of flat bars. */
+const MAX_BUCKETS = 720
+
+export function scaleCandles(candles: Candle[], mult: number): Candle[] {
+  if (!(mult > 0) || mult === 1) return candles
+  return candles.map((c) => ({
+    ...c,
+    open: c.open * mult,
+    high: c.high * mult,
+    low: c.low * mult,
+    close: c.close * mult,
+    // volume stays USD notional
+  }))
+}
 
 /**
- * Build ascending OHLCV candles from a trade tape (any order in, any order out — sorted here).
- * `fallbackPrice` seeds a single flat candle when there's no trade history yet, so the chart
- * always has something sane to render instead of going blank.
+ * Build ascending OHLCV from the full trade tape.
+ * Empty buckets between first trade and now carry the last close (pools.trade style)
+ * so the time axis is real dates, not two stretched blocks.
  */
 export function buildCandles(trades: EvmTrade[], bucketSec: number, fallbackPrice: number): Candle[] {
   const priced = trades.filter((t) => t.ts > 0 && t.priceUsd > 0)
@@ -64,32 +77,44 @@ export function buildCandles(trades: EvmTrade[], bucketSec: number, fallbackPric
   }
 
   const real = [...byBucket.values()].sort((a, b) => a.time - b.time)
-
-  // Backfill gaps (real trade buckets to "now") with flat candles at the last known close.
-  // Without this, a token that only has 1-2 trades produces 1-2 candles total, and
-  // lightweight-charts' fitContent() stretches those into giant blocks filling the whole
-  // container — this keeps bar count (and therefore bar width) reasonable regardless of how
-  // quiet the token has been.
   const nowBucket = Math.floor(Date.now() / 1000 / bucketSec) * bucketSec
+  const first = real[0].time
+  const span = Math.floor((nowBucket - first) / bucketSec) + 1
+  // If history is longer than the cap, start late enough to still include "now"
+  // and keep the most recent real trades.
+  let cursor = first
+  if (span > MAX_BUCKETS) {
+    cursor = nowBucket - (MAX_BUCKETS - 1) * bucketSec
+    const earliestReal = real.find((c) => c.time >= cursor)
+    if (earliestReal && earliestReal.time < cursor) cursor = earliestReal.time
+  }
+
   const out: Candle[] = []
   let lastClose = real[0].open
-  let cursor = real[0].time
-  let bucketsEmitted = 0
   let ri = 0
-  while (cursor <= nowBucket && bucketsEmitted < MAX_BACKFILL_BUCKETS) {
+  while (ri < real.length && real[ri].time < cursor) {
+    lastClose = real[ri].close
+    ri++
+  }
+
+  while (cursor <= nowBucket && out.length < MAX_BUCKETS) {
     const hit = ri < real.length && real[ri].time === cursor ? real[ri] : null
     if (hit) {
       out.push(hit)
       lastClose = hit.close
       ri++
     } else {
-      out.push({ time: cursor, open: lastClose, high: lastClose, low: lastClose, close: lastClose, volume: 0 })
+      out.push({
+        time: cursor,
+        open: lastClose,
+        high: lastClose,
+        low: lastClose,
+        close: lastClose,
+        volume: 0,
+      })
     }
     cursor += bucketSec
-    bucketsEmitted++
   }
-  // If the backfill cap was hit before reaching "now", just tack on any remaining real buckets
-  // (real trades always win over the cap — the cap only limits synthetic flat filler).
   while (ri < real.length) {
     out.push(real[ri])
     ri++

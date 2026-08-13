@@ -1,46 +1,32 @@
 'use client'
 
 /**
- * Candlestick + volume chart via TradingView lightweight-charts.
- * Optional opt-in trader PFP markers (wallets with ArcFun profile + avatar).
- *
- * Marker X positions snap to the nearest candle time — trade timestamps rarely land on a
- * bucket boundary, and timeToCoordinate() returns null for times not in the series data.
+ * Candlestick + volume — pools.trade / Uniswap Pools layout:
+ * dotted grid, last-price line, volume pane, date axis, crosshair OHLC.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import Link from 'next/link'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createChart,
   ColorType,
+  CrosshairMode,
+  LineStyle,
   CandlestickSeries,
   HistogramSeries,
   type IChartApi,
   type ISeriesApi,
   type UTCTimestamp,
+  type MouseEventParams,
 } from 'lightweight-charts'
 import type { Candle } from '@/lib/candles'
-import { fmtUsd, shortAddr } from '@/lib/ui-format'
+import { fmtUsd } from '@/lib/ui-format'
 
-const BG = '#0F2137'
-const UP = '#26C281'
+const BG = '#131313'
+const UP = '#40B66B'
 const DOWN = '#F0616D'
-const UP_VOL = 'rgba(63, 213, 147, 0.33)'
-const DOWN_VOL = 'rgba(255, 99, 117, 0.33)'
-
-const PFP_SIZE = 28
-const MAX_PFPS = 48
-const MIN_USD = 0.01
-
-export type ChartTradeMarker = {
-  time: number
-  price: number
-  isBuy: boolean
-  avatarUrl: string
-  trader: string
-  displayName?: string
-  twitter?: string
-  valueUsd?: number
-}
+const UP_VOL = 'rgba(64, 182, 107, 0.38)'
+const DOWN_VOL = 'rgba(240, 97, 109, 0.38)'
+const GRID = 'rgba(255,255,255,0.055)'
+const TEXT = 'rgba(255,255,255,0.45)'
 
 function priceFormatFor(price: number): { precision: number; minMove: number } {
   if (!(price > 0)) return { precision: 2, minMove: 0.01 }
@@ -49,96 +35,52 @@ function priceFormatFor(price: number): { precision: number; minMove: number } {
   return { precision, minMove: Math.pow(10, -precision) }
 }
 
-/** Snap trade ts to nearest series bar time so timeToCoordinate succeeds. */
-function nearestBarTime(barTimes: number[], t: number): number | null {
-  if (!barTimes.length) return null
-  let best = barTimes[0]
-  let bestD = Math.abs(best - t)
-  for (let i = 1; i < barTimes.length; i++) {
-    const d = Math.abs(barTimes[i] - t)
-    if (d < bestD) {
-      best = barTimes[i]
-      bestD = d
-    }
-  }
-  return best
-}
-
-type Pos = { left: number; top: number; marker: ChartTradeMarker }
+export type HoverCandle = Candle & { up: boolean }
 
 export function TokenChart({
   candles,
-  height = 280,
-  markers = [],
+  height = 360,
+  onHover,
 }: {
   candles: Candle[]
   height?: number
-  markers?: ChartTradeMarker[]
+  onHover?: (c: HoverCandle | null) => void
 }) {
-  const wrapRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
-  const candlesRef = useRef(candles)
-  candlesRef.current = candles
+  const onHoverRef = useRef(onHover)
+  onHoverRef.current = onHover
+  const [ready, setReady] = useState(0)
 
-  const [positions, setPositions] = useState<Pos[]>([])
-  const [hover, setHover] = useState<ChartTradeMarker | null>(null)
-
-  const cappedMarkers = useMemo(() => {
-    return [...markers]
-      .filter((m) => m.avatarUrl && m.time > 0 && m.price > 0 && Number.isFinite(m.price))
-      .filter((m) => (m.valueUsd == null ? true : m.valueUsd >= MIN_USD))
-      .sort((a, b) => b.time - a.time)
-      .slice(0, MAX_PFPS)
-  }, [markers])
-
-  const cappedRef = useRef(cappedMarkers)
-  cappedRef.current = cappedMarkers
-
-  const layoutMarkers = useCallback(() => {
-    const chart = chartRef.current
-    const series = candleSeriesRef.current
-    if (!chart || !series) {
-      setPositions([])
-      return
-    }
-    const bars = candlesRef.current
-    const barTimes = bars.map((c) => c.time)
-    if (!barTimes.length) {
-      setPositions([])
-      return
-    }
-
-    const ts = chart.timeScale()
-    const next: Pos[] = []
-    const stackAtX = new Map<number, number>()
-
-    for (const m of cappedRef.current) {
-      const barT = nearestBarTime(barTimes, m.time)
-      if (barT == null) continue
-      const x = ts.timeToCoordinate(barT as UTCTimestamp)
-      let y = series.priceToCoordinate(m.price)
-      // If price is slightly outside the current scale, pin to mid-candle
-      if (y == null || Number.isNaN(y)) {
-        const bar = bars.find((c) => c.time === barT)
-        if (bar) y = series.priceToCoordinate(bar.close)
+  const attachCrosshair = useCallback((chart: IChartApi, series: ISeriesApi<'Candlestick'>) => {
+    const handler = (param: MouseEventParams) => {
+      const cb = onHoverRef.current
+      if (!cb) return
+      if (!param.time || !param.point) {
+        cb(null)
+        return
       }
-      if (x == null || y == null || Number.isNaN(x) || Number.isNaN(y)) continue
-
-      const xKey = Math.round(x)
-      const stack = stackAtX.get(xKey) ?? 0
-      stackAtX.set(xKey, stack + 1)
-      const stackOffset = stack * 6
-
-      next.push({
-        left: x - PFP_SIZE / 2,
-        top: y - PFP_SIZE / 2 - stackOffset,
-        marker: m,
+      const raw = param.seriesData.get(series) as
+        | { open: number; high: number; low: number; close: number; time: UTCTimestamp }
+        | undefined
+      if (!raw) {
+        cb(null)
+        return
+      }
+      cb({
+        time: Number(raw.time),
+        open: raw.open,
+        high: raw.high,
+        low: raw.low,
+        close: raw.close,
+        volume: 0,
+        up: raw.close >= raw.open,
       })
     }
-    setPositions(next)
+    chart.subscribeCrosshairMove(handler)
+    return () => chart.unsubscribeCrosshairMove(handler)
   }, [])
 
   useEffect(() => {
@@ -148,18 +90,40 @@ export function TokenChart({
     const chart = createChart(el, {
       layout: {
         background: { type: ColorType.Solid, color: BG },
-        textColor: 'rgba(255,255,255,0.5)',
+        textColor: TEXT,
         fontSize: 11,
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
       },
       grid: {
-        vertLines: { color: BG },
-        horzLines: { color: BG },
+        vertLines: { color: GRID, style: LineStyle.Dotted },
+        horzLines: { color: GRID, style: LineStyle.Dotted },
       },
-      rightPriceScale: { borderVisible: false },
-      timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false, barSpacing: 10 },
+      rightPriceScale: {
+        borderVisible: false,
+        scaleMargins: { top: 0.08, bottom: 0.22 },
+      },
+      timeScale: {
+        borderVisible: false,
+        timeVisible: true,
+        secondsVisible: false,
+        barSpacing: 8,
+        minBarSpacing: 3,
+        rightOffset: 4,
+      },
       crosshair: {
-        vertLine: { color: 'rgba(255,255,255,0.25)', labelBackgroundColor: '#1C3552' },
-        horzLine: { color: 'rgba(255,255,255,0.25)', labelBackgroundColor: '#1C3552' },
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          color: 'rgba(255,255,255,0.22)',
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: '#2a2a2a',
+        },
+        horzLine: {
+          color: 'rgba(255,255,255,0.22)',
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: '#2a2a2a',
+        },
       },
       autoSize: true,
     })
@@ -172,39 +136,49 @@ export function TokenChart({
       borderDownColor: DOWN,
       wickUpColor: UP,
       wickDownColor: DOWN,
+      lastValueVisible: true,
+      priceLineVisible: true,
+      priceLineColor: UP,
+      priceLineStyle: LineStyle.Dotted,
+      priceLineWidth: 1,
     })
     candleSeriesRef.current = candleSeries
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
       priceScaleId: '',
+      lastValueVisible: false,
+      priceLineVisible: false,
     })
-    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } })
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0.82, bottom: 0 },
+    })
     volumeSeriesRef.current = volumeSeries
 
-    const onRange = () => layoutMarkers()
-    chart.timeScale().subscribeVisibleLogicalRangeChange(onRange)
-    chart.timeScale().subscribeVisibleTimeRangeChange(onRange)
-    window.addEventListener('resize', onRange)
+    const unsub = attachCrosshair(chart, candleSeries)
+    setReady((n) => n + 1)
 
     return () => {
-      window.removeEventListener('resize', onRange)
-      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
-      chart.timeScale().unsubscribeVisibleTimeRangeChange(onRange)
+      unsub()
       chart.remove()
       chartRef.current = null
       candleSeriesRef.current = null
       volumeSeriesRef.current = null
     }
-  }, [layoutMarkers])
+  }, [attachCrosshair])
 
   useEffect(() => {
     const candleSeries = candleSeriesRef.current
     const volumeSeries = volumeSeriesRef.current
-    if (!candleSeries || !volumeSeries) return
+    const chart = chartRef.current
+    if (!candleSeries || !volumeSeries || !chart) return
 
     const lastClose = candles[candles.length - 1]?.close ?? 0
-    candleSeries.applyOptions({ priceFormat: { type: 'price', ...priceFormatFor(lastClose) } })
+    const lastUp = (candles[candles.length - 1]?.close ?? 0) >= (candles[candles.length - 1]?.open ?? 0)
+    candleSeries.applyOptions({
+      priceFormat: { type: 'price', ...priceFormatFor(lastClose) },
+      priceLineColor: lastUp ? UP : DOWN,
+    })
 
     candleSeries.setData(
       candles.map((c) => ({
@@ -222,123 +196,25 @@ export function TokenChart({
         color: c.close >= c.open ? UP_VOL : DOWN_VOL,
       })),
     )
-    const raf = requestAnimationFrame(() => {
-      const chart = chartRef.current
-      if (!chart) return
-      if (candles.length > 60) {
-        chart.timeScale().fitContent()
-      } else {
-        chart.timeScale().scrollToRealTime()
-      }
-      // Second frame: coordinates settle after fit/scroll
-      requestAnimationFrame(() => layoutMarkers())
-    })
-    return () => cancelAnimationFrame(raf)
-  }, [candles, layoutMarkers])
 
-  useEffect(() => {
-    const t = window.setTimeout(() => layoutMarkers(), 50)
-    return () => clearTimeout(t)
-  }, [cappedMarkers, layoutMarkers])
+    requestAnimationFrame(() => {
+      chart.timeScale().fitContent()
+    })
+  }, [candles, ready])
 
   return (
-    <div ref={wrapRef} className="relative" style={{ height, width: '100%' }}>
+    <div className="relative w-full" style={{ height, background: BG }}>
       <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
-
-      <div className="pointer-events-none absolute inset-0 overflow-visible z-10">
-        {positions.map((p, i) => (
-          <button
-            key={`${p.marker.trader}-${p.marker.time}-${i}`}
-            type="button"
-            className="pointer-events-auto absolute rounded-full border-2 overflow-hidden shadow-lg transition-transform hover:scale-110 focus:scale-110 focus:outline-none"
-            style={{
-              left: p.left,
-              top: p.top,
-              width: PFP_SIZE,
-              height: PFP_SIZE,
-              borderColor: p.marker.isBuy ? UP : DOWN,
-              zIndex: 5 + i,
-              padding: 0,
-              background: '#1a1f2a',
-            }}
-            title={
-              p.marker.twitter
-                ? `@${p.marker.twitter}`
-                : p.marker.displayName || shortAddr(p.marker.trader)
-            }
-            onClick={(e) => {
-              e.stopPropagation()
-              setHover(p.marker)
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={p.marker.avatarUrl}
-              alt=""
-              className="w-full h-full object-cover"
-              draggable={false}
-            />
-          </button>
-        ))}
-      </div>
-
-      {hover ? (
-        <div
-          className="absolute z-20 w-[240px] rounded-2xl border border-hair bg-s1/95 backdrop-blur-md shadow-2xl p-3.5"
-          style={{ right: 12, top: 12 }}
-        >
-          <div className="flex items-start gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={hover.avatarUrl}
-              alt=""
-              className="w-10 h-10 rounded-full object-cover border-2 shrink-0"
-              style={{ borderColor: hover.isBuy ? UP : DOWN }}
-            />
-            <div className="min-w-0 flex-1">
-              <p className="m-0 text-sm font-semibold truncate">
-                {hover.twitter ? `@${hover.twitter}` : hover.displayName || shortAddr(hover.trader)}
-              </p>
-              <p className="m-0 text-[11px] text-t3 tabular-nums truncate">
-                {shortAddr(hover.trader)}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="text-t3 hover:text-white text-xs"
-              onClick={() => setHover(null)}
-            >
-              ✕
-            </button>
-          </div>
-          <div
-            className="mt-3 rounded-xl px-3 py-2.5 border"
-            style={{
-              borderColor: hover.isBuy ? 'rgba(38,194,129,0.35)' : 'rgba(240,97,109,0.35)',
-              background: hover.isBuy ? 'rgba(38,194,129,0.08)' : 'rgba(240,97,109,0.08)',
-            }}
-          >
-            <div className="flex items-center justify-between">
-              <span
-                className="text-xs font-bold tracking-wide"
-                style={{ color: hover.isBuy ? UP : DOWN }}
-              >
-                {hover.isBuy ? 'BUY' : 'SELL'}
-              </span>
-              <span className="text-sm font-semibold tabular-nums">
-                {hover.valueUsd != null ? fmtUsd(hover.valueUsd) : '—'}
-              </span>
-            </div>
-          </div>
-          <Link
-            href={`/creator/${hover.trader}`}
-            className="mt-3 flex items-center justify-between text-[12px] font-semibold text-lime-t hover:text-white"
-            onClick={() => setHover(null)}
-          >
-            View full profile →
-          </Link>
-        </div>
-      ) : null}
     </div>
   )
+}
+
+export function ohlcLabel(c: Pick<Candle, 'open' | 'high' | 'low' | 'close' | 'volume'>, fmt = fmtUsd) {
+  return {
+    o: fmt(c.open),
+    h: fmt(c.high),
+    l: fmt(c.low),
+    c: fmt(c.close),
+    v: fmt(c.volume),
+  }
 }
