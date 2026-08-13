@@ -8,7 +8,7 @@ export function Footer() {
         <p className="max-w-xl leading-relaxed">
           Arcfun — Instant token launches on{' '}
           <a
-            href={ARC_EXPLORER || 'https://arc-scan.io'}
+            href={ARC_EXPLORER || 'https://arc-scan.org'}
             target="_blank"
             rel="noopener noreferrer"
             className="text-t2 hover:text-white"
@@ -50,7 +50,7 @@ export function Footer() {
             </svg>
           </a>
           <a
-            href={ARC_EXPLORER || 'https://arc-scan.io'}
+            href={ARC_EXPLORER || 'https://arc-scan.org'}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-white"

@@ -196,7 +196,7 @@ export default function TokenPage() {
   const buyPct = vol > 0 ? (buyUsd / vol) * 100 : 50
   const sellPct = 100 - buyPct
 
-  const explorer = ARC_EXPLORER || 'https://arc-scan.io'
+  const explorer = ARC_EXPLORER || 'https://arc-scan.org'
   const seed = token || pool?.symbol || 'arc'
   const { tile, mono } = tileGradient(seed)
   const chg = changeParts(pool?.priceChange24h)

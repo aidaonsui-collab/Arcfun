@@ -511,7 +511,7 @@ export function ArcDexTradePanel({
 
           {txHash && (
             <a
-              href={`${ARC_EXPLORER || 'https://arc-scan.io'}/tx/${txHash}`}
+              href={`${ARC_EXPLORER || 'https://arc-scan.org'}/tx/${txHash}`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-1 w-full mt-3 text-[11px] text-t3 hover:text-t2"

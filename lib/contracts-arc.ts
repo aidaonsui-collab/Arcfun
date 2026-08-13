@@ -11,7 +11,7 @@
  *   NEXT_PUBLIC_ARC_CHAIN_ID=5042
  *   NEXT_PUBLIC_ARC_RPC=https://arc-mainnet.infura.io/v3/<PROJECT_ID>
  *   # or set NEXT_PUBLIC_INFURA_API_KEY and we build the URL
- *   NEXT_PUBLIC_ARC_EXPLORER=https://arc-scan.io
+ *   NEXT_PUBLIC_ARC_EXPLORER=https://arc-scan.org
  *   NEXT_PUBLIC_ARC_ENABLED=1
  *
  * 2026-08-03: Railway fortest RPC is DEAD. Public baracat rate-limits under burst (Cloudflare
@@ -74,6 +74,8 @@ const ARC_INFURA_RPC = ARC_INFURA_KEY ? `${ARC_INFURA_HOST}/v3/${ARC_INFURA_KEY}
 
 /** Public unauthenticated fallbacks when Infura is unset / project lacks Arc / rate-limited. */
 const ARC_BARACAT_RPC = 'https://arc-mainnet-rpc.baracat.meme'
+/** Arcscan public RPC — domain moved .io → .org 2026-08-12 (old NS zone emptied). */
+const ARC_SCAN_RPC = 'https://rpc.arc-scan.org'
 
 /**
  * Tail-only fallback — verified 2026-08-10 as a real, in-sync Arc mainnet node (correct chainId,
@@ -183,7 +185,7 @@ export const ARC_RPC_URLS: string[] = (() => {
   // the read-only-safe-calls-only theleak tail.
   const defaults = ARC_IS_TESTNET
     ? [ARC_TESTNET_RPC]
-    : [ARC_BARACAT_RPC, ARC_INFURA_RPC, ARC_THELEAK_RPC].filter(Boolean)
+    : [ARC_BARACAT_RPC, ARC_SCAN_RPC, ARC_INFURA_RPC, ARC_THELEAK_RPC].filter(Boolean)
   const seen = new Set<string>()
   const out: string[] = []
   for (const u of [primary, ...extras, ...defaults]) {
@@ -247,17 +249,18 @@ export function arcCreationFeeWeiFor(creator: string | undefined | null): bigint
 
 /**
  * Block explorer base URL (no trailing slash).
- * Mainnet default: https://arc-scan.io (working public Arc explorer).
- * Ignores deprecated `arcscan.app` env values — that host was still baked into
- * NEXT_PUBLIC_ARC_EXPLORER on some deploys and overrode the new default.
+ * Mainnet default: https://arc-scan.org (Arcscan moved off .io 2026-08-12 after
+ * their .io nameservers were repointed to an empty zone).
+ * Ignores stale env values for arcscan.app and arc-scan.io so an old Vercel
+ * NEXT_PUBLIC_ARC_EXPLORER cannot keep shipping dead explorer links.
  */
 function resolveArcExplorer(): string {
   if (ARC_IS_TESTNET) {
     return process.env.NEXT_PUBLIC_ARC_EXPLORER?.trim() || ARC_TESTNET_EXPLORER
   }
   const raw = (process.env.NEXT_PUBLIC_ARC_EXPLORER || '').trim().replace(/\/$/, '')
-  if (raw && !/arcscan\.app/i.test(raw)) return raw
-  return ARC_MAINNET_CHAIN_ID === ARC_CHAIN_ID ? 'https://arc-scan.io' : ''
+  if (raw && !/arcscan\.app/i.test(raw) && !/arc-scan\.io/i.test(raw)) return raw
+  return ARC_MAINNET_CHAIN_ID === ARC_CHAIN_ID ? 'https://arc-scan.org' : ''
 }
 
 export const ARC_EXPLORER = resolveArcExplorer()
