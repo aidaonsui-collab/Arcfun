@@ -19,6 +19,7 @@ import {
   LIQUIDITY_ABI,
   robinOtcEnabled,
   fetchRecentFills,
+  fetchRecentSales,
   fetchFillById,
   fetchMakerOffers,
   loadLocalFillIds,
@@ -38,6 +39,7 @@ export function InstantOtcOrders() {
   const { writeContractAsync } = useWriteContract()
 
   const [purchases, setPurchases] = useState<OtcFill[]>([])
+  const [sales, setSales] = useState<OtcFill[]>([])
   const [offers, setOffers] = useState<OtcOffer[]>([])
   const [lookup, setLookup] = useState('')
   const [lookupChain, setLookupChain] = useState<OtcPaymentChainId>('base')
@@ -65,6 +67,17 @@ export function InstantOtcOrders() {
         address ? fetchRecentFills({ buyer: address }) : Promise.resolve([] as OtcFill[]),
         address ? fetchMakerOffers(address) : Promise.resolve([] as OtcOffer[]),
       ])
+      let makerSales: OtcFill[] = []
+      if (address) {
+        try {
+          makerSales = await fetchRecentSales({
+            seller: address,
+            offerIds: makerOffers.map((o) => o.offerId),
+          })
+        } catch (e) {
+          console.warn('[otc] sales scan failed', e)
+        }
+      }
 
       // Merge browser-local fill ids not in log window
       const local = loadLocalFillIds()
@@ -84,6 +97,7 @@ export function InstantOtcOrders() {
       const all = [...extras, ...chainFills]
       all.sort((a, b) => b.createdAt - a.createdAt)
       setPurchases(all)
+      setSales(makerSales)
       setOffers(makerOffers)
     } catch (e) {
       // Keep prior purchases/offers when Arc/Base RPC scan fails mid-poll.
@@ -296,6 +310,37 @@ export function InstantOtcOrders() {
 
       <section className="otc-orders-section">
         <div className="otc-section-label">
+          <span>Sales</span>
+        </div>
+        {!isConnected ? (
+          <div className="otc-empty">
+            <h3>Connect wallet</h3>
+            <p>Fills against your offers — and payouts to this wallet — show here.</p>
+          </div>
+        ) : sales.length === 0 ? (
+          <div className="otc-empty">
+            <h3>No sales yet</h3>
+            <p>When someone fills your book, the dest size and Base/ARB proceeds list here.</p>
+          </div>
+        ) : (
+          <div className="otc-orders-list">
+            {sales.map((f) => (
+              <FillCard
+                key={`sale-${f.paymentChainId}-${f.fillId}`}
+                fill={f}
+                now={now}
+                busy={busy}
+                canRefund={false}
+                onRefund={() => undefined}
+                mode="sale"
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="otc-orders-section">
+        <div className="otc-section-label">
           <span>My liquidity offers</span>
         </div>
         {!isConnected ? (
@@ -399,12 +444,14 @@ function FillCard({
   busy,
   canRefund,
   onRefund,
+  mode = 'buy',
 }: {
   fill: OtcFill
   now: number
   busy: boolean
   canRefund: boolean
   onRefund: () => void
+  mode?: 'buy' | 'sale'
 }) {
   const unlockAt = fill.createdAt + (fill.refundDelaySec ?? 1800)
   const secsLeft = Math.max(0, unlockAt - now)
@@ -418,19 +465,30 @@ function FillCard({
     <div className="otc-order-card">
       <div className="otc-order-top">
         <span className="otc-order-title">
-          {formatUsdc6(fill.destAmount)} USDC → Arc · pay {fill.paymentChainName}
+          {mode === 'sale'
+            ? `${formatUsdc6(fill.destAmount)} USDC sold · paid on ${fill.paymentChainName}`
+            : `${formatUsdc6(fill.destAmount)} USDC → Arc · pay ${fill.paymentChainName}`}
         </span>
         <StatusBadge label={badgeLabel} />
       </div>
       <div className="otc-order-rows">
         <div className="otc-offer-row">
-          <span className="lbl">You paid</span>
+          <span className="lbl">{mode === 'sale' ? 'You received' : 'You paid'}</span>
           <span className="val">
-            {formatUsdc6(fill.sellerProceeds + fill.serviceFee)} USDC ({fill.paymentChainName})
+            {formatUsdc6(
+              mode === 'sale' ? fill.sellerProceeds : fill.sellerProceeds + fill.serviceFee,
+            )}{' '}
+            USDC ({fill.paymentChainName})
           </span>
         </div>
+        {mode === 'sale' && (
+          <div className="otc-offer-row">
+            <span className="lbl">Buyer</span>
+            <span className="otc-maker-chip">{short(fill.buyer)}</span>
+          </div>
+        )}
         <div className="otc-offer-row">
-          <span className="lbl">Recipient</span>
+          <span className="lbl">{mode === 'sale' ? 'Buyer received on Arc' : 'Recipient'}</span>
           <span className="otc-maker-chip">{short(fill.destRecipient)}</span>
         </div>
         <div className="otc-offer-row">
@@ -450,7 +508,7 @@ function FillCard({
             {fill.paymentChainName} {short(fill.paymentEscrow)}
           </a>
         </div>
-        {isPending && (
+        {mode === 'buy' && isPending && (
           <div className="otc-offer-row">
             <span className="lbl">Self-refund</span>
             <span className="val">
@@ -458,14 +516,14 @@ function FillCard({
             </span>
           </div>
         )}
-        {isLocked && (
+        {mode === 'buy' && isLocked && (
           <div className="otc-offer-row">
             <span className="lbl">Self-refund</span>
             <span className="val">Blocked while settling</span>
           </div>
         )}
       </div>
-      {isPending && (
+      {mode === 'buy' && isPending && (
         <>
           <button
             type="button"
@@ -485,24 +543,34 @@ function FillCard({
       )}
       {isLocked && (
         <p className="otc-order-hint">
-          Settling — keeper is delivering Arc USDC. Self-refund is blocked until delivery fails and
-          unlocks, or settle completes.
+          {mode === 'sale'
+            ? 'Settling — keeper is delivering Arc USDC to the buyer. Your proceeds pay out on settle.'
+            : 'Settling — keeper is delivering Arc USDC. Self-refund is blocked until delivery fails and unlocks, or settle completes.'}
         </p>
       )}
       {fill.status === 3 && fill.arcDelivered === true && (
-        <p className="otc-order-hint">Settled — maker paid, Arc USDC delivered.</p>
+        <p className="otc-order-hint">
+          {mode === 'sale'
+            ? 'Settled — proceeds sent to your payment wallet, Arc USDC delivered to the buyer.'
+            : 'Settled — maker paid, Arc USDC delivered.'}
+        </p>
       )}
       {fill.status === 3 && fill.arcDelivered === false && (
         <p className="otc-order-hint" style={{ color: 'var(--coral, #ff7a62)' }}>
-          Settled on payment chain only — Arc delivery did not complete. Contact support for
-          make-good; refund is not available after settle.
+          {mode === 'sale'
+            ? 'Settled on the payment chain (you were paid) but Arc delivery did not complete.'
+            : 'Settled on payment chain only — Arc delivery did not complete. Contact support for make-good; refund is not available after settle.'}
         </p>
       )}
       {fill.status === 3 && fill.arcDelivered == null && (
         <p className="otc-order-hint">Settled on payment chain (verifying Arc delivery…).</p>
       )}
       {fill.status === 4 && (
-        <p className="otc-order-hint">Refunded — escrow returned to buyer.</p>
+        <p className="otc-order-hint">
+          {mode === 'sale'
+            ? 'Refunded — buyer got their payment back; this sale did not complete.'
+            : 'Refunded — escrow returned to buyer.'}
+        </p>
       )}
       {!isInFlight && fill.status !== 3 && fill.status !== 4 && null}
     </div>

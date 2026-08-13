@@ -861,6 +861,176 @@ export async function fetchRecentFills(opts?: {
   return out
 }
 
+/**
+ * Fills that paid this wallet as maker (`sellerPayment`), plus any FillCreated
+ * against the maker's offer ids (pending / refunded sales that never settled).
+ * "My orders" purchases only index `buyer` — sales were invisible there.
+ */
+export async function fetchRecentSales(opts: {
+  seller: Address
+  offerIds?: Hex[]
+  maxBlocks?: bigint
+  chunkSize?: bigint
+}): Promise<OtcFill[]> {
+  if (!robinOtcEnabled()) return []
+  const seller = opts.seller.toLowerCase()
+  const maxBlocks = opts.maxBlocks ?? 120_000n
+  const chunkSize = opts.chunkSize ?? PAYMENT_LOG_LOOKBACK
+  const offerIds = [...new Set((opts.offerIds ?? []).map((id) => id.toLowerCase() as Hex))]
+  const out: OtcFill[] = []
+  const seen = new Set<string>()
+
+  await Promise.all(
+    livePaymentChains().map(async (chain) => {
+      try {
+        const client = paymentClient(chain)
+        const latest = await client.getBlockNumber()
+        let refundDelay = 30 * 60
+        try {
+          refundDelay = Number(
+            await client.readContract({
+              address: chain.payment,
+              abi: PAYMENT_ABI,
+              functionName: 'refundDelay',
+            }),
+          )
+        } catch {
+          /* default */
+        }
+
+        const ids: Hex[] = []
+        let to = latest
+        const earliest = latest > maxBlocks ? latest - maxBlocks : 0n
+        while (to >= earliest) {
+          const from = to > chunkSize ? to - chunkSize + 1n : earliest
+          const rangeFrom = from < earliest ? earliest : from
+          try {
+            const settled = await client.getContractEvents({
+              address: chain.payment,
+              abi: PAYMENT_ABI,
+              eventName: 'FillSettled',
+              fromBlock: rangeFrom,
+              toBlock: to,
+              args: { sellerPayment: opts.seller },
+            })
+            for (const log of settled) {
+              const fillId = log.args.fillId as Hex | undefined
+              if (fillId) ids.push(fillId)
+            }
+            for (const offerId of offerIds) {
+              const created = await client.getContractEvents({
+                address: chain.payment,
+                abi: PAYMENT_ABI,
+                eventName: 'FillCreated',
+                fromBlock: rangeFrom,
+                toBlock: to,
+                args: { offerId },
+              })
+              for (const log of created) {
+                const fillId = log.args.fillId as Hex | undefined
+                if (fillId) ids.push(fillId)
+              }
+            }
+          } catch {
+            /* chunk failed */
+          }
+          if (rangeFrom === 0n || rangeFrom <= earliest) break
+          to = rangeFrom - 1n
+        }
+
+        const newIds = ids.filter((fillId) => {
+          const sk = `${chain.id}:${fillId.toLowerCase()}`
+          if (seen.has(sk)) return false
+          seen.add(sk)
+          return true
+        })
+        if (newIds.length === 0) return
+
+        const results = await client.multicall({
+          contracts: newIds.map((fillId) => ({
+            address: chain.payment,
+            abi: PAYMENT_ABI,
+            functionName: 'fills' as const,
+            args: [fillId] as const,
+          })),
+          allowFailure: true,
+        })
+        for (let i = 0; i < newIds.length; i++) {
+          const fillId = newIds[i]
+          const r = results[i]
+          if (r.status !== 'success') continue
+          const row = r.result as readonly [
+            Address,
+            Hex,
+            bigint,
+            Address,
+            Address,
+            number,
+            bigint,
+            bigint,
+            bigint,
+            number,
+            Hex,
+          ]
+          const status = Number(row[9]) as 0 | 1 | 2 | 3 | 4
+          if (status === 0) continue
+          if ((row[4] as string).toLowerCase() !== seller) continue
+          out.push({
+            fillId,
+            buyer: row[0] as Address,
+            offerId: row[1] as Hex,
+            destAmount: row[2] as bigint,
+            destRecipient: row[3] as Address,
+            sellerPayment: row[4] as Address,
+            premiumBps: Number(row[5]),
+            sellerProceeds: row[6] as bigint,
+            serviceFee: row[7] as bigint,
+            createdAt: Number(row[8]),
+            status,
+            statusLabel: FILL_STATUS_LABEL[status] ?? 'none',
+            paymentChainId: chain.id,
+            paymentChainName: chain.shortName,
+            paymentEscrow: chain.payment,
+            explorer: chain.explorer,
+            refundDelaySec: refundDelay,
+            reservationId: (row[10] as Hex | undefined) ?? undefined,
+          })
+        }
+      } catch {
+        /* chain failed */
+      }
+    }),
+  )
+
+  out.sort((a, b) => b.createdAt - a.createdAt)
+
+  if (out.some((f) => f.status === 3)) {
+    try {
+      const arc = arcClient()
+      await Promise.all(
+        out
+          .filter((f) => f.status === 3)
+          .map(async (f) => {
+            try {
+              f.arcDelivered = (await arc.readContract({
+                address: ROBIN_OTC_LIQUIDITY,
+                abi: LIQUIDITY_ABI,
+                functionName: 'delivered',
+                args: [f.fillId],
+              })) as boolean
+            } catch {
+              f.arcDelivered = undefined
+            }
+          }),
+      )
+    } catch {
+      /* optional */
+    }
+  }
+
+  return out
+}
+
 export async function fetchFillById(
   fillId: Hex,
   chainId?: OtcPaymentChainId,
