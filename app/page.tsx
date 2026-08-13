@@ -97,8 +97,9 @@ function HomeInner() {
   const sortTabs: SortKey[] = ['Top volume', 'New', 'Top MC']
 
   return (
-    <main className="min-h-screen text-white pt-16 pb-16">
-      <div className="max-w-desk mx-auto px-4 sm:px-10">
+    <main className="relative min-h-screen text-white pt-16 pb-16 overflow-hidden">
+      <div aria-hidden="true" className="hero-grid-fade" />
+      <div className="relative z-10 max-w-desk mx-auto px-4 sm:px-10">
         <section className="relative mt-6">
           <div className="relative max-w-[600px] flex flex-col gap-3">
             <span className="self-start inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-lime-soft border border-lime-line text-xs font-semibold text-lime-t tracking-tightish whitespace-nowrap">

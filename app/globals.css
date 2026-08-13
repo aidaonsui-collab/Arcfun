@@ -130,6 +130,23 @@
   animation: livePulse 1.8s ease-in-out infinite;
 }
 
+/* Hero backdrop: fine blueprint grid that fades out toward the token tiles,
+   same idea as a dot-grid hero but on-brand (line grid instead of dots). */
+.hero-grid-fade {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 620px;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(126, 192, 247, 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(126, 192, 247, 0.16) 1px, transparent 1px);
+  background-size: 34px 34px;
+  background-position: center top;
+  -webkit-mask-image: radial-gradient(ellipse 78% 68% at 50% -8%, #000 0%, #000 32%, transparent 78%);
+  mask-image: radial-gradient(ellipse 78% 68% at 50% -8%, #000 0%, #000 32%, transparent 78%);
+}
+
 ::-webkit-scrollbar {
   width: 0;
   height: 0;
