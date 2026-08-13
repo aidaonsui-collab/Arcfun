@@ -5,7 +5,7 @@ import { SiteHeader } from '@/components/SiteHeader'
 import { Footer } from '@/components/Footer'
 import { Analytics } from '@vercel/analytics/next'
 
-const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://arcfun.lol'
+const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://www.arcfun.co'
 const TITLE = 'Arcfun — Instant token launches on Arc'
 const DESCRIPTION =
   'Launch a token on Arc mainnet in one transaction. Full supply straight onto Uniswap V3, LP locked a year.'
@@ -30,11 +30,20 @@ export const metadata: Metadata = {
     siteName: 'Arcfun',
     locale: 'en_US',
     type: 'website',
+    images: [
+      {
+        url: '/og.png',
+        width: 1200,
+        height: 630,
+        alt: 'Arcfun — Launch on Arc. Trade in USDC.',
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: TITLE,
     description: DESCRIPTION,
+    images: ['/og.png'],
   },
 }
 
