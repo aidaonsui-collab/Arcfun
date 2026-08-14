@@ -350,10 +350,6 @@ export default function DocsPage() {
                 d: 'The whole 1B supply lands in a Uniswap V3 TOKEN/USDC pool in one transaction. Tradable at block one — no graduate step.',
               },
               {
-                t: 'LP locked',
-                d: 'The Uni V3 position NFT is locked at create. Fees can be collected; liquidity cannot be pulled early.',
-              },
-              {
                 t: 'Token-side fees burn',
                 d: 'Swap fees in the launch token are burned on collect. Quote-side USDC is what gets split.',
               },
