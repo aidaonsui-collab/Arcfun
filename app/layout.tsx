@@ -8,7 +8,7 @@ import { Analytics } from '@vercel/analytics/next'
 const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://www.arcfun.co'
 const TITLE = 'Arcfun — Instant token launches on Arc'
 const DESCRIPTION =
-  'Launch a token on Arc mainnet in one transaction. Full supply straight onto Uniswap V3, LP locked a year.'
+  'Launch a token on Arc mainnet in one transaction. Full supply straight onto Uniswap V3, LP locked.'
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

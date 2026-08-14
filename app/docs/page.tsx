@@ -49,7 +49,7 @@ export default function DocsPage() {
         </h1>
         <p className="mt-3 mb-0 max-w-2xl text-[16px] text-t2 leading-relaxed">
           Instant token launches on Arc. Full supply onto Uniswap V3 from block one, always quoted
-          in USDC, LP locked a year. Two live launch types — Meme and Reflection — plus an Instant
+          in USDC, LP locked. Two live launch types — Meme and Reflection — plus an Instant
           OTC desk to get USDC onto the chain.
         </p>
 
@@ -196,7 +196,7 @@ export default function DocsPage() {
                     ['Holders', '—', '50% via reflect()'],
                     ['Platform', '30%', '25%'],
                     ['Launch-token fees', 'Burned', 'Burned'],
-                    ['LP lock', '1 year', '1 year'],
+                    ['LP lock', 'Locked', 'Locked'],
                     ['Supply', '1,000,000,000', '1,000,000,000'],
                   ].map(([k, a, b]) => (
                     <tr key={k} className="border-b border-hair2 last:border-0">
@@ -351,7 +351,7 @@ export default function DocsPage() {
                 d: 'The whole 1B supply lands in a Uniswap V3 TOKEN/USDC pool in one transaction. Tradable at block one — no graduate step.',
               },
               {
-                t: 'LP locked a year',
+                t: 'LP locked',
                 d: 'The Uni V3 position NFT is locked at create. Fees can be collected; liquidity cannot be pulled early.',
               },
               {
