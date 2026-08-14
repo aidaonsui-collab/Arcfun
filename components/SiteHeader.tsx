@@ -230,6 +230,7 @@ export function SiteHeader() {
             </form>
 
             {navLink('/', 'Home')}
+            {navLink('/docs', 'Docs')}
             {navLink('/otc', 'Arc OTC')}
             {navLink('/create', 'Launch a token', { primary: true })}
             {isConnected && address && !wrongChain && (

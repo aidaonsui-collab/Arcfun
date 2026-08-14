@@ -116,12 +116,12 @@ function HomeInner() {
               >
                 Launch a token
               </Link>
-              <a
-                href="#all-launches"
+              <Link
+                href="/docs"
                 className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
               >
                 How it works
-              </a>
+              </Link>
             </div>
           </div>
 

@@ -6,7 +6,7 @@ export function Footer() {
     <footer className="border-t border-hair mt-8">
       <div className="max-w-desk mx-auto px-4 sm:px-10 py-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 text-[13px] text-t3">
         <p className="max-w-xl leading-relaxed">
-          Arcfun — Instant token launches on{' '}
+          Arcfun — Instant and Reflection launches on{' '}
           <a
             href={ARC_EXPLORER || 'https://arc-scan.org'}
             target="_blank"
@@ -18,6 +18,9 @@ export function Footer() {
           . Full supply on Uniswap V3 from block one; launch-token LP fees are auto-burned.
         </p>
         <div className="flex items-center gap-5 font-medium text-t2">
+          <Link href="/docs" className="hover:text-white">
+            Docs
+          </Link>
           <Link href="/otc" className="hover:text-white">
             Arc OTC
           </Link>
