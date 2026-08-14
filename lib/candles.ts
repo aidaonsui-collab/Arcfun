@@ -1,6 +1,8 @@
 /**
- * Bucket indexed swap tape into OHLCV — same shape pools.trade uses
- * (interval candles across full history, carry last close through quiet buckets).
+ * Bucket indexed swap tape into OHLCV.
+ * Only buckets that had a trade are emitted — empty 5m/15m slots are skipped so
+ * candles sit adjacent (RadarDEX). lightweight-charts already spaces by index,
+ * not wall-clock, so filling quiet buckets just draws invisible dojis ("gaps").
  */
 import type { EvmTrade } from './evm-trades'
 
@@ -25,7 +27,7 @@ export const RANGE_BUCKET_SEC = {
   '1W': 604_800,
 } as const
 
-/** Cap empty carry-forward so a quiet token doesn't emit thousands of flat bars. */
+/** Cap how many trade-buckets we keep (most recent). */
 const MAX_BUCKETS = 720
 
 export function scaleCandles(candles: Candle[], mult: number): Candle[] {
@@ -42,8 +44,7 @@ export function scaleCandles(candles: Candle[], mult: number): Candle[] {
 
 /**
  * Build ascending OHLCV from the full trade tape.
- * Empty buckets between first trade and now carry the last close (pools.trade style)
- * so the time axis is real dates, not two stretched blocks.
+ * Quiet intervals are omitted (no flat carry-forward bars).
  */
 export function buildCandles(trades: EvmTrade[], bucketSec: number, fallbackPrice: number): Candle[] {
   const priced = trades.filter((t) => t.ts > 0 && t.priceUsd > 0)
@@ -77,47 +78,5 @@ export function buildCandles(trades: EvmTrade[], bucketSec: number, fallbackPric
   }
 
   const real = [...byBucket.values()].sort((a, b) => a.time - b.time)
-  const nowBucket = Math.floor(Date.now() / 1000 / bucketSec) * bucketSec
-  const first = real[0].time
-  const span = Math.floor((nowBucket - first) / bucketSec) + 1
-  // If history is longer than the cap, start late enough to still include "now"
-  // and keep the most recent real trades.
-  let cursor = first
-  if (span > MAX_BUCKETS) {
-    cursor = nowBucket - (MAX_BUCKETS - 1) * bucketSec
-    const earliestReal = real.find((c) => c.time >= cursor)
-    if (earliestReal && earliestReal.time < cursor) cursor = earliestReal.time
-  }
-
-  const out: Candle[] = []
-  let lastClose = real[0].open
-  let ri = 0
-  while (ri < real.length && real[ri].time < cursor) {
-    lastClose = real[ri].close
-    ri++
-  }
-
-  while (cursor <= nowBucket && out.length < MAX_BUCKETS) {
-    const hit = ri < real.length && real[ri].time === cursor ? real[ri] : null
-    if (hit) {
-      out.push(hit)
-      lastClose = hit.close
-      ri++
-    } else {
-      out.push({
-        time: cursor,
-        open: lastClose,
-        high: lastClose,
-        low: lastClose,
-        close: lastClose,
-        volume: 0,
-      })
-    }
-    cursor += bucketSec
-  }
-  while (ri < real.length) {
-    out.push(real[ri])
-    ri++
-  }
-  return out
+  return real.length > MAX_BUCKETS ? real.slice(-MAX_BUCKETS) : real
 }
