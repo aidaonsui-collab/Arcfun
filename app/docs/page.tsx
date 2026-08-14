@@ -73,7 +73,6 @@ export default function DocsPage() {
           <h2 className="m-0 text-[24px] font-semibold tracking-tightish">Pair types</h2>
           <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
             Every live launch is a single Uniswap V3 pool. The quote asset is always Arc USDC.
-            There is no TOKEN/TOKEN or ETH pair on this pad.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
