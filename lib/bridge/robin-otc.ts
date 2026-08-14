@@ -413,19 +413,35 @@ type StatsCache = {
 }
 
 /**
+ * Cold-start lookback per payment chain, sized to ~5 days of real wall-clock trading history
+ * rather than a flat block count. Found live 2026-08-13: a prior fix capped the cold window to a
+ * single 50_000n shared across chains ("~1 day @ Base's 2s/block") to keep first paint light —
+ * but Base is ~2.0s/block while Arbitrum is ~0.25s/block (measured), so the same 50_000n covered
+ * ~1 day on Base and only ~3.5h on Arbitrum. This desk settles infrequently (10 fills over the
+ * last several days, all on Base), so a fresh session's most recent real trade was already older
+ * than the window — "Settled trades: 0 / Volume: 0 USDC" on first load, indistinguishable from a
+ * desk with no history at all, even though 10 trades had actually settled.
+ *
+ * Verified both mainnet.base.org and arb1.arbitrum.io/rpc answer a single getContractEvents call
+ * across these full ranges in well under a second for this narrow a query (one contract address,
+ * one event topic) — no need to fragment into many small chunked round trips to stay fast.
+ */
+const DESK_STATS_COLD_WINDOW: Partial<Record<OtcPaymentChainId, bigint>> = {
+  base: 220_000n, // ~5.1 days @ ~2.0s/block
+  arb: 1_750_000n, // ~5.1 days @ ~0.2516s/block
+  eth: 40_000n, // ~5.6 days @ ~12s/block — inactive by default, kept for parity
+}
+
+/**
  * Aggregate settled trades + volume from FillSettled logs (chunked).
  * Uses session cache + incremental scan so refreshes stay cheap.
  */
 export async function fetchOtcDeskStats(opts?: {
-  /** Max blocks to scan per call when no cache (default ~1d Base @ 2s — keep first paint light). */
+  /** Max blocks to scan per call when no cache. Omit to use DESK_STATS_COLD_WINDOW per chain. */
   maxBlocks?: bigint
   chunkSize?: bigint
 }): Promise<OtcDeskStats> {
   if (!robinOtcEnabled()) return { settledTrades: 0, volumeUsdc: 0n }
-
-  // Cold first load used to scan ~500k blocks on every payment chain (~minutes). Cap to ~1 day.
-  const maxBlocks = opts?.maxBlocks ?? 50_000n
-  const chunkSize = opts?.chunkSize ?? PAYMENT_LOG_LOOKBACK
 
   let settledTrades = 0
   let volumeUsdc = 0n
@@ -452,8 +468,13 @@ export async function fetchOtcDeskStats(opts?: {
         const latest = await client.getBlockNumber()
         const key = String(chain.chainId)
         const cachedTo = cursor[key] ? BigInt(cursor[key]) : null
-        // Resume after last scanned block; otherwise scan maxBlocks back
-        let fromStart = cachedTo != null ? cachedTo + 1n : latest > maxBlocks ? latest - maxBlocks : 0n
+        const chainMaxBlocks = opts?.maxBlocks ?? DESK_STATS_COLD_WINDOW[chain.id] ?? 50_000n
+        // One-shot by default (chunkSize == the whole cold window) — see DESK_STATS_COLD_WINDOW's
+        // comment for why that's fast and safe on both default RPCs. Still fully chunkable via
+        // opts.chunkSize, and a chunk that does fail is caught below (allChunksOk), not swallowed.
+        const chainChunkSize = opts?.chunkSize ?? chainMaxBlocks
+        // Resume after last scanned block; otherwise scan chainMaxBlocks back
+        let fromStart = cachedTo != null ? cachedTo + 1n : latest > chainMaxBlocks ? latest - chainMaxBlocks : 0n
         if (fromStart > latest) {
           cursor[key] = latest.toString()
           return
@@ -478,7 +499,7 @@ export async function fetchOtcDeskStats(opts?: {
         let passVolume = 0n
         let to = latest
         while (to >= fromStart) {
-          const from = to >= chunkSize ? to - chunkSize + 1n : fromStart
+          const from = to >= chainChunkSize ? to - chainChunkSize + 1n : fromStart
           const rangeFrom = from < fromStart ? fromStart : from
           try {
             const logs = await client.getContractEvents({
