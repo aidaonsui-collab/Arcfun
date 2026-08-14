@@ -21,6 +21,7 @@ type PortfolioPayload = {
   address: string
   usdcRewards: {
     claimable: number
+    pending: number
     earned: number
     claimed: number
     otherClaimable: { symbol: string; amount: number }[]
@@ -139,6 +140,7 @@ export default function PortfolioPage() {
   }
 
   const claimable = portfolio?.usdcRewards.claimable ?? 0
+  const pending = portfolio?.usdcRewards.pending ?? 0
   const earned = portfolio?.usdcRewards.earned ?? 0
   const claimed = portfolio?.usdcRewards.claimed ?? 0
 
@@ -187,12 +189,18 @@ export default function PortfolioPage() {
                 ? '—'
                 : claimable > 0
                   ? fmtReward(claimable)
-                  : 'Pending'}
+                  : pending > 0
+                    ? fmtReward(pending)
+                    : fmtReward(0)}
             </p>
             <p className="m-0 mt-1 text-[13px] text-violet-100/70">
               {claimable > 0
-                ? 'Claimable now · Instant Reflection'
-                : 'Next sweep · Instant Reflection'}
+                ? pending > 0
+                  ? `Claimable now · ${fmtReward(pending)} next sweep`
+                  : 'Claimable now · Instant Reflection'
+                : pending > 0
+                  ? 'Next sweep · Instant Reflection'
+                  : 'No rewards yet'}
             </p>
           </div>
           <div className="border border-hair rounded-[20px] bg-s1 px-5 py-4">
@@ -298,6 +306,11 @@ export default function PortfolioPage() {
                           {line.isUsdcReward
                             ? fmtReward(line.claimableHuman)
                             : `${line.claimableHuman.toFixed(4)} ${line.rewardSymbol}`}
+                          {line.pendingHuman > 0 && line.claimableHuman <= 0 ? (
+                            <p className="m-0 mt-0.5 text-[11px] font-medium text-violet-100/60">
+                              {fmtReward(line.pendingHuman)} next sweep
+                            </p>
+                          ) : null}
                         </td>
                         <td className="px-5 py-3.5 text-right tabular-nums text-t2 hidden sm:table-cell">
                           {line.isUsdcReward

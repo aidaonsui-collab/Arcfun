@@ -30,6 +30,7 @@ export async function GET(
           address,
           usdcRewards: {
             claimable: rewards.claimableUsdc,
+            pending: rewards.pendingUsdc,
             earned: rewards.earnedUsdc,
             claimed: rewards.claimedUsdc,
             otherClaimable: rewards.otherClaimable,

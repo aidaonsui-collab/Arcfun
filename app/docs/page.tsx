@@ -270,8 +270,9 @@ export default function DocsPage() {
                 USDC rewards
               </p>
               <p className="m-0 mt-2 text-[15px] text-t2 leading-snug">
-                Amount ready to pull with <code className="text-white">claim()</code>. Shows
-                Pending until the next keeper sweep has reflected fees.
+                Ready to <code className="text-white">claim()</code> now. If nothing is
+                claimable yet, this is your share of uncollected LP fees waiting on the next
+                keeper sweep.
               </p>
             </div>
             <div className="border border-hair rounded-[20px] bg-s1 px-5 py-4">
