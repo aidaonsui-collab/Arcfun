@@ -196,7 +196,6 @@ export default function DocsPage() {
                     ['Holders', '—', '50% via reflect()'],
                     ['Platform', '30%', '25%'],
                     ['Launch-token fees', 'Burned', 'Burned'],
-                    ['LP lock', 'Locked', 'Locked'],
                     ['Supply', '1,000,000,000', '1,000,000,000'],
                   ].map(([k, a, b]) => (
                     <tr key={k} className="border-b border-hair2 last:border-0">
