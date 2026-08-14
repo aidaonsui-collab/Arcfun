@@ -133,8 +133,9 @@ function HomeInner() {
                 const { tile } = tileGradient(seed)
                 const chg = changeParts(t.priceChange24h)
                 const initial = (t.symbol || t.name || '?').charAt(0).toUpperCase()
+                const img = t.imageUrl || t.logoUrl
                 const transform = `translateY(${i * 62}px) rotate(${i * 1.6 - 1.6}deg) scale(${1 - i * 0.045})`
-                const shade = `rgba(0,0,0,${0.18 + i * 0.14})`
+                const shade = `rgba(0,0,0,${img ? 0.42 + i * 0.1 : 0.18 + i * 0.14})`
                 return (
                   <Link
                     key={t.id || seed}
@@ -142,12 +143,25 @@ function HomeInner() {
                     className="absolute left-0 right-0 top-0 h-[118px] rounded-[22px] overflow-hidden border border-white/10 shadow-[0_22px_48px_rgba(0,0,0,0.55)] cursor-pointer hover:brightness-110 transition-[filter]"
                     style={{ background: tile, transform, zIndex: 30 - i * 10 }}
                   >
+                    {img ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={img}
+                        alt=""
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    ) : null}
                     <div className="absolute inset-0" style={{ background: shade }} />
                     <div className="relative h-full px-4 py-3.5 flex flex-col justify-between">
                       <div className="flex items-center justify-between">
                         <span className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-lg bg-black/35 flex items-center justify-center text-xs font-bold text-white">
-                            {initial}
+                          <span className="w-6 h-6 rounded-lg bg-black/35 overflow-hidden flex items-center justify-center text-xs font-bold text-white">
+                            {img ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={img} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                              initial
+                            )}
                           </span>
                           <span className="text-[13px] font-semibold text-white tracking-tightish">
                             {t.name}
