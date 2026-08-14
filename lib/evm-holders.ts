@@ -173,7 +173,7 @@ export async function fetchEvmHolders(
     .filter((r) => r.total > 0n)
     .sort((a, b) => (b.total > a.total ? 1 : b.total < a.total ? -1 : 0))
 
-  const holders = nonZero.slice(0, 25).map((r, i) => ({
+  const holders = nonZero.slice(0, 200).map((r, i) => ({
     rank: i + 1,
     address: r.address,
     balance: fmtBalance(r.total),

@@ -236,7 +236,7 @@ export default function TokenPage() {
   const shown = hoverCandle ?? (lastCandle ? { ...lastCandle, up: lastCandle.close >= lastCandle.open } : null)
   const axisFmt = chartScale === 'FDV' ? fmtUsd : fmtPrice
 
-  const holderCount = holders?.holders?.length ?? 0
+  const holderCount = holders?.total ?? holders?.holders?.length ?? 0
   const actTabs: { id: Tab; label: string }[] = [
     { id: 'Activity', label: 'Activity' },
     { id: 'holders', label: holderCount ? `${holderCount} holders` : 'Holders' },
