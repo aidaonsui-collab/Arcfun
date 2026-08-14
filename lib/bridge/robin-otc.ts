@@ -404,7 +404,12 @@ export type OtcDeskStats = {
   volumeUsdc: bigint
 }
 
-const STATS_CACHE_KEY = 'robin_otc_desk_stats_v1'
+// Bumped v1 -> v2: any session that already ran the old, too-narrow cold scan has a cached
+// `cursor` sitting past the real history it missed (see DESK_STATS_COLD_WINDOW above) — with a
+// cursor already cached, fetchOtcDeskStats resumes from it and never re-runs the wider cold
+// scan, so widening the window alone doesn't self-heal an already-poisoned session. New key
+// forces every client to drop that stale cache and cold-start fresh with the fixed window.
+const STATS_CACHE_KEY = 'robin_otc_desk_stats_v2'
 
 type StatsCache = {
   settledTrades: number
