@@ -6,6 +6,7 @@ import { type Address } from 'viem'
 import { fetchArcPoolToken } from '@/lib/arc-instant-tokens'
 import { arcInstantEnabled, arcCurveEnabled } from '@/lib/contracts-arc'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
+import { isHiddenToken } from '@/lib/tokens'
 import { jsonSafe } from '@/lib/json-safe'
 import { summarizeRpcError } from '@/lib/rpc-error'
 
@@ -15,6 +16,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
   const { token } = await params
   if (!isPlausibleEvmAddress(token)) {
     return NextResponse.json({ error: 'invalid token' }, { status: 400 })
+  }
+  if (isHiddenToken(token)) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
   }
   if (!arcInstantEnabled() && !arcCurveEnabled()) {
     return NextResponse.json({ error: 'arc launchpad not configured' }, { status: 404 })
