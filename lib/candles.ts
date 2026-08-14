@@ -80,3 +80,33 @@ export function buildCandles(trades: EvmTrade[], bucketSec: number, fallbackPric
   const real = [...byBucket.values()].sort((a, b) => a.time - b.time)
   return real.length > MAX_BUCKETS ? real.slice(-MAX_BUCKETS) : real
 }
+
+/** % change from price ~windowSec ago (or first print if the token is younger) to last print. */
+export function priceChangeFromTrades(trades: EvmTrade[], windowSec = 86_400): number {
+  const priced = trades.filter((t) => t.ts > 0 && t.priceUsd > 0)
+  if (priced.length < 2) return 0
+  const chronological = [...priced].sort((a, b) => a.ts - b.ts)
+  const now = Math.floor(Date.now() / 1000)
+  const cutoff = now - windowSec
+  let start = chronological[0].priceUsd
+  for (let i = chronological.length - 1; i >= 0; i--) {
+    if (chronological[i].ts <= cutoff) {
+      start = chronological[i].priceUsd
+      break
+    }
+  }
+  const end = chronological[chronological.length - 1].priceUsd
+  if (!(start > 0) || !Number.isFinite(start) || !Number.isFinite(end)) return 0
+  return ((end - start) / start) * 100
+}
+
+/** 5m candle closes — same buckets as the token chart default — for rail sparklines. */
+export function sparkClosesFromTrades(
+  trades: EvmTrade[],
+  fallbackPrice = 0,
+  maxPoints = 36,
+): number[] {
+  const candles = buildCandles(trades, RANGE_BUCKET_SEC['5M'], fallbackPrice)
+  const closes = candles.map((c) => c.close).filter((n) => n > 0)
+  return closes.length > maxPoints ? closes.slice(-maxPoints) : closes
+}

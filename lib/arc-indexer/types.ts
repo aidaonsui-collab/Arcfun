@@ -21,6 +21,10 @@ export type IndexedVolume = {
   /** last swap ts seen */
   lastTradeAt: number
   updatedAt: number
+  /** (last print − print 24h ago) / print 24h ago × 100. First print if younger than 24h. */
+  priceChange24h?: number
+  /** 5m candle closes for home-rail spark (same buckets as the token chart). */
+  sparkCloses?: number[]
 }
 
 export type IndexedOtcOffer = {

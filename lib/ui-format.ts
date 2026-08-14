@@ -66,6 +66,26 @@ export function changeParts(pct: number | undefined | null): {
   }
 }
 
+/** Line through real values (5m candle closes) in a 100×30 viewBox — same path as the token chart. */
+export function sparkPathFromValues(values: number[]): string {
+  const pts = values.filter((n) => Number.isFinite(n))
+  if (pts.length === 0) return ''
+  const series = pts.length === 1 ? [pts[0], pts[0]] : pts
+  const min = Math.min(...series)
+  const max = Math.max(...series)
+  const flat = max <= min
+  return (
+    'M ' +
+    series
+      .map((v, i) => {
+        const x = ((i / (series.length - 1)) * 100).toFixed(1)
+        const y = (flat ? 15 : 27 - ((v - min) / (max - min)) * 23).toFixed(1)
+        return `${x} ${y}`
+      })
+      .join(' L ')
+  )
+}
+
 /** Deterministic HSL tile gradient from a seed string (address/symbol). */
 export function tileGradient(seed: string): { tile: string; mono: string } {
   let h = 0

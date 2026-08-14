@@ -4,6 +4,7 @@
 import { kv } from '@vercel/kv'
 import type { Address } from 'viem'
 import type { EvmTrade } from '@/lib/evm-trades'
+import { priceChangeFromTrades, sparkClosesFromTrades } from '@/lib/candles'
 import type { IndexedVolume } from './types'
 import { summarizeRpcError } from '@/lib/rpc-error'
 
@@ -46,5 +47,7 @@ export async function computeVolumeWindows(token: Address | string): Promise<Ind
     volume24h,
     lastTradeAt,
     updatedAt: Date.now(),
+    priceChange24h: priceChangeFromTrades(trades),
+    sparkCloses: sparkClosesFromTrades(trades),
   }
 }

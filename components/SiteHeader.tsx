@@ -124,13 +124,6 @@ export function SiteHeader() {
           Arc OTC
         </Link>
 
-        <Link
-          href="/create"
-          className="hidden sm:inline-flex h-9 items-center px-[18px] rounded-xl bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
-        >
-          Launch a token
-        </Link>
-
         {isConnected && address ? (
           <div className="flex items-center gap-2">
             {!wrongChain && (

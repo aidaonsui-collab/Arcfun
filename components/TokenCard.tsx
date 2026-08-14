@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import type { PoolToken } from '@/lib/tokens'
 import { LaunchKindBadge } from '@/components/LaunchKindBadge'
-import { ageLabel, changeParts, fmtUsd, sparkPath, tileGradient } from '@/lib/ui-format'
+import { ageLabel, changeParts, fmtUsd, sparkPathFromValues, tileGradient } from '@/lib/ui-format'
 
 export function TokenCard({
   token,
@@ -79,7 +79,7 @@ export function TokenRailCard({ token }: { token: PoolToken }) {
   const seed = address || token.symbol || token.name
   const { tile, mono } = tileGradient(seed)
   const chg = changeParts(token.priceChange24h)
-  const spark = sparkPath(seed, 26, token.priceChange24h ?? 0)
+  const spark = sparkPathFromValues(token.sparkCloses ?? [])
   const initial = (token.symbol || token.name || '?').charAt(0).toUpperCase()
   const img = token.imageUrl || token.logoUrl
   const age = ageLabel(token.createdAt ?? token.lastTradeAt)
@@ -123,17 +123,21 @@ export function TokenRailCard({ token }: { token: PoolToken }) {
         <span className="text-[19px] font-semibold tabular-nums tracking-[-0.028em]">
           {fmtUsd(token.marketCap)}
         </span>
-        <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-full h-[22px] opacity-85">
-          <path
-            d={spark}
-            fill="none"
-            stroke={chg.stroke}
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
-        </svg>
+        {spark ? (
+          <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-full h-[22px] opacity-85">
+            <path
+              d={spark}
+              fill="none"
+              stroke={chg.stroke}
+              strokeWidth="1.5"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+        ) : (
+          <span className="block h-[22px]" />
+        )}
       </span>
     </Link>
   )

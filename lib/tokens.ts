@@ -35,6 +35,8 @@ export interface PoolToken {
   volume12h?: number
   volume24h?: number
   priceChange24h: number
+  /** 5m candle closes for the Top Memes sparkline (same buckets as the token chart). */
+  sparkCloses?: number[]
   lastTradeAt?: number
   age: string
   creatorShort: string

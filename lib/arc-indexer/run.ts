@@ -416,26 +416,32 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
   }
 }
 
-/** Catalog enrichment helper. */
+/** Catalog enrichment helper — live tape: volumes, 24h change, 5m spark closes. */
 export async function enrichTokensWithIndexVolume<
-  T extends { coinType?: string; poolId?: string; volume1h?: number },
+  T extends { coinType?: string; poolId?: string; volume1h?: number; priceChange24h?: number },
 >(tokens: T[]): Promise<T[]> {
-  const { getVolumesMap } = await import('./store')
-  const ids = tokens.map((t) => (t.coinType || t.poolId || '').toLowerCase()).filter(Boolean)
-  const vols = await getVolumesMap(ids)
-  return tokens.map((t) => {
-    const id = (t.coinType || t.poolId || '').toLowerCase()
-    const v = vols[id]
-    if (!v) return t
-    return {
-      ...t,
-      volume1h: v.volume1h,
-      volume6h: v.volume6h,
-      volume12h: v.volume12h,
-      volume24h: v.volume24h,
-      lastTradeAt: v.lastTradeAt || (t as { lastTradeAt?: number }).lastTradeAt,
-    }
-  })
+  const { computeVolumeWindows } = await import('./volume')
+  return Promise.all(
+    tokens.map(async (t) => {
+      const id = (t.coinType || t.poolId || '').toLowerCase()
+      if (!id) return t
+      try {
+        const v = await computeVolumeWindows(id)
+        return {
+          ...t,
+          volume1h: v.volume1h,
+          volume6h: v.volume6h,
+          volume12h: v.volume12h,
+          volume24h: v.volume24h,
+          lastTradeAt: v.lastTradeAt || (t as { lastTradeAt?: number }).lastTradeAt,
+          priceChange24h: v.priceChange24h ?? t.priceChange24h ?? 0,
+          sparkCloses: v.sparkCloses,
+        }
+      } catch {
+        return t
+      }
+    }),
+  )
 }
 
 /** Live OTC book from index + fee mult. */

@@ -24,8 +24,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     return NextResponse.json({ error: 'arc launchpad not configured' }, { status: 404 })
   }
   try {
-    const pool = await fetchArcPoolToken(token as Address)
+    let pool = await fetchArcPoolToken(token as Address)
     if (!pool) return NextResponse.json({ error: 'not found' }, { status: 404 })
+    try {
+      const { enrichTokensWithIndexVolume } = await import('@/lib/arc-indexer/run')
+      ;[pool] = await enrichTokensWithIndexVolume([pool])
+    } catch {
+      /* indexer optional */
+    }
     return jsonSafe(pool, {
       headers: { 'Cache-Control': 'public, s-maxage=8, stale-while-revalidate=15' },
     })

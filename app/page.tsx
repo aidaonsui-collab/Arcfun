@@ -8,7 +8,6 @@ import type { PoolToken, VolumeWindow } from '@/lib/tokens'
 import { volumeForWindow } from '@/lib/tokens'
 import { TokenCard, TokenRailCard } from '@/components/TokenCard'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
-import { changeParts, fmtUsd, tileGradient } from '@/lib/ui-format'
 
 type SortKey = 'Top volume' | 'New' | 'Top MC'
 
@@ -89,10 +88,6 @@ function HomeInner() {
       .slice(0, 8)
   }, [tokens])
 
-  const stack = useMemo(
-    () => [...tokens].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 3),
-    [tokens],
-  )
   const liveCount = tokens.length
   const sortTabs: SortKey[] = ['Top volume', 'New', 'Top MC']
 
@@ -100,7 +95,7 @@ function HomeInner() {
     <main className="relative min-h-screen text-white pt-16 pb-16 overflow-hidden">
       <div aria-hidden="true" className="hero-grid-fade" />
       <div className="relative z-10 max-w-desk mx-auto px-4 sm:px-10">
-        <section className="relative mt-6">
+        <section className="relative mt-6 lg:min-h-[200px]">
           <div className="relative max-w-[600px] flex flex-col gap-3">
             <span className="self-start inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-lime-soft border border-lime-line text-xs font-semibold text-lime-t tracking-tightish whitespace-nowrap">
               <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot" />
@@ -109,7 +104,7 @@ function HomeInner() {
             <h1 className="m-0 text-[26px] sm:text-[32px] leading-[1.15] font-bold tracking-display text-pretty text-white">
               The best way to launch and trade tokens on Arc.
             </h1>
-            <div className="flex flex-wrap gap-3 pt-1">
+            <div className="flex flex-wrap gap-3 pt-1 lg:hidden">
               <Link
                 href="/create"
                 className="inline-flex h-[42px] items-center px-6 rounded-full bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
@@ -123,69 +118,24 @@ function HomeInner() {
                 How it works
               </Link>
             </div>
+            <div className="hidden lg:flex flex-wrap gap-3 pt-1">
+              <Link
+                href="/docs"
+                className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
+              >
+                How it works
+              </Link>
+            </div>
           </div>
 
-          {stack.length > 0 && (
-            <div className="hidden lg:block absolute right-14 top-[52px] w-72 h-[260px]">
-              {stack.map((t, i) => {
-                const address = t.coinType || t.poolId
-                const seed = address || t.symbol
-                const { tile } = tileGradient(seed)
-                const chg = changeParts(t.priceChange24h)
-                const initial = (t.symbol || t.name || '?').charAt(0).toUpperCase()
-                const img = t.imageUrl || t.logoUrl
-                const transform = `translateY(${i * 62}px) rotate(${i * 1.6 - 1.6}deg) scale(${1 - i * 0.045})`
-                const shade = `rgba(0,0,0,${img ? 0.42 + i * 0.1 : 0.18 + i * 0.14})`
-                return (
-                  <Link
-                    key={t.id || seed}
-                    href={`/token/${address}`}
-                    className="absolute left-0 right-0 top-0 h-[118px] rounded-[22px] overflow-hidden border border-white/10 shadow-[0_22px_48px_rgba(0,0,0,0.55)] cursor-pointer hover:brightness-110 transition-[filter]"
-                    style={{ background: tile, transform, zIndex: 30 - i * 10 }}
-                  >
-                    {img ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={img}
-                        alt=""
-                        className="absolute inset-0 h-full w-full object-cover"
-                      />
-                    ) : null}
-                    <div className="absolute inset-0" style={{ background: shade }} />
-                    <div className="relative h-full px-4 py-3.5 flex flex-col justify-between">
-                      <div className="flex items-center justify-between">
-                        <span className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-lg bg-black/35 overflow-hidden flex items-center justify-center text-xs font-bold text-white">
-                            {img ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={img} alt="" className="h-full w-full object-cover" />
-                            ) : (
-                              initial
-                            )}
-                          </span>
-                          <span className="text-[13px] font-semibold text-white tracking-tightish">
-                            {t.name}
-                          </span>
-                        </span>
-                        <span
-                          className="px-2 py-0.5 rounded-lg text-[11px] font-bold tabular-nums"
-                          style={{ background: chg.chipBg, color: chg.chipFg }}
-                        >
-                          {chg.label}
-                        </span>
-                      </div>
-                      <div className="flex items-baseline justify-between">
-                        <span className="text-[22px] font-semibold tracking-[-0.03em] tabular-nums text-white">
-                          {fmtUsd(t.marketCap)}
-                        </span>
-                        <span className="text-[11px] font-semibold text-white/70">{t.symbol}</span>
-                      </div>
-                    </div>
-                  </Link>
-                )
-              })}
-            </div>
-          )}
+          <div className="hidden lg:flex absolute right-0 top-0 w-72 h-[200px] items-center justify-center">
+            <Link
+              href="/create"
+              className="inline-flex h-14 items-center px-8 rounded-full bg-lime text-white text-[16px] font-semibold tracking-tightish hover:bg-lime-2 transition-colors shadow-[0_12px_36px_rgba(47,132,219,0.35)]"
+            >
+              Launch a token
+            </Link>
+          </div>
         </section>
 
         {rail.length > 0 && (

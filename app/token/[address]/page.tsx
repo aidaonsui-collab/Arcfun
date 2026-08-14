@@ -17,7 +17,7 @@ import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import type { TraderMeta } from '@/lib/arc-trader-meta'
 import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
-import { buildCandles, RANGE_BUCKET_SEC, scaleCandles } from '@/lib/candles'
+import { buildCandles, priceChangeFromTrades, RANGE_BUCKET_SEC, scaleCandles } from '@/lib/candles'
 import {
   ageLabel,
   changeParts,
@@ -199,7 +199,8 @@ export default function TokenPage() {
   const explorer = ARC_EXPLORER || 'https://arc-scan.org'
   const seed = token || pool?.symbol || 'arc'
   const { tile, mono } = tileGradient(seed)
-  const chg = changeParts(pool?.priceChange24h)
+  const tapeChange = useMemo(() => priceChangeFromTrades(chartTape), [chartTape])
+  const chg = changeParts(chartTape.length >= 2 ? tapeChange : pool?.priceChange24h)
   const supply = useMemo(() => {
     if (pool && pool.totalSupply > 1) return pool.totalSupply
     if (pool && pool.currentPrice > 0 && pool.marketCap > 0) return pool.marketCap / pool.currentPrice
