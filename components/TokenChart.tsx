@@ -106,9 +106,11 @@ export function TokenChart({
         borderVisible: false,
         timeVisible: true,
         secondsVisible: false,
-        barSpacing: 8,
+        // Fixed thin bars like RadarDEX — never stretch one candle across the pane.
+        barSpacing: 6,
         minBarSpacing: 3,
-        rightOffset: 4,
+        maxBarSpacing: 10,
+        rightOffset: 8,
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -198,7 +200,8 @@ export function TokenChart({
     )
 
     requestAnimationFrame(() => {
-      chart.timeScale().fitContent()
+      chart.timeScale().applyOptions({ barSpacing: 6, maxBarSpacing: 10 })
+      chart.timeScale().scrollToRealTime()
     })
   }, [candles, ready])
 

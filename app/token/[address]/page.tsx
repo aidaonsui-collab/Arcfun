@@ -48,7 +48,7 @@ export default function TokenPage() {
   const [traderMeta, setTraderMeta] = useState<Record<string, TraderMeta>>({})
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('Activity')
-  const [range, setRange] = useState<Range>('1H')
+  const [range, setRange] = useState<Range>('5M')
   const [chartScale, setChartScale] = useState<ChartScale>('FDV')
   const [hoverCandle, setHoverCandle] = useState<HoverCandle | null>(null)
   const [volRange, setVolRange] = useState<VolRange>('1H')
