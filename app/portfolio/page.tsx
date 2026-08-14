@@ -183,10 +183,16 @@ export default function PortfolioPage() {
               USDC rewards
             </p>
             <p className="m-0 mt-2 text-[28px] font-semibold tracking-tightish tabular-nums text-white">
-              {loading && !portfolio ? '—' : fmtReward(claimable)}
+              {loading && !portfolio
+                ? '—'
+                : claimable > 0
+                  ? fmtReward(claimable)
+                  : 'Pending'}
             </p>
             <p className="m-0 mt-1 text-[13px] text-violet-100/70">
-              Claimable now · Instant Reflection
+              {claimable > 0
+                ? 'Claimable now · Instant Reflection'
+                : 'Next sweep · Instant Reflection'}
             </p>
           </div>
           <div className="border border-hair rounded-[20px] bg-s1 px-5 py-4">
