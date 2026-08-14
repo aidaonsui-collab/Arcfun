@@ -279,6 +279,44 @@ export async function getArcLivePriceUsdc(token: Address, uniPool?: Address): Pr
   }
 }
 
+/** Pool TVL: ERC-20 USDC in the Uni V3 pool + launch-token inventory × spot. */
+export async function getArcPoolLiquidityUsdc(
+  token: Address,
+  uniPool: Address | undefined,
+  priceUsdc: number,
+): Promise<{ tvlUsd: number; usdc: number } | null> {
+  if (!uniPool || uniPool === ZERO) return null
+  try {
+    const client = arcPublicClient()
+    const [usdcRaw, tokRaw, tokenDecimals] = await Promise.all([
+      client.readContract({
+        address: ARC.USDC,
+        abi: ERC20_ABI,
+        functionName: 'balanceOf',
+        args: [uniPool],
+      }) as Promise<bigint>,
+      client.readContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: 'balanceOf',
+        args: [uniPool],
+      }) as Promise<bigint>,
+      client
+        .readContract({ address: token, abi: ERC20_ABI, functionName: 'decimals' })
+        .then((d) => Number(d))
+        .catch(() => ARC.TOKEN_DECIMALS) as Promise<number>,
+    ])
+    const dec = Number.isFinite(tokenDecimals) && tokenDecimals > 0 ? tokenDecimals : ARC.TOKEN_DECIMALS
+    const usdc = Number(formatUnits(usdcRaw, USDC_DECIMALS))
+    const tok = Number(formatUnits(tokRaw, dec))
+    const quote = Number.isFinite(usdc) ? usdc : 0
+    const tokenUsd = Number.isFinite(tok) && priceUsdc > 0 ? tok * priceUsdc : 0
+    return { tvlUsd: quote + tokenUsd, usdc: quote }
+  } catch {
+    return null
+  }
+}
+
 function toPoolToken(
   token: Address,
   p: InstantQuotePool,

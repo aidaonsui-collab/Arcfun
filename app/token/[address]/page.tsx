@@ -194,6 +194,8 @@ export default function TokenPage() {
     return 86_400
   }, [volRange])
 
+  const tape = chartTape.length ? chartTape : (trades?.trades ?? [])
+
   const { vol, buys, sells, buyUsd, sellUsd } = useMemo(() => {
     const cutoff = Math.floor(Date.now() / 1000) - volWindowSec
     let vol = 0
@@ -201,7 +203,7 @@ export default function TokenPage() {
     let sells = 0
     let buyUsd = 0
     let sellUsd = 0
-    for (const t of trades?.trades ?? []) {
+    for (const t of tape) {
       if (t.ts < cutoff) continue
       vol += t.valueUsd
       if (t.isBuy) {
@@ -213,10 +215,26 @@ export default function TokenPage() {
       }
     }
     return { vol, buys, sells, buyUsd, sellUsd }
-  }, [trades, volWindowSec])
+  }, [tape, volWindowSec])
 
-  const buyPct = vol > 0 ? (buyUsd / vol) * 100 : 50
-  const sellPct = 100 - buyPct
+  const vol24 = useMemo(() => {
+    const cutoff = Math.floor(Date.now() / 1000) - 86_400
+    let tapeVol = 0
+    let buyUsd = 0
+    for (const t of tape) {
+      if (t.ts < cutoff) continue
+      tapeVol += t.valueUsd
+      if (t.isBuy) buyUsd += t.valueUsd
+    }
+    const indexed = pool?.volume24h ?? 0
+    return {
+      vol: Math.max(tapeVol, indexed),
+      buyPct: tapeVol > 0 ? (buyUsd / tapeVol) * 100 : 0,
+    }
+  }, [tape, pool?.volume24h])
+
+  const buyPct = vol > 0 ? (buyUsd / vol) * 100 : 0
+  const sellPct = vol > 0 ? 100 - buyPct : 0
 
   const explorer = ARC_EXPLORER || 'https://arc-scan.org'
   const seed = token || pool?.symbol || 'arc'
@@ -400,14 +418,20 @@ export default function TokenPage() {
                 },
                 {
                   label: '24H volume',
-                  value: fmtUsd(vol),
-                  sub: `${buyPct.toFixed(1)}% buys`,
+                  value: fmtUsd(vol24.vol),
+                  sub: vol24.vol > 0 ? `${vol24.buyPct.toFixed(1)}% buys` : 'no trades',
                   subColor: 'var(--limeT)',
                 },
                 {
                   label: 'Liquidity',
-                  value: '—',
-                  sub: 'locked 12mo',
+                  value:
+                    pool.liquidityUsd != null && pool.liquidityUsd > 0
+                      ? fmtUsd(pool.liquidityUsd)
+                      : '—',
+                  sub:
+                    pool.liquidityQuoteUsd != null && pool.liquidityQuoteUsd > 0
+                      ? `${fmtUsd(pool.liquidityQuoteUsd)} USDC`
+                      : 'in pool',
                   subColor: 'var(--t3)',
                 },
                 {

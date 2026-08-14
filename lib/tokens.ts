@@ -43,6 +43,10 @@ export interface PoolToken {
   creatorFull: string
   logoUrl: string
   marketCap: number
+  /** Uni V3 pool TVL in USD (USDC reserves + token reserves × spot). */
+  liquidityUsd?: number
+  /** USDC sitting in the pool. */
+  liquidityQuoteUsd?: number
   totalSupply: number
   bondingProgress: number
   /** Instant DEX launch (no bonding curve) — always true for Arc tokens today. */
