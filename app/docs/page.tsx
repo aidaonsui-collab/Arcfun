@@ -1,31 +1,10 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { ARC, ARC_CHAIN_ID, ARC_EXPLORER } from '@/lib/contracts-arc'
 
 export const metadata: Metadata = {
   title: 'Docs — Arcfun',
   description:
     'Arcfun pair types, LP fee splits, Portfolio reflection claims, Instant OTC, and how Instant launches work on Arc.',
-}
-
-const EXPLORER = ARC_EXPLORER || 'https://arc-scan.org'
-
-function short(addr: string) {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`
-}
-
-function ExplorerAddr({ address, label }: { address: string; label: string }) {
-  return (
-    <a
-      href={`${EXPLORER}/address/${address}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-2 font-mono text-[13px] text-t2 hover:text-white"
-    >
-      <span className="text-t3 font-sans font-medium">{label}</span>
-      {short(address)}
-    </a>
-  )
 }
 
 const TOC = [
@@ -34,7 +13,6 @@ const TOC = [
   { href: '#fees', label: 'LP fees' },
   { href: '#portfolio', label: 'Portfolio' },
   { href: '#otc', label: 'Arc OTC' },
-  { href: '#pad', label: 'How the pad works' },
 ] as const
 
 export default function DocsPage() {
@@ -386,78 +364,6 @@ export default function DocsPage() {
             >
               Open Arc OTC
             </Link>
-          </div>
-        </section>
-
-        {/* Pad characteristics */}
-        <section id="pad" className="scroll-mt-24 mt-14">
-          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">
-            What defines this pad
-          </h2>
-          <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
-            Arcfun is a single-chain Instant pad. No bonding curve, no multi-chain launch, no
-            private AMM.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {[
-              {
-                t: 'Instant, not a curve',
-                d: 'The whole 1B supply lands in a Uniswap V3 TOKEN/USDC pool in one transaction. Tradable at block one — no graduate step.',
-              },
-              {
-                t: 'Token-side fees burn',
-                d: 'Swap fees in the launch token are burned on collect. Quote-side USDC is what gets split.',
-              },
-              {
-                t: 'USDC in, USDC out',
-                d: 'Arc gas is native USDC. Pools quote USDC. Reflection rewards default to USDC. First buy is USDC.',
-              },
-              {
-                t: 'Buy at launch',
-                d: 'Creators can bundle a USDC first buy into the create transaction so they start with inventory at the initial tick.',
-              },
-              {
-                t: 'Trade on the token page',
-                d: 'Buy and sell go through Uniswap V3 on each token page. FDV is spot × full 1B mint.',
-              },
-              {
-                t: 'Arc only',
-                d: `Chain ${ARC_CHAIN_ID}. Explorer is ArcScan. This app does not launch on any other network.`,
-              },
-              {
-                t: 'Creator profile',
-                d: 'Each launcher has a public page for tokens, fees, and followers. Rewards wallet can differ from the create signer.',
-              },
-            ].map((item) => (
-              <article key={item.t} className="border border-hair rounded-[22px] bg-s1 p-5">
-                <h3 className="m-0 text-[15px] font-semibold tracking-tightish">{item.t}</h3>
-                <p className="mt-1.5 mb-0 text-[13px] text-t2 leading-relaxed">{item.d}</p>
-              </article>
-            ))}
-          </div>
-
-          <div className="mt-6 border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
-            <h3 className="m-0 text-[15px] font-semibold tracking-tightish">On-chain</h3>
-            <div className="mt-3 flex flex-col gap-2">
-              <ExplorerAddr address={ARC.INSTANT_FACTORY} label="Instant factory" />
-              <ExplorerAddr address={ARC.INSTANT_LOCKER} label="Instant locker" />
-              <ExplorerAddr address={ARC.REFLECTION_FACTORY} label="Reflection factory" />
-              <ExplorerAddr address={ARC.REFLECTION_LOCKER} label="Reflection locker" />
-              <ExplorerAddr address={ARC.UNI_FACTORY} label="Uni V3 factory" />
-              <ExplorerAddr address={ARC.USDC} label="USDC" />
-            </div>
-            <p className="mt-4 mb-0 text-[12px] text-t3">
-              Chain {ARC_CHAIN_ID} ·{' '}
-              <a
-                href={EXPLORER}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-t2 hover:text-white"
-              >
-                {EXPLORER.replace(/^https:\/\//, '')}
-              </a>
-            </p>
           </div>
         </section>
 
