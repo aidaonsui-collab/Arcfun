@@ -425,13 +425,10 @@ export default function TokenPage() {
                 {
                   label: 'Liquidity',
                   value:
-                    pool.liquidityUsd != null && pool.liquidityUsd > 0
-                      ? fmtUsd(pool.liquidityUsd)
-                      : '—',
-                  sub:
                     pool.liquidityQuoteUsd != null && pool.liquidityQuoteUsd > 0
-                      ? `${fmtUsd(pool.liquidityQuoteUsd)} USDC`
-                      : 'in pool',
+                      ? fmtUsd(pool.liquidityQuoteUsd)
+                      : '—',
+                  sub: 'USDC in pool',
                   subColor: 'var(--t3)',
                 },
                 {
