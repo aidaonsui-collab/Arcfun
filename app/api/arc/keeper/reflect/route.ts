@@ -1,7 +1,7 @@
 /**
  * GET /api/arc/keeper/reflect — Vercel Cron hits this every 15 minutes (see vercel.json).
- * Sweeps LP fees to holders for every live Arc Instant Reflection token. See
- * lib/arc-reflection-keeper.ts for the actual per-token chain.
+ * Collects Instant locker LP fees (70/30) and sweeps Instant Reflection
+ * (collect → forward → reflect). See lib/arc-reflection-keeper.ts.
  *
  * Auth: Vercel Cron sends `Authorization: Bearer $CRON_SECRET` automatically once CRON_SECRET is
  * set as a project env var — https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs.
@@ -9,7 +9,7 @@
  * real gas from the keeper wallet on every accepted call).
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { arcReflectionEnabled } from '@/lib/contracts-arc'
+import { arcInstantEnabled, arcReflectionEnabled } from '@/lib/contracts-arc'
 import { runReflectionKeeperCycle } from '@/lib/arc-reflection-keeper'
 
 export const dynamic = 'force-dynamic'
@@ -22,8 +22,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  if (!arcReflectionEnabled()) {
-    return NextResponse.json({ ok: false, error: 'reflection factory not configured' }, { status: 404 })
+  if (!arcReflectionEnabled() && !arcInstantEnabled()) {
+    return NextResponse.json({ ok: false, error: 'no Instant or Reflection factory configured' }, { status: 404 })
   }
 
   const pk = process.env.ARC_REFLECTION_KEEPER_PRIVATE_KEY as `0x${string}` | undefined

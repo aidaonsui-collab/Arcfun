@@ -1,25 +1,36 @@
 /**
- * Arc Instant Reflection keeper — sweeps LP fees to holders for every reflection token, on a
- * schedule (see app/api/arc/keeper/reflect/route.ts + vercel.json cron).
+ * Arc LP-fee keeper — Instant collect + Instant Reflection sweep.
+ * Cron: app/api/arc/keeper/reflect/route.ts + vercel.json (every 15m).
  *
- * Chain per token, all permissionless (no owner/creator gating anywhere in this path):
- *   1. MonLock.collectFees(positionId) — pulls accrued V3 swap fees out of the locked LP position,
- *      splits them (25% creator / 50% holder-fee-sink / 25% platform), burns the launch-token side.
- *   2. feeSink.forwardFees() — pushes whatever USDC the fee sink is holding into the factory's
- *      pendingReflectionQuote[token] accounting.
- *   3. factory.reflect(token, amountOutMinimum) — spends pendingReflectionQuote: swaps to the
- *      creator-chosen reward token if it isn't USDC, sends it to the token contract, then calls
- *      distribute() + pushRewards() to actually pay holders.
+ * Instant (TOKEN/USDC, 70% creator / 30% platform):
+ *   MonLock.collectFees(positionId) on the Instant locker. No reflect step.
+ *
+ * Instant Reflection:
+ *   1. MonLock.collectFees(positionId) — 25% creator / 50% holder-sink / 25% platform;
+ *      launch-token side burns.
+ *   2. feeSink.forwardFees() — USDC into pendingReflectionQuote[token].
+ *   3. factory.reflect(token, amountOutMinimum) — distribute + pushRewards.
  *
  * For rewardToken === USDC, amountOutMinimum is 0 (pass-through, no swap).
  * For custom reward CAs, the keeper quotes Uni V3 USDC→reward (same fee tiers as the factory:
- * 1% / 0.3% / 0.05% / 0.01%), applies REFLECT_SLIPPAGE_BPS, and passes that minOut. If no pool
- * or quote fails, the token is skipped until a later cycle (or a manual reflect).
+ * 1% / 0.3% / 0.05% / 0.01%), applies REFLECT_SLIPPAGE_BPS, and passes that minOut.
  */
 import { type Address, erc20Abi, parseEther } from 'viem'
-import { ARC, ARC_CHAIN_ID, ARC_PLATFORM_WALLET, arcPublicClient, arcServerWalletClient } from './contracts-arc'
+import {
+  ARC,
+  ARC_CHAIN_ID,
+  ARC_PLATFORM_WALLET,
+  arcInstantEnabled,
+  arcPublicClient,
+  arcReflectionEnabled,
+  arcServerWalletClient,
+} from './contracts-arc'
 import { INSTANT_REFLECTION_FACTORY_ABI } from './arc-reflection-launchpad'
+import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
 import { minOutFromSlippage } from './arc-swap'
+
+/** Pre–LaunchToken18 Instant factory (still holds live 6dp tokens). */
+const ARC_INSTANT_FACTORY_LEGACY = '0x607bff9EB2ff1494AC8f0b545502Ce49ee2Ae42B' as Address
 
 const MONLOCK_ABI = [
   {
@@ -155,6 +166,7 @@ async function quoteUsdcToReward(
 
 export interface KeeperTokenResult {
   token: Address
+  kind: 'instant' | 'reflection'
   collectFeesTx?: `0x${string}`
   collectFeesError?: string
   forwardFeesTx?: `0x${string}`
@@ -181,6 +193,8 @@ export interface KeeperGasTopUpResult {
 export interface KeeperRunResult {
   ranAt: number
   tokensChecked: number
+  instantChecked: number
+  reflectionChecked: number
   results: KeeperTokenResult[]
   gasTopUp: KeeperGasTopUpResult
 }
@@ -238,6 +252,95 @@ export async function maybeTopUpKeeperGas(privateKey: `0x${string}`): Promise<Ke
   }
 }
 
+async function listFactoryTokens(
+  factory: Address,
+  abi: typeof INSTANT_QUOTE_FACTORY_ABI | typeof INSTANT_REFLECTION_FACTORY_ABI,
+): Promise<Address[]> {
+  const client = arcPublicClient()
+  const count = Number(
+    await client.readContract({
+      address: factory,
+      abi,
+      functionName: 'allTokensLength',
+    }),
+  )
+  if (!Number.isFinite(count) || count <= 0) return []
+  const out: Address[] = []
+  for (let i = 0; i < count; i++) {
+    const t = (await client.readContract({
+      address: factory,
+      abi,
+      functionName: 'allTokens',
+      args: [BigInt(i)],
+    })) as Address
+    if (t && t !== '0x0000000000000000000000000000000000000000') out.push(t)
+  }
+  return out
+}
+
+async function collectInstantPositions(
+  privateKey: `0x${string}`,
+): Promise<KeeperTokenResult[]> {
+  if (!arcInstantEnabled()) return []
+  const client = arcPublicClient()
+  const wallet = arcServerWalletClient(privateKey)
+  const locker = ARC.INSTANT_LOCKER
+  const seen = new Set<string>()
+  const results: KeeperTokenResult[] = []
+
+  for (const factory of [ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_LEGACY]) {
+    let tokens: Address[] = []
+    try {
+      tokens = await listFactoryTokens(factory, INSTANT_QUOTE_FACTORY_ABI)
+    } catch (e) {
+      results.push({
+        token: factory,
+        kind: 'instant',
+        collectFeesError: `list ${factory.slice(0, 10)}: ${(e as Error).message?.slice(0, 160)}`,
+      })
+      continue
+    }
+
+    for (const token of tokens) {
+      const key = token.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      const r: KeeperTokenResult = { token, kind: 'instant' }
+      try {
+        const pool = (await client.readContract({
+          address: factory,
+          abi: INSTANT_QUOTE_FACTORY_ABI,
+          functionName: 'getPool',
+          args: [token],
+        })) as { positionId: bigint }
+        const positionId = pool?.positionId ?? 0n
+        if (positionId <= 0n) {
+          r.collectFeesError = 'no position'
+          results.push(r)
+          continue
+        }
+        try {
+          const hash = await wallet.writeContract({
+            address: locker,
+            abi: MONLOCK_ABI,
+            functionName: 'collectFees',
+            args: [positionId],
+            chain: wallet.chain,
+          })
+          r.collectFeesTx = hash
+          await client.waitForTransactionReceipt({ hash })
+        } catch (e) {
+          r.collectFeesError = (e as Error).message?.slice(0, 200)
+        }
+      } catch (e) {
+        r.collectFeesError = (e as Error).message?.slice(0, 200)
+      }
+      results.push(r)
+    }
+  }
+  return results
+}
+
 export async function runReflectionKeeperCycle(privateKey: `0x${string}`): Promise<KeeperRunResult> {
   const client = arcPublicClient()
   const wallet = arcServerWalletClient(privateKey)
@@ -248,29 +351,16 @@ export async function runReflectionKeeperCycle(privateKey: `0x${string}`): Promi
   // die mid-cycle on some token N of M.
   const gasTopUp = await maybeTopUpKeeperGas(privateKey)
 
-  const count = Number(
-    await client.readContract({
-      address: factory,
-      abi: INSTANT_REFLECTION_FACTORY_ABI,
-      functionName: 'allTokensLength',
-    }),
-  )
+  const instantResults = await collectInstantPositions(privateKey)
 
-  const tokens: Address[] = []
-  for (let i = 0; i < count; i++) {
-    const t = (await client.readContract({
-      address: factory,
-      abi: INSTANT_REFLECTION_FACTORY_ABI,
-      functionName: 'allTokens',
-      args: [BigInt(i)],
-    })) as Address
-    tokens.push(t)
-  }
+  const tokens: Address[] = arcReflectionEnabled()
+    ? await listFactoryTokens(factory, INSTANT_REFLECTION_FACTORY_ABI).catch(() => [] as Address[])
+    : []
 
-  const results: KeeperTokenResult[] = []
+  const results: KeeperTokenResult[] = [...instantResults]
 
   for (const token of tokens) {
-    const r: KeeperTokenResult = { token }
+    const r: KeeperTokenResult = { token, kind: 'reflection' }
     try {
       const pool = (await client.readContract({
         address: factory,
@@ -363,7 +453,14 @@ export async function runReflectionKeeperCycle(privateKey: `0x${string}`): Promi
     results.push(r)
   }
 
-  return { ranAt: Date.now(), tokensChecked: tokens.length, results, gasTopUp }
+  return {
+    ranAt: Date.now(),
+    tokensChecked: results.length,
+    instantChecked: instantResults.length,
+    reflectionChecked: tokens.length,
+    results,
+    gasTopUp,
+  }
 }
 
 // Re-exported for the API route's env-sanity checks.
