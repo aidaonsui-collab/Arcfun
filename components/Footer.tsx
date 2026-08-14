@@ -4,19 +4,7 @@ import { ARC_EXPLORER } from '@/lib/contracts-arc'
 export function Footer() {
   return (
     <footer className="border-t border-hair mt-8">
-      <div className="max-w-desk mx-auto px-4 sm:px-10 py-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 text-[13px] text-t3">
-        <p className="max-w-xl leading-relaxed">
-          Arcfun — Instant and Reflection launches on{' '}
-          <a
-            href={ARC_EXPLORER || 'https://arc-scan.org'}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-t2 hover:text-white"
-          >
-            Arc
-          </a>
-          . Full supply on Uniswap V3 from block one; launch-token LP fees are auto-burned.
-        </p>
+      <div className="max-w-desk mx-auto px-4 sm:px-10 py-10 flex items-center justify-end gap-5 text-[13px] text-t3">
         <div className="flex items-center gap-5 font-medium text-t2">
           <Link href="/docs" className="hover:text-white">
             Docs
