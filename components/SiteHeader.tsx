@@ -219,11 +219,23 @@ export function SiteHeader() {
             </form>
 
             {navLink('/', 'Home')}
-            {isConnected && address && !wrongChain && (
-              <>
-                {navLink('/portfolio', 'Portfolio')}
-                {navLink(`/creator/${address}`, 'Profile')}
-              </>
+            {navLink('/portfolio', 'Portfolio')}
+            {isConnected && address ? (
+              navLink(`/creator/${address}`, 'Profile')
+            ) : (
+              // No address yet to link /creator/[address] to — prompt connect instead of
+              // hiding the entry outright, so Profile stays in its place in the menu order.
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => {
+                  setMenuOpen(false)
+                  connect({ connector: connectors[0] })
+                }}
+                className="flex h-12 items-center px-4 rounded-2xl border border-hair bg-s2 text-[15px] font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors disabled:opacity-50"
+              >
+                Profile
+              </button>
             )}
             {navLink('/otc', 'Arc OTC')}
             {navLink('/docs', 'Docs')}
