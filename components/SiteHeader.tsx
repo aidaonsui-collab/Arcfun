@@ -2,7 +2,7 @@
 
 /**
  * Sticky nav — brand mark, search, Launch CTA, wallet chip.
- * Mobile: hamburger sheet with OTC / Launch / portfolio links.
+ * Mobile: hamburger sheet — Home, Portfolio, Profile, Arc OTC, Docs (Docs last).
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -77,15 +77,11 @@ export function SiteHeader() {
     router.push(`/?q=${encodeURIComponent(v)}`)
   }
 
-  const navLink = (href: string, label: string, opts?: { primary?: boolean }) => (
+  const navLink = (href: string, label: string) => (
     <Link
       href={href}
       onClick={() => setMenuOpen(false)}
-      className={
-        opts?.primary
-          ? 'flex h-12 items-center justify-center rounded-2xl bg-lime text-white text-[15px] font-semibold tracking-tightish hover:bg-lime-2 transition-colors'
-          : 'flex h-12 items-center px-4 rounded-2xl border border-hair bg-s2 text-[15px] font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors'
-      }
+      className="flex h-12 items-center px-4 rounded-2xl border border-hair bg-s2 text-[15px] font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
     >
       {label}
     </Link>
@@ -223,15 +219,14 @@ export function SiteHeader() {
             </form>
 
             {navLink('/', 'Home')}
-            {navLink('/docs', 'Docs')}
-            {navLink('/otc', 'Arc OTC')}
-            {navLink('/create', 'Launch a token', { primary: true })}
             {isConnected && address && !wrongChain && (
               <>
                 {navLink('/portfolio', 'Portfolio')}
                 {navLink(`/creator/${address}`, 'Profile')}
               </>
             )}
+            {navLink('/otc', 'Arc OTC')}
+            {navLink('/docs', 'Docs')}
           </div>
         </div>
       )}
