@@ -254,21 +254,24 @@ export default function DocsPage() {
         <section id="portfolio" className="scroll-mt-24 mt-14">
           <h2 className="m-0 text-[24px] font-semibold tracking-tightish">Portfolio</h2>
           <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
+            Connect a wallet and open{' '}
             <Link href="/portfolio" className="text-lime-t font-semibold hover:text-white">
               Portfolio
             </Link>{' '}
-            is the claim surface for Instant Reflection. Connect a wallet to see USDC (or a custom
-            reward token) accrued from tokens you hold.
+            from the header. It is the claim surface for Instant Reflection — USDC (or a custom
+            reward token) earned from tokens you hold. Profile is next to it: that is where you
+            set the avatar that shows on token activity.
           </p>
 
+          <h3 className="m-0 mb-3 text-[16px] font-semibold tracking-tightish">Rewards</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="border border-violet-400/35 rounded-[20px] bg-gradient-to-br from-violet-500/15 to-s1 px-5 py-4">
               <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-violet-200/90">
-                Claimable
+                USDC rewards
               </p>
               <p className="m-0 mt-2 text-[15px] text-t2 leading-snug">
-                Ready to pull with <code className="text-white">claim()</code> on each reflection
-                token after a sweep.
+                Amount ready to pull with <code className="text-white">claim()</code>. Shows
+                Pending until the next keeper sweep has reflected fees.
               </p>
             </div>
             <div className="border border-hair rounded-[20px] bg-s1 px-5 py-4">
@@ -276,25 +279,78 @@ export default function DocsPage() {
                 Lifetime earned
               </p>
               <p className="m-0 mt-2 text-[15px] text-t2 leading-snug">
-                All reflections accrued to this wallet, including amounts already claimed.
+                Everything this wallet has accrued from reflections, including amounts already
+                claimed.
               </p>
             </div>
             <div className="border border-hair rounded-[20px] bg-s1 px-5 py-4">
               <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-t3">
-                By token
+                Already claimed
               </p>
               <p className="m-0 mt-2 text-[15px] text-t2 leading-snug">
-                Per-token holding, claimable, and earned. Claims are one transaction per token.
+                Pushed by the keeper or pulled with a manual <code className="text-white">claim()</code>.
               </p>
             </div>
           </div>
 
-          <p className="mt-5 mb-0 max-w-2xl text-[14px] text-t2 leading-relaxed">
-            Holding more of a reflection token earns a larger share of that token&apos;s holder
-            leg. Meme Instant launches do not pay holders — only the creator fee wallet. If
-            nothing is claimable yet, the next keeper sweep will collect and reflect pending LP
-            fees.
-          </p>
+          <div className="mt-3 border border-hair rounded-[22px] bg-s1 p-5">
+            <h3 className="m-0 text-[15px] font-semibold tracking-tightish">
+              Reflection rewards by token
+            </h3>
+            <ul className="mt-3 mb-0 pl-4 text-[14px] text-t2 space-y-2 leading-relaxed">
+              <li>
+                One row per Instant Reflection launch: your holding, claimable, and lifetime
+                earned in that token&apos;s reward asset (usually USDC).
+              </li>
+              <li>
+                Claim is one transaction per token — tap Claim on the row. There is no batch
+                claim.
+              </li>
+              <li>
+                Holding more of a reflection token earns a larger share of that token&apos;s
+                50% holder leg. Meme Instant launches do not pay holders.
+              </li>
+              <li>
+                Fees are not streamed per swap. A keeper collects the locked LP, forwards USDC,
+                then calls <code className="text-t2">reflect()</code>. Refresh after a sweep if
+                the tile still says Pending.
+              </li>
+            </ul>
+          </div>
+
+          <h3 className="m-0 mt-8 mb-3 text-[16px] font-semibold tracking-tightish">
+            Profile and avatar
+          </h3>
+          <div className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
+            <p className="m-0 text-[14px] text-t2 leading-relaxed">
+              Open <strong className="text-white font-semibold">Profile</strong> in the header
+              (or <code className="text-t2">/creator/your-wallet</code>) and tap Edit profile.
+              You can set an avatar, display name, bio, and X handle. Saving is a wallet
+              signature — nothing on-chain.
+            </p>
+            <ul className="mt-4 mb-0 pl-4 text-[14px] text-t2 space-y-2 leading-relaxed">
+              <li>
+                Your avatar shows on your public creator page and, when you trade, on the
+                token page activity tape under the chart — replacing the color dot next to
+                your wallet.
+              </li>
+              <li>
+                Display name or <code className="text-t2">@handle</code> replaces the
+                truncated address in that same tape. Wallets without an avatar stay as a
+                color chip.
+              </li>
+              <li>
+                Profile also lists coins you launched, creator LP-fee positions, followers,
+                and trading PnL.
+              </li>
+            </ul>
+            <Link
+              href="/portfolio"
+              className="inline-flex mt-5 h-10 items-center px-4 rounded-xl bg-lime text-white text-sm font-semibold hover:bg-lime-2"
+            >
+              Open Portfolio
+            </Link>
+          </div>
         </section>
 
         {/* OTC */}
