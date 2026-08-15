@@ -3,6 +3,17 @@
 /**
  * Candlestick + volume — pools.trade / Uniswap Pools layout:
  * dotted grid, last-price line, volume pane, date axis, crosshair OHLC.
+ *
+ * Bars are packed with synthetic, evenly-spaced x-axis times (baseTime + i*bucketSec),
+ * NOT each candle's real bucket time. lightweight-charts' time scale spaces bars by actual
+ * elapsed time between their `time` values, same as any TradingView-family chart — passing
+ * real bucket times back-to-back still leaves a wide blank/dotted stretch across any quiet
+ * period, even though lib/candles.ts already dropped the empty buckets from the array. A
+ * low-volume token like this one trades in bursts, so most of the chart ended up empty space.
+ * Synthetic spacing is the standard fix for "pack sparse trades, ignore real gaps" charts
+ * (what RadarDEX/pools.trade actually do) — crosshair hover still resolves back to each bar's
+ * real time/OHLC/volume via `realByIndex`, so tooltips and the parent's volume lookup stay
+ * accurate; only the bar *positions* are synthetic.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -40,10 +51,13 @@ export type HoverCandle = Candle & { up: boolean }
 export function TokenChart({
   candles,
   height = 360,
+  bucketSec = 900,
   onHover,
 }: {
   candles: Candle[]
   height?: number
+  /** Real interval width (seconds) — used only to space the synthetic x-axis readably. */
+  bucketSec?: number
   onHover?: (c: HoverCandle | null) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -52,6 +66,9 @@ export function TokenChart({
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
   const onHoverRef = useRef(onHover)
   onHoverRef.current = onHover
+  // Synthetic chart-time -> real candle, rebuilt whenever `candles` changes. Lets the
+  // long-lived crosshair handler (registered once, below) resolve a hover back to real data.
+  const realByTimeRef = useRef<Map<number, Candle>>(new Map())
   const [ready, setReady] = useState(0)
 
   const attachCrosshair = useCallback((chart: IChartApi, series: ISeriesApi<'Candlestick'>) => {
@@ -69,13 +86,14 @@ export function TokenChart({
         cb(null)
         return
       }
+      const real = realByTimeRef.current.get(Number(raw.time))
       cb({
-        time: Number(raw.time),
+        time: real?.time ?? Number(raw.time),
         open: raw.open,
         high: raw.high,
         low: raw.low,
         close: raw.close,
-        volume: 0,
+        volume: real?.volume ?? 0,
         up: raw.close >= raw.open,
       })
     }
@@ -182,9 +200,20 @@ export function TokenChart({
       priceLineColor: lastUp ? UP : DOWN,
     })
 
+    // Synthetic, evenly-spaced x-axis so a real trading gap (this token bursts, then goes
+    // quiet for hours) doesn't stretch into a blank/dotted gap on the pane — see the file-top
+    // comment. Anchored to the first real candle's actual time so axis labels still read as
+    // plausible clock times, just not necessarily each bar's true timestamp.
+    const baseTime = candles[0]?.time ?? 0
+    const syntheticTime = (i: number) => (baseTime + i * bucketSec) as UTCTimestamp
+
+    const realByTime = new Map<number, Candle>()
+    candles.forEach((c, i) => realByTime.set(syntheticTime(i), c))
+    realByTimeRef.current = realByTime
+
     candleSeries.setData(
-      candles.map((c) => ({
-        time: c.time as UTCTimestamp,
+      candles.map((c, i) => ({
+        time: syntheticTime(i),
         open: c.open,
         high: c.high,
         low: c.low,
@@ -192,8 +221,8 @@ export function TokenChart({
       })),
     )
     volumeSeries.setData(
-      candles.map((c) => ({
-        time: c.time as UTCTimestamp,
+      candles.map((c, i) => ({
+        time: syntheticTime(i),
         value: c.volume,
         color: c.close >= c.open ? UP_VOL : DOWN_VOL,
       })),
@@ -201,9 +230,11 @@ export function TokenChart({
 
     requestAnimationFrame(() => {
       chart.timeScale().applyOptions({ barSpacing: 6, maxBarSpacing: 10 })
-      chart.timeScale().scrollToRealTime()
+      // Not scrollToRealTime() — our x-axis is synthetic, not wall-clock, so "real time" isn't
+      // meaningful here. scrollToPosition(0, …) brings the last bar to rightOffset from the edge.
+      chart.timeScale().scrollToPosition(0, false)
     })
-  }, [candles, ready])
+  }, [candles, bucketSec, ready])
 
   return (
     <div className="relative w-full" style={{ height, background: BG }}>

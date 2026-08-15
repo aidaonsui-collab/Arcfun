@@ -1,8 +1,14 @@
 /**
  * Bucket indexed swap tape into OHLCV.
- * Only buckets that had a trade are emitted — empty 5m/15m slots are skipped so
- * candles sit adjacent (RadarDEX). lightweight-charts already spaces by index,
- * not wall-clock, so filling quiet buckets just draws invisible dojis ("gaps").
+ * Only buckets that had a trade are emitted — empty 5m/15m slots are skipped, so a quiet
+ * stretch doesn't sit in this array as an explicit gap entry. That alone isn't enough to make
+ * candles sit adjacent on screen, though: lightweight-charts spaces bars by each bar's actual
+ * `time` value along a real time axis, same as any TradingView-family chart — two real candles
+ * separated by hours of silence still render with a wide blank stretch between them unless the
+ * chart itself is told to ignore real elapsed time. That part is TokenChart.tsx's job (synthetic,
+ * evenly-spaced x-axis) — see its file-top comment. Found live 2026-08-15: this file's dropped
+ * buckets were doing their part correctly, but the chart wasn't, so the "pack like RadarDEX"
+ * goal was only half-implemented and quiet periods still showed as gaps.
  */
 import type { EvmTrade } from './evm-trades'
 
