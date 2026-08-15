@@ -13,6 +13,7 @@ const TOC = [
   { href: '#fees', label: 'LP fees' },
   { href: '#portfolio', label: 'Portfolio' },
   { href: '#otc', label: 'Arc OTC' },
+  { href: '#agents', label: 'Agents' },
 ] as const
 
 export default function DocsPage() {
@@ -364,6 +365,63 @@ export default function DocsPage() {
             >
               Open Arc OTC
             </Link>
+          </div>
+        </section>
+
+        <section id="agents" className="scroll-mt-24 mt-14">
+          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">Agents</h2>
+          <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
+            ArcFun is the venue. Circle Agent Stack is the wallet. Eve is the agent runtime.
+            Together they let an AI launch and trade Instant / Reflection tokens on Arc without
+            ArcFun ever holding a key. Signing is <code className="text-t2">circle wallet execute</code>.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            <article className="border border-hair rounded-[22px] bg-s1 p-5">
+              <h3 className="m-0 text-[15px] font-semibold tracking-tightish">ArcFun MCP</h3>
+              <p className="mt-1.5 mb-0 text-[13px] text-t2 leading-relaxed">
+                List, quote, holders, candles, and unsigned launch/swap transactions.
+              </p>
+            </article>
+            <article className="border border-hair rounded-[22px] bg-s1 p-5">
+              <h3 className="m-0 text-[15px] font-semibold tracking-tightish">Circle Agent Stack</h3>
+              <p className="mt-1.5 mb-0 text-[13px] text-t2 leading-relaxed">
+                Agent Wallets, Circle CLI, spend policies, USDC on Arc. The signer. Each
+                prepared step includes a <code>circle wallet execute</code> command.
+              </p>
+            </article>
+            <article className="border border-hair rounded-[22px] bg-s1 p-5">
+              <h3 className="m-0 text-[15px] font-semibold tracking-tightish">Eve</h3>
+              <p className="mt-1.5 mb-0 text-[13px] text-t2 leading-relaxed">
+                <code>defineMcpClientConnection</code> to this MCP, then{' '}
+                <code>submit_prepared_tx</code> with approval always on. Eve runs Circle CLI.
+              </p>
+            </article>
+          </div>
+          <div className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
+            <p className="m-0 text-[14px] text-t2 leading-relaxed">
+              MCP URL:{' '}
+              <code className="text-white">https://www.arcfun.co/api/mcp</code>
+            </p>
+            <p className="mt-3 mb-0 text-[13px] text-t3 leading-relaxed">
+              Claude / Cursor / Codex: add that URL as a Streamable HTTP MCP server. Then call{' '}
+              <code className="text-t2">about</code>, <code className="text-t2">list_tokens</code>,{' '}
+              <code className="text-t2">prepare_swap</code>. Sign the returned steps with a funded
+              Circle Agent Wallet on chain 5042.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <a
+                href="/skills/arcfun.md"
+                className="inline-flex h-10 items-center px-4 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white"
+              >
+                Circle / Eve skill
+              </a>
+              <a
+                href="/eve/README.md"
+                className="inline-flex h-10 items-center px-4 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white"
+              >
+                Eve sample
+              </a>
+            </div>
           </div>
         </section>
 

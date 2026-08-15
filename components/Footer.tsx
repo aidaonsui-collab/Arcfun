@@ -9,6 +9,9 @@ export function Footer() {
           <Link href="/docs" className="hover:text-white">
             Docs
           </Link>
+          <Link href="/docs#agents" className="hover:text-white">
+            Agents
+          </Link>
           <Link href="/otc" className="hover:text-white">
             Arc OTC
           </Link>

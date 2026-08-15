@@ -12,6 +12,9 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
+  async rewrites() {
+    return [{ source: '/mcp', destination: '/api/mcp' }]
+  },
 }
 
 module.exports = nextConfig
