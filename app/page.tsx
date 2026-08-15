@@ -80,12 +80,7 @@ function HomeInner() {
   }, [tokens, filter, sort, volWindow])
 
   const rail = useMemo(() => {
-    return [...tokens]
-      .sort(
-        (a, b) =>
-          (b.createdAt ?? b.lastTradeAt ?? 0) - (a.createdAt ?? a.lastTradeAt ?? 0),
-      )
-      .slice(0, 8)
+    return [...tokens].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 3)
   }, [tokens])
 
   const liveCount = tokens.length
