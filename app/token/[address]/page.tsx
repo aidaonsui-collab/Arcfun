@@ -515,6 +515,7 @@ export default function TokenPage() {
                 <TokenChart
                   candles={candles}
                   height={360}
+                  bucketSec={RANGE_BUCKET_SEC[range]}
                   onHover={(c) => {
                     if (!c) {
                       setHoverCandle(null)
