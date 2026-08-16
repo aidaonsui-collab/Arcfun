@@ -83,7 +83,6 @@ function HomeInner() {
     return [...tokens].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 3)
   }, [tokens])
 
-  const liveCount = tokens.length
   const sortTabs: SortKey[] = ['Top volume', 'New', 'Top MC']
 
   return (
@@ -92,10 +91,6 @@ function HomeInner() {
       <div className="relative z-10 max-w-desk mx-auto px-4 sm:px-10">
         <section className="relative mt-6 lg:min-h-[200px]">
           <div className="relative max-w-[600px] flex flex-col gap-3">
-            <span className="self-start inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-lime-soft border border-lime-line text-xs font-semibold text-lime-t tracking-tightish whitespace-nowrap">
-              <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot" />
-              {liveCount} live pool{liveCount === 1 ? '' : 's'} · Instant on Arc
-            </span>
             <h1 className="m-0 text-[26px] sm:text-[32px] leading-[1.15] font-bold tracking-display text-pretty text-white">
               The best way to launch and trade tokens on Arc.
             </h1>
