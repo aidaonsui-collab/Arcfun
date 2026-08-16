@@ -20,6 +20,7 @@ import {
 import {
   buildArcBuy,
   buildArcSell,
+  findArcPoolFee,
   encodeApprove,
   formatUsdc,
   minOutFromSlippage,
@@ -514,7 +515,8 @@ export async function mcpPrepareSwap(input: {
     const quoted = await quoteArcBuy(token, usdcIn)
     if (quoted == null) throw new Error('quote failed')
     const minOut = minOutFromSlippage(quoted, slip)
-    let call = buildArcBuy(token, usdcIn, minOut)
+    const poolFee = (await findArcPoolFee(token)) ?? undefined
+    let call = buildArcBuy(token, usdcIn, minOut, poolFee)
     call = withRecipient(call, wallet)
     steps.push(
       preparedStep({
@@ -572,7 +574,8 @@ export async function mcpPrepareSwap(input: {
   const quoted = await quoteArcSell(token, tokenIn)
   if (quoted == null) throw new Error('quote failed')
   const minOut = minOutFromSlippage(quoted, slip)
-  const call = buildArcSell(token, tokenIn, minOut, wallet)
+  const sellPoolFee = (await findArcPoolFee(token)) ?? undefined
+  const call = buildArcSell(token, tokenIn, minOut, wallet, sellPoolFee)
   steps.push(
     preparedStep({
       step: 1,

@@ -12,7 +12,114 @@ import {
 import { ARC, ARC_CHAIN_ID, arcPublicClient, arcRobinSwapEnabled } from './contracts-arc'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
-const POOL_FEE = ARC.UNI_POOL_FEE // 10000
+const POOL_FEE = ARC.UNI_POOL_FEE // 10000 — ArcFun's own launch tier, and the fallback
+
+/**
+ * Every Uni V3 fee tier, cheapest first. ArcFun launches at 1%, but the Arc factory is shared —
+ * DyorSwap's frontend ships this same factory address, and its launches sit at the 0.01% tier.
+ * Enumerated PoolCreated on 0xf0db7b58…c653918 (2026-08-16): 163 pools, 132 at 1% and 31 at 0.01%.
+ * Hardcoding 1% meant every one of those 31 pools reverted here rather than quoting.
+ */
+const POOL_FEE_TIERS = [100, 500, 3000, 10000] as const
+
+const UNI_V3_FACTORY_ABI = [
+  {
+    type: 'function',
+    name: 'getPool',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'tokenA', type: 'address' },
+      { name: 'tokenB', type: 'address' },
+      { name: 'fee', type: 'uint24' },
+    ],
+    outputs: [{ type: 'address' }],
+  },
+] as const
+
+const UNI_V3_POOL_ABI = [
+  {
+    type: 'function',
+    name: 'liquidity',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint128' }],
+  },
+] as const
+
+/**
+ * token -> fee tier. A pool's tier never changes once created, so a positive hit is cached for
+ * the process lifetime. Misses are NOT cached: a token can get its first pool at any moment
+ * (that's every ArcFun launch), and caching "no pool" would make a fresh launch untradeable
+ * until redeploy.
+ */
+const poolFeeCache = new Map<string, number>()
+
+/**
+ * Which fee tier actually holds the TOKEN/USDC pool. Returns null when no tier has one.
+ * All four getPool reads go out in a single multicall3 batch — Arc's public RPCs rate-limit
+ * under burst, so this must not become four round trips per quote.
+ */
+export async function findArcPoolFee(token: Address): Promise<number | null> {
+  const key = token.toLowerCase()
+  const cached = poolFeeCache.get(key)
+  if (cached != null) return cached
+  if (token.toLowerCase() === ARC.USDC.toLowerCase()) return null
+
+  const client = arcPublicClient()
+  let pools: (Address | null)[]
+  try {
+    const res = await client.multicall({
+      contracts: POOL_FEE_TIERS.map((fee) => ({
+        address: ARC.UNI_FACTORY,
+        abi: UNI_V3_FACTORY_ABI,
+        functionName: 'getPool' as const,
+        args: [ARC.USDC, token, fee] as const,
+      })),
+      allowFailure: true,
+    })
+    pools = res.map((r) => (r.status === 'success' ? (r.result as Address) : null))
+  } catch {
+    return null
+  }
+
+  const found: { fee: number; pool: Address }[] = []
+  POOL_FEE_TIERS.forEach((fee, i) => {
+    const pool = pools[i]
+    if (pool && pool !== ZERO) found.push({ fee, pool })
+  })
+  if (found.length === 0) return null
+  if (found.length === 1) {
+    poolFeeCache.set(key, found[0].fee)
+    return found[0].fee
+  }
+
+  // Rare on Arc today (no token has two tiers), but a token can be pooled at several. Pick the
+  // deepest by in-range liquidity rather than assuming a tier, so quotes follow the real book.
+  try {
+    const liq = await client.multicall({
+      contracts: found.map((c) => ({
+        address: c.pool,
+        abi: UNI_V3_POOL_ABI,
+        functionName: 'liquidity' as const,
+      })),
+      allowFailure: true,
+    })
+    let best = found[0].fee
+    let bestLiq = -1n
+    liq.forEach((r, i) => {
+      const v = r.status === 'success' ? (r.result as bigint) : 0n
+      if (v > bestLiq) {
+        bestLiq = v
+        best = found[i].fee
+      }
+    })
+    poolFeeCache.set(key, best)
+    return best
+  } catch {
+    poolFeeCache.set(key, found[0].fee)
+    return found[0].fee
+  }
+}
 
 const QUOTER_ABI = [
   {
@@ -138,6 +245,7 @@ export async function quoteArcBuy(token: Address, usdcIn: bigint): Promise<bigin
   const bps = await feeBps()
   const swapIn = netAfterFee(usdcIn, bps)
   if (swapIn <= 0n) return null
+  const fee = (await findArcPoolFee(token)) ?? POOL_FEE
   try {
     const res = (await arcPublicClient().readContract({
       address: ARC.UNI_QUOTER,
@@ -148,7 +256,7 @@ export async function quoteArcBuy(token: Address, usdcIn: bigint): Promise<bigin
           tokenIn: ARC.USDC,
           tokenOut: token,
           amountIn: swapIn,
-          fee: POOL_FEE,
+          fee,
           sqrtPriceLimitX96: 0n,
         },
       ],
@@ -164,6 +272,7 @@ export async function quoteArcSell(token: Address, tokenIn: bigint): Promise<big
   const bps = await feeBps()
   const swapIn = netAfterFee(tokenIn, bps)
   if (swapIn <= 0n) return null
+  const fee = (await findArcPoolFee(token)) ?? POOL_FEE
   try {
     const res = (await arcPublicClient().readContract({
       address: ARC.UNI_QUOTER,
@@ -174,7 +283,7 @@ export async function quoteArcSell(token: Address, tokenIn: bigint): Promise<big
           tokenIn: token,
           tokenOut: ARC.USDC,
           amountIn: swapIn,
-          fee: POOL_FEE,
+          fee,
           sqrtPriceLimitX96: 0n,
         },
       ],
@@ -198,13 +307,23 @@ export function arcSwapSpender(): Address {
   return useFeeRouter() ? ARC.FEE_ROUTER : ARC.UNI_ROUTER
 }
 
-export function buildArcBuy(token: Address, usdcIn: bigint, amountOutMin: bigint): ArcSwapWrite {
+/**
+ * `fee` must be the tier the quote came from — pass `await findArcPoolFee(token)`. Quoting one
+ * tier and swapping another reverts (or fills against a different book), so callers resolve it
+ * once and hand it to both. Defaults to ArcFun's 1% launch tier when omitted.
+ */
+export function buildArcBuy(
+  token: Address,
+  usdcIn: bigint,
+  amountOutMin: bigint,
+  fee: number = POOL_FEE,
+): ArcSwapWrite {
   if (useFeeRouter()) {
     return {
       address: ARC.FEE_ROUTER,
       abi: FEE_ROUTER_ABI,
       functionName: 'swapExactInput',
-      args: [ARC.UNI_ROUTER, ARC.USDC, token, POOL_FEE, usdcIn, amountOutMin],
+      args: [ARC.UNI_ROUTER, ARC.USDC, token, fee, usdcIn, amountOutMin],
       chainId: ARC_CHAIN_ID,
     }
   }
@@ -216,7 +335,7 @@ export function buildArcBuy(token: Address, usdcIn: bigint, amountOutMin: bigint
       {
         tokenIn: ARC.USDC,
         tokenOut: token,
-        fee: POOL_FEE,
+        fee,
         recipient: ZERO, // filled by caller with user address
         amountIn: usdcIn,
         amountOutMinimum: amountOutMin,
@@ -227,18 +346,20 @@ export function buildArcBuy(token: Address, usdcIn: bigint, amountOutMin: bigint
   }
 }
 
+/** See buildArcBuy — `fee` must match the tier the quote used. */
 export function buildArcSell(
   token: Address,
   tokenIn: bigint,
   amountOutMin: bigint,
   recipient: Address,
+  fee: number = POOL_FEE,
 ): ArcSwapWrite {
   if (useFeeRouter()) {
     return {
       address: ARC.FEE_ROUTER,
       abi: FEE_ROUTER_ABI,
       functionName: 'swapExactInput',
-      args: [ARC.UNI_ROUTER, token, ARC.USDC, POOL_FEE, tokenIn, amountOutMin],
+      args: [ARC.UNI_ROUTER, token, ARC.USDC, fee, tokenIn, amountOutMin],
       chainId: ARC_CHAIN_ID,
     }
   }
@@ -250,7 +371,7 @@ export function buildArcSell(
       {
         tokenIn: token,
         tokenOut: ARC.USDC,
-        fee: POOL_FEE,
+        fee,
         recipient,
         amountIn: tokenIn,
         amountOutMinimum: amountOutMin,
