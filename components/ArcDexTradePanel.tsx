@@ -20,6 +20,7 @@ import {
   arcSwapSpender,
   buildArcBuy,
   buildArcSell,
+  findArcPoolFee,
   formatUsdc,
   minOutFromSlippage,
   parseUsdc,
@@ -172,7 +173,9 @@ export function ArcDexTradePanel({
           void refetchAllowance()
         }
         setStatusMsg('Buying…')
-        let call = buildArcBuy(token, inAmt, minOut)
+        // Same tier the quote resolved — cached, so this is not an extra RPC round trip.
+        const poolFee = (await findArcPoolFee(token)) ?? undefined
+        let call = buildArcBuy(token, inAmt, minOut, poolFee)
         call = withRecipient(call, address)
         const hash = await writeContractAsync({
           address: call.address,
@@ -199,7 +202,8 @@ export function ArcDexTradePanel({
           void refetchAllowance()
         }
         setStatusMsg('Selling…')
-        const call = buildArcSell(token, inAmt, minOut, address)
+        const poolFee = (await findArcPoolFee(token)) ?? undefined
+        const call = buildArcSell(token, inAmt, minOut, address, poolFee)
         const hash = await writeContractAsync({
           address: call.address,
           abi: call.abi as never,
