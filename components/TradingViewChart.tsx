@@ -74,7 +74,7 @@ export default function TradingViewChart({
       widgetRef.current = null
     }
 
-    widgetRef.current = new window.TradingView.widget({
+    const widget = new window.TradingView.widget({
       container: containerRef.current,
       datafeed: createArcDatafeed(token, symbol),
       library_path: '/charting_library/charting_library/',
@@ -120,6 +120,38 @@ export default function TradingViewChart({
         'volume_force_overlay',
         'disable_resolution_rebuild',
       ],
+    })
+    widgetRef.current = widget
+
+    widget.onChartReady(() => {
+      const fit = async () => {
+        try {
+          const chart = widget.activeChart()
+          const res = String(chart.resolution?.() ?? '15')
+          const r = await fetch(
+            `/api/arc/${encodeURIComponent(token)}/ohlcv?resolution=${encodeURIComponent(res)}`,
+            { cache: 'no-store' },
+          )
+          if (!r.ok) return
+          const data = await r.json()
+          const c = (data.candles ?? []) as { time: number }[]
+          if (c.length < 2) return
+          chart.setVisibleRange({
+            from: Math.floor(c[0].time / 1000),
+            to: Math.floor(c[c.length - 1].time / 1000) + 60,
+          })
+        } catch {
+          /* ignore */
+        }
+      }
+      void fit()
+      try {
+        widget.activeChart().onIntervalChanged().subscribe(null, () => {
+          window.setTimeout(() => void fit(), 80)
+        })
+      } catch {
+        /* older library */
+      }
     })
 
     return () => {

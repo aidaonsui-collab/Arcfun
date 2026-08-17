@@ -113,16 +113,14 @@ export function createArcDatafeed(token: string, symbol: string) {
           onResult([], { noData: true })
           return
         }
-        // Packed times are synthetic. Always hand the full series on first load so
-        // a 5D wall-clock window doesn't clip or re-open holes.
-        if (periodParams.firstDataRequest) {
-          onResult(candles, { noData: false })
-          return
-        }
-        const fromMs = periodParams.from * 1000
-        const toMs = periodParams.to * 1000
-        const bars = candles.filter((c) => c.time >= fromMs && c.time <= toMs)
-        onResult(bars, { noData: bars.length === 0 })
+        // Packed series is not wall-clock. Always return it in full so zoom/TF
+        // changes cannot re-open holes by filtering a 5D UTC window.
+        const n = periodParams.countBack
+        const bars =
+          n > 0 && n < candles.length && !periodParams.firstDataRequest
+            ? candles.slice(-n)
+            : candles
+        onResult(bars, { noData: false })
       } catch (e) {
         onError((e as Error)?.message ?? 'Failed to fetch bars')
       }
