@@ -59,6 +59,12 @@ function websiteHref(raw: string): string {
 
 const BURN_ADDRESS = '0x000000000000000000000000000000000000dead'
 
+function fmtTapeTokens(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n) || n <= 0) return '—'
+  if (n < 1) return n.toLocaleString(undefined, { maximumFractionDigits: 4 })
+  return Math.round(n).toLocaleString()
+}
+
 function fmtBurnedPct(p: number | null | undefined): string {
   if (p == null || !Number.isFinite(p)) return '—'
   if (p <= 0) return '0%'
@@ -638,7 +644,7 @@ export default function TokenPage() {
                           rel="noopener noreferrer"
                           className="text-t2 truncate hover:text-white"
                         >
-                          {t.tokenAmount != null ? String(t.tokenAmount) : '—'}
+                          {fmtTapeTokens(t.tokenAmount)}
                         </a>
                         <a
                           href={`${explorer}/tx/${t.txHash}`}
