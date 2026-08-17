@@ -20,6 +20,8 @@ export interface EvmTrade {
   ts: number
   blockNumber: number
   txHash: `0x${string}`
+  /** Swap log index — used to dedupe one pool Swap per tx. */
+  logIndex?: number
 }
 
 export interface EvmTradeStats {

@@ -53,6 +53,23 @@ const FRESH_MS = 6_000
 
 const tradesKvKey = (token: string) => `arcfun:trades:${token.toLowerCase()}`
 const cursorKvKey = (token: string) => `arcfun:trades:cursor:${token.toLowerCase()}`
+const seenKvKey = (token: string) => `arcfun:trades:seen:${token.toLowerCase()}`
+
+function tradeId(t: Pick<EvmTrade, 'txHash' | 'logIndex'>): string {
+  return t.logIndex != null ? `${t.txHash}:${t.logIndex}` : t.txHash
+}
+
+function dedupeTrades(trades: EvmTrade[]): EvmTrade[] {
+  const seen = new Set<string>()
+  const out: EvmTrade[] = []
+  for (const t of trades) {
+    const id = tradeId(t)
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(t)
+  }
+  return out
+}
 
 const empty: EvmTradesResult = {
   trades: [],
@@ -196,6 +213,7 @@ async function scanSwapRange(
 
         out.push({
           txHash: log.transactionHash! as `0x${string}`,
+          logIndex: Number(log.logIndex ?? 0),
           blockNumber: Number(log.blockNumber ?? 0n),
           ts,
           isBuy,
@@ -227,8 +245,18 @@ async function scanSwapRange(
  */
 async function persistTrades(key: string, ascendingNew: EvmTrade[], newCursor: bigint): Promise<void> {
   try {
-    if (ascendingNew.length > 0) {
-      await kv.rpush(tradesKvKey(key), ...ascendingNew)
+    const fresh: EvmTrade[] = []
+    for (const t of ascendingNew) {
+      const id = tradeId(t)
+      try {
+        const added = Number(await kv.sadd(seenKvKey(key), id))
+        if (added > 0) fresh.push(t)
+      } catch {
+        fresh.push(t)
+      }
+    }
+    if (fresh.length > 0) {
+      await kv.rpush(tradesKvKey(key), ...fresh)
       await kv.ltrim(tradesKvKey(key), -TRADES_CAP, -1)
     }
     await kv.set(cursorKvKey(key), newCursor.toString())
@@ -300,21 +328,30 @@ export async function fetchArcTrades(
     // LRANGE with negative indices counts from the end, so page N's ascending slice is
     // [-(offset+limit), -(offset+1)] — clamped to the list start automatically for an
     // out-of-range negative start (e.g. a deep offset on a short list just returns fewer rows).
-    let ascending: EvmTrade[] | null = null
-    let total: number | null = null
+    let stored: EvmTrade[] | null = null
     try {
-      ;[ascending, total] = await Promise.all([
-        // Already-deserialized objects, not JSON strings — see persistTrades' doc comment.
-        kv.lrange<EvmTrade>(tradesKvKey(key), -(offset + limit), -(offset + 1)),
-        kv.llen(tradesKvKey(key)),
-      ])
+      stored = await kv.lrange<EvmTrade>(tradesKvKey(key), 0, -1)
     } catch (e) {
       console.warn('[arc-trades] kv read trades', summarizeRpcError(e))
     }
-    // KV unavailable (or nothing stored yet) — fall back to whatever this request just scanned
-    // live, so a KV outage degrades gracefully instead of returning nothing. Only meaningful for
-    // page 1 (offset 0); a KV outage on a deeper page just returns empty, same as "no more pages."
-    if (ascending === null) ascending = offset === 0 ? (foundThisCall ?? []).slice(-limit) : []
+    if (stored === null) stored = foundThisCall ?? []
+
+    const cleaned = dedupeTrades(stored)
+    if (stored.length !== cleaned.length) {
+      try {
+        await kv.del(tradesKvKey(key))
+        if (cleaned.length > 0) {
+          await kv.rpush(tradesKvKey(key), ...cleaned)
+          const ids = cleaned.map(tradeId)
+          if (ids.length) await kv.sadd(seenKvKey(key), ids[0], ...ids.slice(1))
+        }
+      } catch (e) {
+        console.warn('[arc-trades] kv dedupe rewrite', summarizeRpcError(e))
+      }
+    }
+
+    const total = cleaned.length
+    const ascending = cleaned.slice(Math.max(0, cleaned.length - (offset + limit)), Math.max(0, cleaned.length - offset))
 
     // Newest first, matching the API's existing contract
     const trimmed = [...ascending].reverse()
@@ -328,7 +365,7 @@ export async function fetchArcTrades(
       trades: trimmed,
       stats: buildStats(trimmed),
       pricePoints,
-      ...(total != null ? { total } : {}),
+      total,
     }
     mem.set(cacheKey, { result, at: Date.now() })
     return result

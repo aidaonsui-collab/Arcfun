@@ -4,7 +4,7 @@
  * ArcDexTradePanel — buy/sell Instant tokens with USDC on Arc Uni V3.
  * Restyled to match redesign: sticky card, buy/sell pill, large amount, USDC chip.
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   useAccount,
   useReadContract,
@@ -83,6 +83,7 @@ export function ArcDexTradePanel({
   const [statusMsg, setStatusMsg] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>()
+  const submitLock = useRef(false)
 
   const { isSuccess: mined } = useWaitForTransactionReceipt({ hash: txHash })
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
@@ -120,6 +121,7 @@ export function ArcDexTradePanel({
     if (!mined) return
     setStatusMsg('Confirmed ✓')
     setBusy(false)
+    submitLock.current = false
     setAmount('')
     setEstOut(null)
     void refetchUsdc()
@@ -168,6 +170,8 @@ export function ArcDexTradePanel({
 
   const onSubmit = async () => {
     if (!address || !amount || Number(amount) <= 0) return
+    if (submitLock.current || busy) return
+    submitLock.current = true
     setError(null)
     setBusy(true)
     setStatusMsg('')
@@ -235,6 +239,7 @@ export function ArcDexTradePanel({
       setError(msg.length > 160 ? msg.slice(0, 160) + '…' : msg)
       setBusy(false)
       setStatusMsg('')
+      submitLock.current = false
     }
   }
 
