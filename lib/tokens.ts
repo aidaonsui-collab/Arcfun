@@ -48,6 +48,8 @@ export interface PoolToken {
   /** USDC sitting in the pool. */
   liquidityQuoteUsd?: number
   totalSupply: number
+  /** Percent of on-chain supply sitting at burn addresses (0–100). */
+  burnedPct?: number | null
   bondingProgress: number
   /** Instant DEX launch (no bonding curve) — always true for Arc tokens today. */
   instantLaunch?: boolean
