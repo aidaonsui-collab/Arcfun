@@ -103,7 +103,7 @@ export function createArcDatafeed(token: string, symbol: string) {
     async getBars(
       _symbolInfo: object,
       resolution: string,
-      periodParams: { from: number; to: number; firstDataRequest: boolean },
+      periodParams: { from: number; to: number; firstDataRequest: boolean; countBack?: number },
       onResult: (bars: TVBar[], meta: { noData: boolean }) => void,
       onError: (err: string) => void,
     ) {
@@ -115,7 +115,7 @@ export function createArcDatafeed(token: string, symbol: string) {
         }
         // Packed series is not wall-clock. Always return it in full so zoom/TF
         // changes cannot re-open holes by filtering a 5D UTC window.
-        const n = periodParams.countBack
+        const n = periodParams.countBack ?? 0
         const bars =
           n > 0 && n < candles.length && !periodParams.firstDataRequest
             ? candles.slice(-n)

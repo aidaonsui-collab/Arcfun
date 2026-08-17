@@ -54,8 +54,8 @@ function packAdjacent(candles: TvCandle[], stepSec: number): TvCandle[] {
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
-  const { token: raw } = await params
-  const token = (raw || '').trim()
+  const { token: rawToken } = await params
+  const token = (rawToken || '').trim()
   if (!isAddress(token)) {
     return NextResponse.json({ error: 'invalid token' }, { status: 400 })
   }
