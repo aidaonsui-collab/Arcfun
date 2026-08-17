@@ -40,7 +40,6 @@ export function createArcDatafeed(token: string, symbol: string) {
     const promise = (async () => {
       const res = await fetch(
         `/api/arc/${encodeURIComponent(token)}/ohlcv?resolution=${encodeURIComponent(resolution)}`,
-        { cache: 'no-store' },
       )
       if (!res.ok) return []
       const data = await res.json()
@@ -113,14 +112,21 @@ export function createArcDatafeed(token: string, symbol: string) {
           onResult([], { noData: true })
           return
         }
-        // Packed series is not wall-clock. Always return it in full so zoom/TF
-        // changes cannot re-open holes by filtering a 5D UTC window.
-        const n = periodParams.countBack ?? 0
-        const bars =
-          n > 0 && n < candles.length && !periodParams.firstDataRequest
-            ? candles.slice(-n)
-            : candles
-        onResult(bars, { noData: false })
+        if (periodParams.firstDataRequest) {
+          onResult(candles, { noData: false })
+          return
+        }
+        // TV keeps paging left until we say the history is finished.
+        // Packed times live in a short synthetic span — treat anything
+        // earlier than the first bar as the end of history.
+        const toRaw = periodParams.to
+        const toSec = toRaw > 1e12 ? toRaw / 1000 : toRaw
+        const firstSec = candles[0].time / 1000
+        if (toSec <= firstSec) {
+          onResult([], { noData: true })
+          return
+        }
+        onResult(candles, { noData: false })
       } catch (e) {
         onError((e as Error)?.message ?? 'Failed to fetch bars')
       }
