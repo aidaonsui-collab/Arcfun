@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { isAddress, type Address } from 'viem'
 import { fetchArcTrades } from '@/lib/arc-trades'
 import { fetchArcPoolToken } from '@/lib/arc-instant-tokens'
-import { buildCandles } from '@/lib/candles'
+import { buildCandles, fillCandleGaps } from '@/lib/candles'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,12 +27,7 @@ type TvCandle = {
   volume: number
 }
 
-function packAdjacent(candles: TvCandle[], stepSec: number): TvCandle[] {
-  if (candles.length < 2 || !(stepSec > 0)) return candles
-  const step = stepSec * 1000
-  const t0 = candles[0].time
-  return candles.map((c, i) => ({ ...c, time: t0 + i * step }))
-}
+
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token: rawToken } = await params
@@ -52,7 +47,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     fallback = tape.trades[0]?.priceUsd ?? 0
   }
 
-  const raw: TvCandle[] = buildCandles(tape.trades, bucketSec, fallback).map((c) => ({
+  const filled = fillCandleGaps(buildCandles(tape.trades, bucketSec, fallback), bucketSec)
+  const candles: TvCandle[] = filled.map((c) => ({
     time: c.time * 1000,
     open: c.open,
     high: c.high,
@@ -61,13 +57,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     volume: c.volume,
   }))
 
-  const candles = packAdjacent(
-    raw.filter((c) => c.volume > 0 || c.open !== c.close),
-    bucketSec,
-  )
-
   return NextResponse.json(
-    { candles: candles.length ? candles : raw, resolution },
+    { candles, resolution },
     { headers: { 'Cache-Control': 's-maxage=15, stale-while-revalidate=30' } },
   )
 }

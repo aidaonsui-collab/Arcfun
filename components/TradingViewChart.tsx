@@ -118,7 +118,6 @@ export default function TradingViewChart({
         'dont_show_boolean_study_arguments',
         'move_logo_to_main_pane',
         'volume_force_overlay',
-        'disable_resolution_rebuild',
       ],
     })
     widgetRef.current = widget

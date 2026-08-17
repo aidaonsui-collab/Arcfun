@@ -14,21 +14,6 @@ export interface TVBar {
 
 const SUPPORTED_RESOLUTIONS = ['1', '5', '15', '60', '240', '1D']
 
-function resolutionSec(res: string): number {
-  if (res === '1D' || res === 'D') return 86_400
-  if (res === '1W' || res === 'W') return 604_800
-  const n = Number(res)
-  return Number.isFinite(n) && n > 0 ? n * 60 : 900
-}
-
-/** Sit volume candles next to each other. TV's time axis would otherwise leave holes for quiet hours. */
-function packBars(bars: TVBar[], resolution: string): TVBar[] {
-  if (bars.length < 2) return bars
-  const stepMs = resolutionSec(resolution) * 1000
-  const t0 = bars[0].time
-  return bars.map((b, i) => ({ ...b, time: t0 + i * stepMs }))
-}
-
 export function createArcDatafeed(token: string, symbol: string) {
   const subscriptions = new Map<string, ReturnType<typeof setInterval>>()
   const CANDLE_CACHE_TTL_MS = 8_000
@@ -43,9 +28,7 @@ export function createArcDatafeed(token: string, symbol: string) {
       )
       if (!res.ok) return []
       const data = await res.json()
-      const raw = (data.candles ?? []) as TVBar[]
-      const withVol = raw.filter((c) => c.volume > 0 || c.open !== c.close)
-      return packBars(withVol.length ? withVol : raw, resolution)
+      return (data.candles ?? []) as TVBar[]
     })()
     candleCache.set(resolution, { at: Date.now(), promise })
     promise.catch(() => candleCache.delete(resolution))
@@ -86,7 +69,7 @@ export function createArcDatafeed(token: string, symbol: string) {
           minmov: 1,
           pricescale: 1_000_000_000,
           has_intraday: true,
-          has_empty_bars: false,
+          has_empty_bars: true,
           intraday_multipliers: ['1', '5', '15', '60', '240'],
           has_daily: true,
           supported_resolutions: SUPPORTED_RESOLUTIONS,
@@ -116,17 +99,16 @@ export function createArcDatafeed(token: string, symbol: string) {
           onResult(candles, { noData: false })
           return
         }
-        // TV keeps paging left until we say the history is finished.
-        // Packed times live in a short synthetic span — treat anything
-        // earlier than the first bar as the end of history.
+        const fromRaw = periodParams.from
         const toRaw = periodParams.to
-        const toSec = toRaw > 1e12 ? toRaw / 1000 : toRaw
-        const firstSec = candles[0].time / 1000
-        if (toSec <= firstSec) {
+        const fromMs = fromRaw > 1e12 ? fromRaw : fromRaw * 1000
+        const toMs = toRaw > 1e12 ? toRaw : toRaw * 1000
+        const bars = candles.filter((c) => c.time >= fromMs && c.time <= toMs)
+        if (!bars.length) {
           onResult([], { noData: true })
           return
         }
-        onResult(candles, { noData: false })
+        onResult(bars, { noData: false })
       } catch (e) {
         onError((e as Error)?.message ?? 'Failed to fetch bars')
       }

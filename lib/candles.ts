@@ -57,16 +57,19 @@ export function buildCandles(trades: EvmTrade[], bucketSec: number, fallbackPric
 
   const chronological = [...priced].sort((a, b) => a.ts - b.ts)
   const byBucket = new Map<number, Candle>()
+  let lastClose = 0
 
   for (const t of chronological) {
     const bucketTime = Math.floor(t.ts / bucketSec) * bucketSec
     const existing = byBucket.get(bucketTime)
     if (!existing) {
+      // Open at the prior close so a one-print bucket still has a body (robinpad ohlcv).
+      const open = lastClose > 0 ? lastClose : t.priceUsd
       byBucket.set(bucketTime, {
         time: bucketTime,
-        open: t.priceUsd,
-        high: t.priceUsd,
-        low: t.priceUsd,
+        open,
+        high: Math.max(open, t.priceUsd),
+        low: Math.min(open, t.priceUsd),
         close: t.priceUsd,
         volume: t.valueUsd,
       })
@@ -76,6 +79,7 @@ export function buildCandles(trades: EvmTrade[], bucketSec: number, fallbackPric
       existing.close = t.priceUsd
       existing.volume += t.valueUsd
     }
+    lastClose = t.priceUsd
   }
 
   const real = [...byBucket.values()].sort((a, b) => a.time - b.time)
