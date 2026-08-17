@@ -14,6 +14,21 @@ export interface TVBar {
 
 const SUPPORTED_RESOLUTIONS = ['1', '5', '15', '60', '240', '1D']
 
+function resolutionSec(res: string): number {
+  if (res === '1D' || res === 'D') return 86_400
+  if (res === '1W' || res === 'W') return 604_800
+  const n = Number(res)
+  return Number.isFinite(n) && n > 0 ? n * 60 : 900
+}
+
+/** Sit volume candles next to each other. TV's time axis would otherwise leave holes for quiet hours. */
+function packBars(bars: TVBar[], resolution: string): TVBar[] {
+  if (bars.length < 2) return bars
+  const stepMs = resolutionSec(resolution) * 1000
+  const t0 = bars[0].time
+  return bars.map((b, i) => ({ ...b, time: t0 + i * stepMs }))
+}
+
 export function createArcDatafeed(token: string, symbol: string) {
   const subscriptions = new Map<string, ReturnType<typeof setInterval>>()
   const CANDLE_CACHE_TTL_MS = 8_000
@@ -29,7 +44,9 @@ export function createArcDatafeed(token: string, symbol: string) {
       )
       if (!res.ok) return []
       const data = await res.json()
-      return (data.candles ?? []) as TVBar[]
+      const raw = (data.candles ?? []) as TVBar[]
+      const withVol = raw.filter((c) => c.volume > 0 || c.open !== c.close)
+      return packBars(withVol.length ? withVol : raw, resolution)
     })()
     candleCache.set(resolution, { at: Date.now(), promise })
     promise.catch(() => candleCache.delete(resolution))
@@ -70,6 +87,7 @@ export function createArcDatafeed(token: string, symbol: string) {
           minmov: 1,
           pricescale: 1_000_000_000,
           has_intraday: true,
+          has_empty_bars: false,
           intraday_multipliers: ['1', '5', '15', '60', '240'],
           has_daily: true,
           supported_resolutions: SUPPORTED_RESOLUTIONS,
@@ -95,15 +113,16 @@ export function createArcDatafeed(token: string, symbol: string) {
           onResult([], { noData: true })
           return
         }
+        // Packed times are synthetic. Always hand the full series on first load so
+        // a 5D wall-clock window doesn't clip or re-open holes.
+        if (periodParams.firstDataRequest) {
+          onResult(candles, { noData: false })
+          return
+        }
         const fromMs = periodParams.from * 1000
         const toMs = periodParams.to * 1000
         const bars = candles.filter((c) => c.time >= fromMs && c.time <= toMs)
-        if (!bars.length) {
-          if (periodParams.firstDataRequest) onResult(candles, { noData: false })
-          else onResult([], { noData: true })
-          return
-        }
-        onResult(bars, { noData: false })
+        onResult(bars, { noData: bars.length === 0 })
       } catch (e) {
         onError((e as Error)?.message ?? 'Failed to fetch bars')
       }
