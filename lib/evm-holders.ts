@@ -127,6 +127,24 @@ async function transferRecipients(token: Address, fromBlock: bigint): Promise<Se
   return known
 }
 
+
+export async function fetchTokenBurnedPct(token: Address): Promise<number | null> {
+  const client = arcPublicClient()
+  try {
+    const [totalSupply, deadBal, zeroBal] = await Promise.all([
+      client.readContract({ address: token, abi: erc20Abi, functionName: 'totalSupply' }),
+      client.readContract({ address: token, abi: erc20Abi, functionName: 'balanceOf', args: [DEAD] }),
+      client.readContract({ address: token, abi: erc20Abi, functionName: 'balanceOf', args: [ZERO] }),
+    ])
+    if (typeof totalSupply !== 'bigint' || totalSupply === 0n) return null
+    const burned =
+      (typeof deadBal === 'bigint' ? deadBal : 0n) + (typeof zeroBal === 'bigint' ? zeroBal : 0n)
+    return toPercent(burned, totalSupply)
+  } catch {
+    return null
+  }
+}
+
 export async function fetchEvmHolders(
   _chain: 'arc',
   token: Address,
