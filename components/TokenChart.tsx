@@ -2,8 +2,9 @@
 
 /**
  * Token chart — RadarDEX-style by default:
- * area + line on a real time axis, last price carried through quiet buckets.
- * Candles stay as a toggle (packed so sparse OHLC isn't a field of matchsticks).
+ * green/red candlesticks on a real time axis. Quiet hours keep last price
+ * (filled upstream) so the path is a continuous stair, not a packed fake clock.
+ * Line/area is an optional toggle.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -52,7 +53,7 @@ export type HoverCandle = Candle & { up: boolean }
 export function TokenChart({
   candles,
   markers = [],
-  style = 'line',
+  style = 'candles',
   height = 360,
   bucketSec = 900,
   onHover,
@@ -143,10 +144,8 @@ export function TokenChart({
         borderVisible: false,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 6,
-        ...(style === 'candles'
-          ? { barSpacing: 6, minBarSpacing: 3, maxBarSpacing: 10 }
-          : { minBarSpacing: 0.5 }),
+        rightOffset: 4,
+        minBarSpacing: 0.5,
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -196,10 +195,7 @@ export function TokenChart({
         wickUpColor: UP,
         wickDownColor: DOWN,
         lastValueVisible: true,
-        priceLineVisible: true,
-        priceLineColor: tone,
-        priceLineStyle: LineStyle.Dotted,
-        priceLineWidth: 1,
+        priceLineVisible: false,
       })
     }
     priceSeriesRef.current = priceSeries
@@ -253,23 +249,18 @@ export function TokenChart({
         : { priceLineColor: tone }),
     })
 
-    const packed = style === 'candles'
-    const baseTime = candles[0]?.time ?? 0
-    const xTime = (c: Candle, i: number) =>
-      (packed ? baseTime + i * bucketSec : c.time) as UTCTimestamp
-
     const realByTime = new Map<number, Candle>()
-    candles.forEach((c, i) => realByTime.set(Number(xTime(c, i)), c))
+    candles.forEach((c) => realByTime.set(c.time, c))
     realByTimeRef.current = realByTime
 
     if (style === 'line') {
       ;(priceSeries as ISeriesApi<'Area'>).setData(
-        candles.map((c, i) => ({ time: xTime(c, i), value: c.close })),
+        candles.map((c) => ({ time: c.time as UTCTimestamp, value: c.close })),
       )
     } else {
       ;(priceSeries as ISeriesApi<'Candlestick'>).setData(
-        candles.map((c, i) => ({
-          time: xTime(c, i),
+        candles.map((c) => ({
+          time: c.time as UTCTimestamp,
           open: c.open,
           high: c.high,
           low: c.low,
@@ -280,52 +271,34 @@ export function TokenChart({
 
     volumeSeries.setData(
       candles
-        .map((c, i) => ({
-          time: xTime(c, i),
+        .filter((c) => c.volume > 0)
+        .map((c) => ({
+          time: c.time as UTCTimestamp,
           value: c.volume,
           color: c.close >= c.open ? UP_VOL : DOWN_VOL,
-        }))
-        .filter((b) => b.value > 0),
+        })),
     )
 
     const used = new Set<number>()
     const lwMarkers: SeriesMarker<UTCTimestamp>[] = []
     for (const m of markers) {
-      const snapped = packed
-        ? candles.reduce(
-            (best, c, i) => {
-              const dt = Math.abs(c.time - m.time)
-              return dt < best.dt ? { dt, t: Number(xTime(c, i)) } : best
-            },
-            { dt: Infinity, t: 0 },
-          ).t
-        : m.time
-      if (!snapped || used.has(snapped)) continue
-      if (!realByTime.has(snapped) && !packed) {
-        // Snap to nearest filled bucket so the marker lands on a line point.
+      let t = m.time
+      if (!realByTime.has(t)) {
         let nearest = 0
         let best = Infinity
-        realByTime.forEach((_, t) => {
-          const dt = Math.abs(t - snapped)
+        realByTime.forEach((_, key) => {
+          const dt = Math.abs(key - t)
           if (dt < best) {
             best = dt
-            nearest = t
+            nearest = key
           }
         })
-        if (!nearest || used.has(nearest)) continue
-        used.add(nearest)
-        lwMarkers.push({
-          time: nearest as UTCTimestamp,
-          position: m.isBuy ? 'belowBar' : 'aboveBar',
-          color: m.isBuy ? UP : DOWN,
-          shape: m.isBuy ? 'circle' : 'circle',
-          text: m.isBuy ? 'B' : 'S',
-        })
-        continue
+        t = nearest
       }
-      used.add(snapped)
+      if (!t || used.has(t)) continue
+      used.add(t)
       lwMarkers.push({
-        time: snapped as UTCTimestamp,
+        time: t as UTCTimestamp,
         position: m.isBuy ? 'belowBar' : 'aboveBar',
         color: m.isBuy ? UP : DOWN,
         shape: 'circle',
@@ -335,12 +308,7 @@ export function TokenChart({
     markerApiRef.current?.setMarkers(lwMarkers)
 
     requestAnimationFrame(() => {
-      if (style === 'line') {
-        chart.timeScale().fitContent()
-      } else {
-        chart.timeScale().applyOptions({ barSpacing: 6, maxBarSpacing: 10 })
-        chart.timeScale().scrollToPosition(0, false)
-      }
+      chart.timeScale().fitContent()
     })
   }, [candles, markers, bucketSec, ready, style])
 

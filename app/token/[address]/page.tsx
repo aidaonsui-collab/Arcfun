@@ -90,7 +90,7 @@ export default function TokenPage() {
   const [tab, setTab] = useState<Tab>('Activity')
   const [range, setRange] = useState<Range>('5M')
   const [chartScale, setChartScale] = useState<ChartScale>('Price')
-  const [chartStyle, setChartStyle] = useState<ChartStyle>('line')
+  const [chartStyle, setChartStyle] = useState<ChartStyle>('candles')
   const [hoverCandle, setHoverCandle] = useState<HoverCandle | null>(null)
   const [volRange, setVolRange] = useState<VolRange>('1H')
   const [copied, setCopied] = useState(false)
@@ -271,8 +271,8 @@ export default function TokenPage() {
     return chartScale === 'FDV' ? scaleCandles(raw, supply) : raw
   }, [chartTape, bucketSec, pool?.currentPrice, chartScale, supply])
   const candles = useMemo(
-    () => (chartStyle === 'line' ? fillCandleGaps(tradeCandles, bucketSec) : tradeCandles),
-    [chartStyle, tradeCandles, bucketSec],
+    () => fillCandleGaps(tradeCandles, bucketSec),
+    [tradeCandles, bucketSec],
   )
   const session = useMemo(() => sessionOhlc(tradeCandles), [tradeCandles])
   const lastCandle = tradeCandles[tradeCandles.length - 1]
@@ -285,22 +285,21 @@ export default function TokenPage() {
         : null)
   const axisFmt = chartScale === 'FDV' ? fmtUsd : fmtPrice
   const chartMarkers = useMemo(() => {
-    const byBucket = new Map<number, { time: number; isBuy: boolean; usd: number }>()
-    for (const t of chartTape) {
-      if (!(t.ts > 0)) continue
+    const prints = chartTape.filter((t) => t.ts > 0 && t.valueUsd > 0)
+    if (prints.length === 0) return []
+    const first = [...prints].sort((a, b) => a.ts - b.ts)[0]
+    const biggestBuy = prints.filter((t) => t.isBuy).sort((a, b) => b.valueUsd - a.valueUsd)[0]
+    const biggestSell = prints.filter((t) => !t.isBuy).sort((a, b) => b.valueUsd - a.valueUsd)[0]
+    const picked = [first, biggestBuy, biggestSell].filter(Boolean) as typeof prints
+    const seen = new Set<number>()
+    const out: { time: number; isBuy: boolean }[] = []
+    for (const t of picked) {
       const time = Math.floor(t.ts / bucketSec) * bucketSec
-      const prev = byBucket.get(time)
-      if (!prev || t.valueUsd >= prev.usd) {
-        byBucket.set(time, { time, isBuy: t.isBuy, usd: t.valueUsd })
-      }
+      if (seen.has(time)) continue
+      seen.add(time)
+      out.push({ time, isBuy: t.isBuy })
     }
-    const all = [...byBucket.values()].sort((a, b) => a.time - b.time)
-    if (all.length <= 24) return all.map(({ time, isBuy }) => ({ time, isBuy }))
-    const ranked = [...all].sort((a, b) => b.usd - a.usd)
-    const keep = new Set(ranked.slice(0, 22))
-    keep.add(all[0])
-    keep.add(all[all.length - 1])
-    return all.filter((m) => keep.has(m)).map(({ time, isBuy }) => ({ time, isBuy }))
+    return out
   }, [chartTape, bucketSec])
 
   const holderCount = holders?.total ?? holders?.holders?.length ?? 0
