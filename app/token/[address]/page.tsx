@@ -56,6 +56,8 @@ function websiteHref(raw: string): string {
 }
 
 
+const BURN_ADDRESS = '0x000000000000000000000000000000000000dead'
+
 function fmtBurnedPct(p: number | null | undefined): string {
   if (p == null || !Number.isFinite(p)) return '—'
   if (p <= 0) return '0%'
@@ -425,6 +427,7 @@ export default function TokenPage() {
                   sub: 'of supply',
                   subColor: 'var(--limeT)',
                   bar: pool.burnedPct,
+                  href: `${explorer}/token/${token}?a=${BURN_ADDRESS}`,
                 },
                 {
                   label: '24H volume',
@@ -432,6 +435,7 @@ export default function TokenPage() {
                   sub: vol24.vol > 0 ? `${vol24.buyPct.toFixed(1)}% buys` : 'no trades',
                   subColor: 'var(--limeT)',
                   bar: null,
+                  href: null,
                 },
                 {
                   label: 'Liquidity',
@@ -442,6 +446,7 @@ export default function TokenPage() {
                   sub: 'USDC in pool',
                   subColor: 'var(--t3)',
                   bar: null,
+                  href: null,
                 },
                 {
                   label: 'Holders',
@@ -449,31 +454,52 @@ export default function TokenPage() {
                   sub: 'on Arc',
                   subColor: 'var(--limeT)',
                   bar: null,
+                  href: null,
                 },
-              ].map((m) => (
-                <div key={m.label} className="px-5 py-[18px] bg-s1 flex flex-col gap-1.5 min-w-0">
-                  <span className="text-[11px] font-semibold tracking-[0.06em] uppercase text-t3 whitespace-nowrap">
-                    {m.label}
-                  </span>
-                  <span className="text-2xl font-semibold tabular-nums tracking-[-0.028em] leading-tight truncate">
-                    {m.value}
-                  </span>
-                  {m.bar != null && Number.isFinite(m.bar) ? (
-                    <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${Math.min(100, Math.max(0, m.bar))}%`,
-                          background: 'var(--limeT)',
-                        }}
-                      />
-                    </div>
-                  ) : null}
-                  <span className="text-xs font-semibold tabular-nums" style={{ color: m.subColor }}>
-                    {m.sub}
-                  </span>
-                </div>
-              ))}
+              ].map((m) => {
+                const inner = (
+                  <>
+                    <span className="text-[11px] font-semibold tracking-[0.06em] uppercase text-t3 whitespace-nowrap inline-flex items-center gap-1">
+                      {m.label}
+                      {m.href ? <ExternalLink className="w-3 h-3" /> : null}
+                    </span>
+                    <span className="text-2xl font-semibold tabular-nums tracking-[-0.028em] leading-tight truncate">
+                      {m.value}
+                    </span>
+                    {m.bar != null && Number.isFinite(m.bar) ? (
+                      <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${Math.min(100, Math.max(0, m.bar))}%`,
+                            background: 'var(--limeT)',
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                    <span className="text-xs font-semibold tabular-nums" style={{ color: m.subColor }}>
+                      {m.sub}
+                    </span>
+                  </>
+                )
+                const cls = 'px-5 py-[18px] bg-s1 flex flex-col gap-1.5 min-w-0'
+                return m.href ? (
+                  <a
+                    key={m.label}
+                    href={m.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="View burned supply on explorer"
+                    className={`${cls} hover:bg-s2 transition-colors`}
+                  >
+                    {inner}
+                  </a>
+                ) : (
+                  <div key={m.label} className={cls}>
+                    {inner}
+                  </div>
+                )
+              })}
             </div>
 
             {/* Chart — pools.trade layout: OHLC + FDV/interval + candles + volume */}
