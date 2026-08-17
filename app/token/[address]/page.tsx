@@ -55,6 +55,15 @@ function websiteHref(raw: string): string {
   return /^https?:\/\//i.test(t) ? t : `https://${t}`
 }
 
+
+function fmtBurnedPct(p: number | null | undefined): string {
+  if (p == null || !Number.isFinite(p)) return '—'
+  if (p <= 0) return '0%'
+  if (p < 0.1) return '<0.1%'
+  if (p >= 99.95) return '100%'
+  return `${p.toFixed(1)}%`
+}
+
 /** Activity tape only — pools.trade style: 25/page, hard cap 50 rows. Chart uses the full KV tape. */
 const ACT_PAGE_SIZE = 25
 const ACT_MAX_ROWS = 50
@@ -411,16 +420,18 @@ export default function TokenPage() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-hair2 border border-hair rounded-[24px] overflow-hidden">
               {[
                 {
-                  label: 'Price',
-                  value: fmtPrice(pool.currentPrice),
-                  sub: 'per token',
-                  subColor: 'var(--t3)',
+                  label: 'Burned',
+                  value: fmtBurnedPct(pool.burnedPct),
+                  sub: 'of supply',
+                  subColor: 'var(--limeT)',
+                  bar: pool.burnedPct,
                 },
                 {
                   label: '24H volume',
                   value: fmtUsd(vol24.vol),
                   sub: vol24.vol > 0 ? `${vol24.buyPct.toFixed(1)}% buys` : 'no trades',
                   subColor: 'var(--limeT)',
+                  bar: null,
                 },
                 {
                   label: 'Liquidity',
@@ -430,12 +441,14 @@ export default function TokenPage() {
                       : '—',
                   sub: 'USDC in pool',
                   subColor: 'var(--t3)',
+                  bar: null,
                 },
                 {
                   label: 'Holders',
                   value: holderCount ? String(holderCount) : '—',
                   sub: 'on Arc',
                   subColor: 'var(--limeT)',
+                  bar: null,
                 },
               ].map((m) => (
                 <div key={m.label} className="px-5 py-[18px] bg-s1 flex flex-col gap-1.5 min-w-0">
@@ -445,6 +458,17 @@ export default function TokenPage() {
                   <span className="text-2xl font-semibold tabular-nums tracking-[-0.028em] leading-tight truncate">
                     {m.value}
                   </span>
+                  {m.bar != null && Number.isFinite(m.bar) ? (
+                    <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.min(100, Math.max(0, m.bar))}%`,
+                          background: 'var(--limeT)',
+                        }}
+                      />
+                    </div>
+                  ) : null}
                   <span className="text-xs font-semibold tabular-nums" style={{ color: m.subColor }}>
                     {m.sub}
                   </span>

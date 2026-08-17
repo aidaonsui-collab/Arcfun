@@ -4,6 +4,7 @@
 import { NextResponse } from 'next/server'
 import { type Address } from 'viem'
 import { fetchArcPoolToken, getArcPoolLiquidityUsdc } from '@/lib/arc-instant-tokens'
+import { fetchTokenBurnedPct } from '@/lib/evm-holders'
 import { arcInstantEnabled, arcCurveEnabled } from '@/lib/contracts-arc'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { isHiddenToken } from '@/lib/tokens'
@@ -32,17 +33,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     } catch {
       /* indexer optional */
     }
-    try {
-      const liq = await getArcPoolLiquidityUsdc(
+    const [liq, burnedPct] = await Promise.all([
+      getArcPoolLiquidityUsdc(
         token as Address,
         pool.instantMeta?.uniPool as Address | undefined,
         pool.currentPrice,
-      )
-      if (liq) {
-        pool = { ...pool, liquidityUsd: liq.tvlUsd, liquidityQuoteUsd: liq.usdc }
-      }
-    } catch {
-      /* TVL optional */
+      ).catch(() => null),
+      fetchTokenBurnedPct(token as Address).catch(() => null),
+    ])
+    if (liq) {
+      pool = { ...pool, liquidityUsd: liq.tvlUsd, liquidityQuoteUsd: liq.usdc }
+    }
+    if (burnedPct != null) {
+      pool = { ...pool, burnedPct }
     }
     return jsonSafe(pool, {
       headers: { 'Cache-Control': 'public, s-maxage=8, stale-while-revalidate=15' },
