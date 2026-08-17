@@ -1,32 +1,26 @@
 'use client'
 
 /**
- * Candlestick + volume — pools.trade / Uniswap Pools layout:
- * dotted grid, last-price line, volume pane, date axis, crosshair OHLC.
- *
- * Bars are packed with synthetic, evenly-spaced x-axis times (baseTime + i*bucketSec),
- * NOT each candle's real bucket time. lightweight-charts' time scale spaces bars by actual
- * elapsed time between their `time` values, same as any TradingView-family chart — passing
- * real bucket times back-to-back still leaves a wide blank/dotted stretch across any quiet
- * period, even though lib/candles.ts already dropped the empty buckets from the array. A
- * low-volume token like this one trades in bursts, so most of the chart ended up empty space.
- * Synthetic spacing is the standard fix for "pack sparse trades, ignore real gaps" charts
- * (what RadarDEX/pools.trade actually do) — crosshair hover still resolves back to each bar's
- * real time/OHLC/volume via `realByIndex`, so tooltips and the parent's volume lookup stay
- * accurate; only the bar *positions* are synthetic.
+ * Token chart — RadarDEX-style by default:
+ * area + line on a real time axis, last price carried through quiet buckets.
+ * Candles stay as a toggle (packed so sparse OHLC isn't a field of matchsticks).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createChart,
+  createSeriesMarkers,
   ColorType,
   CrosshairMode,
   LineStyle,
+  AreaSeries,
   CandlestickSeries,
   HistogramSeries,
   type IChartApi,
   type ISeriesApi,
+  type ISeriesMarkersPluginApi,
   type UTCTimestamp,
   type MouseEventParams,
+  type SeriesMarker,
 } from 'lightweight-charts'
 import type { Candle } from '@/lib/candles'
 import { fmtUsd } from '@/lib/ui-format'
@@ -39,6 +33,13 @@ const DOWN_VOL = 'rgba(240, 97, 109, 0.38)'
 const GRID = 'rgba(255,255,255,0.055)'
 const TEXT = 'rgba(255,255,255,0.45)'
 
+export type ChartStyle = 'line' | 'candles'
+
+export type ChartMarker = {
+  time: number
+  isBuy: boolean
+}
+
 function priceFormatFor(price: number): { precision: number; minMove: number } {
   if (!(price > 0)) return { precision: 2, minMove: 0.01 }
   const magnitude = Math.floor(Math.log10(price))
@@ -50,28 +51,31 @@ export type HoverCandle = Candle & { up: boolean }
 
 export function TokenChart({
   candles,
+  markers = [],
+  style = 'line',
   height = 360,
   bucketSec = 900,
   onHover,
 }: {
   candles: Candle[]
+  markers?: ChartMarker[]
+  style?: ChartStyle
   height?: number
-  /** Real interval width (seconds) — used only to space the synthetic x-axis readably. */
+  /** Used only in candle mode to space the synthetic x-axis. */
   bucketSec?: number
   onHover?: (c: HoverCandle | null) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
-  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const priceSeriesRef = useRef<ISeriesApi<'Area'> | ISeriesApi<'Candlestick'> | null>(null)
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
+  const markerApiRef = useRef<ISeriesMarkersPluginApi<any> | null>(null)
   const onHoverRef = useRef(onHover)
   onHoverRef.current = onHover
-  // Synthetic chart-time -> real candle, rebuilt whenever `candles` changes. Lets the
-  // long-lived crosshair handler (registered once, below) resolve a hover back to real data.
   const realByTimeRef = useRef<Map<number, Candle>>(new Map())
   const [ready, setReady] = useState(0)
 
-  const attachCrosshair = useCallback((chart: IChartApi, series: ISeriesApi<'Candlestick'>) => {
+  const attachCrosshair = useCallback((chart: IChartApi, series: ISeriesApi<'Area'> | ISeriesApi<'Candlestick'>) => {
     const handler = (param: MouseEventParams) => {
       const cb = onHoverRef.current
       if (!cb) return
@@ -81,20 +85,35 @@ export function TokenChart({
       }
       const raw = param.seriesData.get(series) as
         | { open: number; high: number; low: number; close: number; time: UTCTimestamp }
+        | { value: number; time: UTCTimestamp }
         | undefined
       if (!raw) {
         cb(null)
         return
       }
-      const real = realByTimeRef.current.get(Number(raw.time))
+      const t = Number(raw.time)
+      const real = realByTimeRef.current.get(t)
+      if ('close' in raw) {
+        cb({
+          time: real?.time ?? t,
+          open: raw.open,
+          high: raw.high,
+          low: raw.low,
+          close: raw.close,
+          volume: real?.volume ?? 0,
+          up: raw.close >= raw.open,
+        })
+        return
+      }
+      const close = raw.value
       cb({
-        time: real?.time ?? Number(raw.time),
-        open: raw.open,
-        high: raw.high,
-        low: raw.low,
-        close: raw.close,
+        time: real?.time ?? t,
+        open: real?.open ?? close,
+        high: real?.high ?? close,
+        low: real?.low ?? close,
+        close,
         volume: real?.volume ?? 0,
-        up: raw.close >= raw.open,
+        up: close >= (real?.open ?? close),
       })
     }
     chart.subscribeCrosshairMove(handler)
@@ -124,11 +143,10 @@ export function TokenChart({
         borderVisible: false,
         timeVisible: true,
         secondsVisible: false,
-        // Fixed thin bars like RadarDEX — never stretch one candle across the pane.
-        barSpacing: 6,
-        minBarSpacing: 3,
-        maxBarSpacing: 10,
-        rightOffset: 8,
+        rightOffset: 6,
+        ...(style === 'candles'
+          ? { barSpacing: 6, minBarSpacing: 3, maxBarSpacing: 10 }
+          : { minBarSpacing: 0.5 }),
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -149,20 +167,43 @@ export function TokenChart({
     })
     chartRef.current = chart
 
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: UP,
-      downColor: DOWN,
-      borderUpColor: UP,
-      borderDownColor: DOWN,
-      wickUpColor: UP,
-      wickDownColor: DOWN,
-      lastValueVisible: true,
-      priceLineVisible: true,
-      priceLineColor: UP,
-      priceLineStyle: LineStyle.Dotted,
-      priceLineWidth: 1,
-    })
-    candleSeriesRef.current = candleSeries
+    const last = candles[candles.length - 1]
+    const first = candles[0]
+    const up = (last?.close ?? 0) >= (first?.open ?? last?.close ?? 0)
+    const tone = up ? UP : DOWN
+
+    let priceSeries: ISeriesApi<'Area'> | ISeriesApi<'Candlestick'>
+    if (style === 'line') {
+      priceSeries = chart.addSeries(AreaSeries, {
+        lineColor: tone,
+        topColor: up ? 'rgba(64, 182, 107, 0.28)' : 'rgba(240, 97, 109, 0.28)',
+        bottomColor: up ? 'rgba(64, 182, 107, 0.02)' : 'rgba(240, 97, 109, 0.02)',
+        lineWidth: 2,
+        lastValueVisible: true,
+        priceLineVisible: true,
+        priceLineColor: tone,
+        priceLineStyle: LineStyle.Solid,
+        priceLineWidth: 1,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 4,
+      })
+    } else {
+      priceSeries = chart.addSeries(CandlestickSeries, {
+        upColor: UP,
+        downColor: DOWN,
+        borderUpColor: UP,
+        borderDownColor: DOWN,
+        wickUpColor: UP,
+        wickDownColor: DOWN,
+        lastValueVisible: true,
+        priceLineVisible: true,
+        priceLineColor: tone,
+        priceLineStyle: LineStyle.Dotted,
+        priceLineWidth: 1,
+      })
+    }
+    priceSeriesRef.current = priceSeries
+    markerApiRef.current = createSeriesMarkers(priceSeries, [])
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
@@ -175,66 +216,133 @@ export function TokenChart({
     })
     volumeSeriesRef.current = volumeSeries
 
-    const unsub = attachCrosshair(chart, candleSeries)
+    const unsub = attachCrosshair(chart, priceSeries)
     setReady((n) => n + 1)
 
     return () => {
       unsub()
+      markerApiRef.current = null
       chart.remove()
       chartRef.current = null
-      candleSeriesRef.current = null
+      priceSeriesRef.current = null
       volumeSeriesRef.current = null
     }
-  }, [attachCrosshair])
+    // Rebuild when the style changes so we don't leak mixed series types.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachCrosshair, style])
 
   useEffect(() => {
-    const candleSeries = candleSeriesRef.current
+    const priceSeries = priceSeriesRef.current
     const volumeSeries = volumeSeriesRef.current
     const chart = chartRef.current
-    if (!candleSeries || !volumeSeries || !chart) return
+    if (!priceSeries || !volumeSeries || !chart) return
 
     const lastClose = candles[candles.length - 1]?.close ?? 0
-    const lastUp = (candles[candles.length - 1]?.close ?? 0) >= (candles[candles.length - 1]?.open ?? 0)
-    candleSeries.applyOptions({
+    const firstOpen = candles[0]?.open ?? lastClose
+    const up = lastClose >= firstOpen
+    const tone = up ? UP : DOWN
+    priceSeries.applyOptions({
       priceFormat: { type: 'price', ...priceFormatFor(lastClose) },
-      priceLineColor: lastUp ? UP : DOWN,
+      ...(style === 'line'
+        ? {
+            lineColor: tone,
+            topColor: up ? 'rgba(64, 182, 107, 0.28)' : 'rgba(240, 97, 109, 0.28)',
+            bottomColor: up ? 'rgba(64, 182, 107, 0.02)' : 'rgba(240, 97, 109, 0.02)',
+            priceLineColor: tone,
+          }
+        : { priceLineColor: tone }),
     })
 
-    // Synthetic, evenly-spaced x-axis so a real trading gap (this token bursts, then goes
-    // quiet for hours) doesn't stretch into a blank/dotted gap on the pane — see the file-top
-    // comment. Anchored to the first real candle's actual time so axis labels still read as
-    // plausible clock times, just not necessarily each bar's true timestamp.
+    const packed = style === 'candles'
     const baseTime = candles[0]?.time ?? 0
-    const syntheticTime = (i: number) => (baseTime + i * bucketSec) as UTCTimestamp
+    const xTime = (c: Candle, i: number) =>
+      (packed ? baseTime + i * bucketSec : c.time) as UTCTimestamp
 
     const realByTime = new Map<number, Candle>()
-    candles.forEach((c, i) => realByTime.set(syntheticTime(i), c))
+    candles.forEach((c, i) => realByTime.set(Number(xTime(c, i)), c))
     realByTimeRef.current = realByTime
 
-    candleSeries.setData(
-      candles.map((c, i) => ({
-        time: syntheticTime(i),
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      })),
-    )
+    if (style === 'line') {
+      ;(priceSeries as ISeriesApi<'Area'>).setData(
+        candles.map((c, i) => ({ time: xTime(c, i), value: c.close })),
+      )
+    } else {
+      ;(priceSeries as ISeriesApi<'Candlestick'>).setData(
+        candles.map((c, i) => ({
+          time: xTime(c, i),
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        })),
+      )
+    }
+
     volumeSeries.setData(
-      candles.map((c, i) => ({
-        time: syntheticTime(i),
-        value: c.volume,
-        color: c.close >= c.open ? UP_VOL : DOWN_VOL,
-      })),
+      candles
+        .map((c, i) => ({
+          time: xTime(c, i),
+          value: c.volume,
+          color: c.close >= c.open ? UP_VOL : DOWN_VOL,
+        }))
+        .filter((b) => b.value > 0),
     )
 
+    const used = new Set<number>()
+    const lwMarkers: SeriesMarker<UTCTimestamp>[] = []
+    for (const m of markers) {
+      const snapped = packed
+        ? candles.reduce(
+            (best, c, i) => {
+              const dt = Math.abs(c.time - m.time)
+              return dt < best.dt ? { dt, t: Number(xTime(c, i)) } : best
+            },
+            { dt: Infinity, t: 0 },
+          ).t
+        : m.time
+      if (!snapped || used.has(snapped)) continue
+      if (!realByTime.has(snapped) && !packed) {
+        // Snap to nearest filled bucket so the marker lands on a line point.
+        let nearest = 0
+        let best = Infinity
+        realByTime.forEach((_, t) => {
+          const dt = Math.abs(t - snapped)
+          if (dt < best) {
+            best = dt
+            nearest = t
+          }
+        })
+        if (!nearest || used.has(nearest)) continue
+        used.add(nearest)
+        lwMarkers.push({
+          time: nearest as UTCTimestamp,
+          position: m.isBuy ? 'belowBar' : 'aboveBar',
+          color: m.isBuy ? UP : DOWN,
+          shape: m.isBuy ? 'circle' : 'circle',
+          text: m.isBuy ? 'B' : 'S',
+        })
+        continue
+      }
+      used.add(snapped)
+      lwMarkers.push({
+        time: snapped as UTCTimestamp,
+        position: m.isBuy ? 'belowBar' : 'aboveBar',
+        color: m.isBuy ? UP : DOWN,
+        shape: 'circle',
+        text: m.isBuy ? 'B' : 'S',
+      })
+    }
+    markerApiRef.current?.setMarkers(lwMarkers)
+
     requestAnimationFrame(() => {
-      chart.timeScale().applyOptions({ barSpacing: 6, maxBarSpacing: 10 })
-      // Not scrollToRealTime() — our x-axis is synthetic, not wall-clock, so "real time" isn't
-      // meaningful here. scrollToPosition(0, …) brings the last bar to rightOffset from the edge.
-      chart.timeScale().scrollToPosition(0, false)
+      if (style === 'line') {
+        chart.timeScale().fitContent()
+      } else {
+        chart.timeScale().applyOptions({ barSpacing: 6, maxBarSpacing: 10 })
+        chart.timeScale().scrollToPosition(0, false)
+      }
     })
-  }, [candles, bucketSec, ready])
+  }, [candles, markers, bucketSec, ready, style])
 
   return (
     <div className="relative w-full" style={{ height, background: BG }}>

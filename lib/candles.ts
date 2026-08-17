@@ -1,14 +1,9 @@
 /**
  * Bucket indexed swap tape into OHLCV.
- * Only buckets that had a trade are emitted — empty 5m/15m slots are skipped, so a quiet
- * stretch doesn't sit in this array as an explicit gap entry. That alone isn't enough to make
- * candles sit adjacent on screen, though: lightweight-charts spaces bars by each bar's actual
- * `time` value along a real time axis, same as any TradingView-family chart — two real candles
- * separated by hours of silence still render with a wide blank stretch between them unless the
- * chart itself is told to ignore real elapsed time. That part is TokenChart.tsx's job (synthetic,
- * evenly-spaced x-axis) — see its file-top comment. Found live 2026-08-15: this file's dropped
- * buckets were doing their part correctly, but the chart wasn't, so the "pack like RadarDEX"
- * goal was only half-implemented and quiet periods still showed as gaps.
+ *
+ * `buildCandles` emits only buckets that had a trade (sparklines, MCP, candle-mode OHLC).
+ * The token page line chart uses `fillCandleGaps` on top of that so quiet stretches stay on
+ * a real time axis as a flat last-price shelf — the RadarDEX / mountain-chart look.
  */
 import type { EvmTrade } from './evm-trades'
 
@@ -85,6 +80,72 @@ export function buildCandles(trades: EvmTrade[], bucketSec: number, fallbackPric
 
   const real = [...byBucket.values()].sort((a, b) => a.time - b.time)
   return real.length > MAX_BUCKETS ? real.slice(-MAX_BUCKETS) : real
+}
+
+/** Cap filled bars so a 5M chart over weeks doesn't explode. */
+const MAX_FILLED = 1_500
+
+/**
+ * Insert last-close bars into quiet buckets from the first print through `untilTs`
+ * (default: now). The line stays on wall-clock time; dead hours read as a flat shelf.
+ */
+export function fillCandleGaps(
+  candles: Candle[],
+  bucketSec: number,
+  untilTs?: number,
+): Candle[] {
+  if (candles.length === 0 || !(bucketSec > 0)) return candles
+  const sorted = [...candles].sort((a, b) => a.time - b.time)
+  const lastTrade = sorted[sorted.length - 1].time
+  const end = Math.floor((untilTs ?? Math.floor(Date.now() / 1000)) / bucketSec) * bucketSec
+  let start = sorted[0].time
+  const tail = Math.max(end, lastTrade)
+  const span = Math.floor((tail - start) / bucketSec) + 1
+  if (span > MAX_FILLED) start = tail - (MAX_FILLED - 1) * bucketSec
+
+  const byTime = new Map(sorted.map((c) => [c.time, c]))
+  let last = sorted.find((c) => c.time <= start) ?? sorted[0]
+  const out: Candle[] = []
+  for (let t = start; t <= tail; t += bucketSec) {
+    const hit = byTime.get(t)
+    if (hit) {
+      last = hit
+      out.push(hit)
+    } else {
+      out.push({
+        time: t,
+        open: last.close,
+        high: last.close,
+        low: last.close,
+        close: last.close,
+        volume: 0,
+      })
+    }
+  }
+  return out
+}
+
+/** First open / range high-low / last close / summed volume. Ignores empty carry bars. */
+export function sessionOhlc(candles: Candle[]): Candle | null {
+  const live = candles.filter((c) => c.volume > 0 || c.high !== c.low || c.open !== c.close)
+  const src = live.length > 0 ? live : candles
+  if (src.length === 0) return null
+  let high = src[0].high
+  let low = src[0].low
+  let volume = 0
+  for (const c of src) {
+    if (c.high > high) high = c.high
+    if (c.low < low) low = c.low
+    volume += c.volume
+  }
+  return {
+    time: src[src.length - 1].time,
+    open: src[0].open,
+    high,
+    low,
+    close: src[src.length - 1].close,
+    volume,
+  }
 }
 
 /** % change from price ~windowSec ago (or first print if the token is younger) to last print. */
