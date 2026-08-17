@@ -5,6 +5,7 @@
  */
 import { useParams } from 'next/navigation'
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import nextDynamic from 'next/dynamic'
 import { type Address } from 'viem'
 import Link from 'next/link'
 import { Loader2, ExternalLink, Copy, Check, Globe } from 'lucide-react'
@@ -12,23 +13,18 @@ import type { PoolToken } from '@/lib/tokens'
 import type { EvmTrade, EvmTradesResult } from '@/lib/evm-trades'
 import type { EvmHoldersResult } from '@/lib/evm-holders'
 import { ArcDexTradePanel } from '@/components/ArcDexTradePanel'
-import { TokenChart, type ChartStyle, type HoverCandle } from '@/components/TokenChart'
 import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import type { TraderMeta } from '@/lib/arc-trader-meta'
 import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
-import {
-  buildCandles,
-  fillCandleGaps,
-  priceChangeFromTrades,
-  RANGE_BUCKET_SEC,
-  scaleCandles,
-  sessionOhlc,
-} from '@/lib/candles'
+import { priceChangeFromTrades } from '@/lib/candles'
+
+const TradingViewChart = nextDynamic(() => import('@/components/TradingViewChart'), {
+  ssr: false,
+})
 import {
   ageLabel,
   changeParts,
-  fmtPrice,
   fmtUsd,
   shortAddr,
   tileGradient,
@@ -36,9 +32,7 @@ import {
 } from '@/lib/ui-format'
 
 type Tab = 'Activity' | 'holders'
-type Range = '5M' | '15M' | '1H' | '1D' | '1W'
 type VolRange = '1H' | '6H' | '24H'
-type ChartScale = 'FDV' | 'Price'
 
 function twitterHref(raw: string): string {
   const t = raw.trim().replace(/^@/, '')
@@ -88,10 +82,6 @@ export default function TokenPage() {
   const [traderMeta, setTraderMeta] = useState<Record<string, TraderMeta>>({})
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('Activity')
-  const [range, setRange] = useState<Range>('5M')
-  const [chartScale, setChartScale] = useState<ChartScale>('Price')
-  const [chartStyle, setChartStyle] = useState<ChartStyle>('candles')
-  const [hoverCandle, setHoverCandle] = useState<HoverCandle | null>(null)
   const [volRange, setVolRange] = useState<VolRange>('1H')
   const [copied, setCopied] = useState(false)
   const [actPage, setActPage] = useState(0)
@@ -260,47 +250,7 @@ export default function TokenPage() {
   const { tile, mono } = tileGradient(seed)
   const tapeChange = useMemo(() => priceChangeFromTrades(chartTape), [chartTape])
   const chg = changeParts(chartTape.length >= 2 ? tapeChange : pool?.priceChange24h)
-  const supply = useMemo(() => {
-    if (pool && pool.totalSupply > 1) return pool.totalSupply
-    if (pool && pool.currentPrice > 0 && pool.marketCap > 0) return pool.marketCap / pool.currentPrice
-    return 1_000_000_000
-  }, [pool])
-  const bucketSec = RANGE_BUCKET_SEC[range]
-  const tradeCandles = useMemo(() => {
-    const raw = buildCandles(chartTape, bucketSec, pool?.currentPrice ?? 0)
-    return chartScale === 'FDV' ? scaleCandles(raw, supply) : raw
-  }, [chartTape, bucketSec, pool?.currentPrice, chartScale, supply])
-  const candles = useMemo(
-    () => fillCandleGaps(tradeCandles, bucketSec),
-    [tradeCandles, bucketSec],
-  )
-  const session = useMemo(() => sessionOhlc(tradeCandles), [tradeCandles])
-  const lastCandle = tradeCandles[tradeCandles.length - 1]
-  const shown =
-    hoverCandle ??
-    (session
-      ? { ...session, up: session.close >= session.open }
-      : lastCandle
-        ? { ...lastCandle, up: lastCandle.close >= lastCandle.open }
-        : null)
-  const axisFmt = chartScale === 'FDV' ? fmtUsd : fmtPrice
-  const chartMarkers = useMemo(() => {
-    const prints = chartTape.filter((t) => t.ts > 0 && t.valueUsd > 0)
-    if (prints.length === 0) return []
-    const first = [...prints].sort((a, b) => a.ts - b.ts)[0]
-    const biggestBuy = prints.filter((t) => t.isBuy).sort((a, b) => b.valueUsd - a.valueUsd)[0]
-    const biggestSell = prints.filter((t) => !t.isBuy).sort((a, b) => b.valueUsd - a.valueUsd)[0]
-    const picked = [first, biggestBuy, biggestSell].filter(Boolean) as typeof prints
-    const seen = new Set<number>()
-    const out: { time: number; isBuy: boolean }[] = []
-    for (const t of picked) {
-      const time = Math.floor(t.ts / bucketSec) * bucketSec
-      if (seen.has(time)) continue
-      seen.add(time)
-      out.push({ time, isBuy: t.isBuy })
-    }
-    return out
-  }, [chartTape, bucketSec])
+
 
   const holderCount = holders?.total ?? holders?.holders?.length ?? 0
   const actTabs: { id: Tab; label: string }[] = [
@@ -451,7 +401,7 @@ export default function TokenPage() {
                 {chg.label}
               </span>
               <span className="text-[13px] text-t3 mb-2 hidden sm:inline">
-                fully diluted · past {range}
+                fully diluted · past 24h
               </span>
             </div>
 
@@ -539,101 +489,8 @@ export default function TokenPage() {
               })}
             </div>
 
-            {/* Chart — RadarDEX-style line on real time; candles optional */}
-            <div className="border border-hair rounded-[28px] bg-[#131313] px-4 pt-4 pb-2 overflow-hidden">
-              <div className="flex items-center justify-between gap-4 flex-wrap px-2">
-                <div
-                  className="flex flex-wrap gap-x-3 gap-y-1 text-[13px] font-semibold tabular-nums"
-                  style={{ color: shown?.up === false ? '#F0616D' : '#40B66B' }}
-                >
-                  <span>
-                    O <span className="text-inherit">{shown ? axisFmt(shown.open) : '—'}</span>
-                  </span>
-                  <span>
-                    H <span className="text-inherit">{shown ? axisFmt(shown.high) : '—'}</span>
-                  </span>
-                  <span>
-                    L <span className="text-inherit">{shown ? axisFmt(shown.low) : '—'}</span>
-                  </span>
-                  <span>
-                    C <span className="text-inherit">{shown ? axisFmt(shown.close) : '—'}</span>
-                  </span>
-                  <span className="text-white/45">
-                    V <span className="text-white/70">{shown ? fmtUsd(shown.volume) : '$0'}</span>
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex gap-1 p-1 bg-white/5 border border-white/10 rounded-xl">
-                    {([
-                      ['line', 'Line'],
-                      ['candles', 'Candles'],
-                    ] as const).map(([id, label]) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => setChartStyle(id)}
-                        className="px-3 py-1.5 rounded-[9px] text-xs font-semibold transition-colors"
-                        style={{
-                          background: chartStyle === id ? 'rgba(255,255,255,0.12)' : 'transparent',
-                          color: chartStyle === id ? '#fff' : 'rgba(255,255,255,0.52)',
-                        }}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex gap-1 p-1 bg-white/5 border border-white/10 rounded-xl">
-                    {(['FDV', 'Price'] as ChartScale[]).map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => setChartScale(s)}
-                        className="px-3 py-1.5 rounded-[9px] text-xs font-semibold transition-colors"
-                        style={{
-                          background: chartScale === s ? 'rgba(255,255,255,0.12)' : 'transparent',
-                          color: chartScale === s ? '#fff' : 'rgba(255,255,255,0.52)',
-                        }}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex gap-1 p-1 bg-white/5 border border-white/10 rounded-xl">
-                    {(['5M', '15M', '1H', '1D', '1W'] as Range[]).map((r) => (
-                      <button
-                        key={r}
-                        type="button"
-                        onClick={() => setRange(r)}
-                        className="px-3 py-1.5 rounded-[9px] text-xs font-semibold transition-colors"
-                        style={{
-                          background: range === r ? 'rgba(255,255,255,0.12)' : 'transparent',
-                          color: range === r ? '#fff' : 'rgba(255,255,255,0.52)',
-                        }}
-                      >
-                        {r}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="relative mt-2 rounded-xl overflow-hidden">
-                <TokenChart
-                  candles={candles}
-                  markers={chartMarkers}
-                  style={chartStyle}
-                  height={360}
-                  bucketSec={bucketSec}
-                  onHover={(c) => {
-                    if (!c) {
-                      setHoverCandle(null)
-                      return
-                    }
-                    const match = candles.find((x) => x.time === c.time)
-                    setHoverCandle(match ? { ...c, volume: match.volume } : c)
-                  }}
-                />
-              </div>
+            <div className="border border-hair rounded-[28px] bg-[#131313] overflow-hidden">
+              <TradingViewChart token={token} symbol={pool.symbol} height={420} />
             </div>
 
             {/* Volume */}
