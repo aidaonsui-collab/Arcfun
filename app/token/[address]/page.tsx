@@ -732,6 +732,7 @@ export default function TokenPage() {
             <ArcDexTradePanel
               token={token}
               symbol={pool.symbol}
+              imageUrl={pool.imageUrl || pool.logoUrl}
               onTraded={refreshAfterTrade}
             />
             {pool.description && (
