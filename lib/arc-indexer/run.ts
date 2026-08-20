@@ -27,6 +27,7 @@ import {
   tokenCount,
   otcOfferCount,
 } from './store'
+import { catchUpOtcDeskStats } from './otc-desk-stats'
 import { computeVolumeWindows } from './volume'
 import type { IndexedLaunchKind, IndexedToken, IndexerState } from './types'
 import { summarizeRpcError } from '@/lib/rpc-error'
@@ -352,6 +353,10 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
     const o = await scanOtcOffers(state, head)
     state = o.state
     otcOffers = o.offers
+
+    await catchUpOtcDeskStats().catch((e) => {
+      console.warn('[arc-indexer] desk stats', e instanceof Error ? e.message : e)
+    })
 
     const s = await catchUpSwapsAndVolume(state)
     state = s.state

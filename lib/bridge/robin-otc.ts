@@ -404,67 +404,103 @@ export type OtcDeskStats = {
   volumeUsdc: bigint
 }
 
-// Bumped v1 -> v2: any session that already ran the old, too-narrow cold scan has a cached
-// `cursor` sitting past the real history it missed (see DESK_STATS_COLD_WINDOW above) — with a
-// cursor already cached, fetchOtcDeskStats resumes from it and never re-runs the wider cold
-// scan, so widening the window alone doesn't self-heal an already-poisoned session. New key
-// forces every client to drop that stale cache and cold-start fresh with the fixed window.
-const STATS_CACHE_KEY = 'robin_otc_desk_stats_v2'
+/**
+ * v3: lifetime cumulative totals in localStorage (not a rolling session window).
+ *
+ * v2 scanned a ~5 day lookback in one 220k getLogs. Two things broke that:
+ *  1. Last live fills (10 trades, 128 USDC, all Base) aged past 5 days — 2026-08-18
+ *     last fill at Base 49903889 vs head ~5022xxxx — so a fresh session painted 0.
+ *  2. mainnet.base.org now caps eth_getLogs at 10_000 blocks, so the 220k one-shot
+ *     throws and the cursor never advances.
+ *
+ * Production paint should come from KV (`GET /api/otc/offers` → stats). This client
+ * scan is the fallback: 10k chunks, forward from a deployment floor, persist forever.
+ */
+const STATS_CACHE_KEY = 'robin_otc_desk_stats_v3'
 
 type StatsCache = {
   settledTrades: number
   volumeUsdc: string
-  cursor: Record<string, string> // chainId -> last exclusive-to block scanned
+  cursor: Record<string, string> // chainId -> last inclusive block scanned
+  complete?: boolean
+  /** Totals came from KV — do not re-sum from the floor (would double-count). */
+  fromServer?: boolean
 }
 
-/**
- * Cold-start lookback per payment chain, sized to ~5 days of real wall-clock trading history
- * rather than a flat block count. Found live 2026-08-13: a prior fix capped the cold window to a
- * single 50_000n shared across chains ("~1 day @ Base's 2s/block") to keep first paint light —
- * but Base is ~2.0s/block while Arbitrum is ~0.25s/block (measured), so the same 50_000n covered
- * ~1 day on Base and only ~3.5h on Arbitrum. This desk settles infrequently (10 fills over the
- * last several days, all on Base), so a fresh session's most recent real trade was already older
- * than the window — "Settled trades: 0 / Volume: 0 USDC" on first load, indistinguishable from a
- * desk with no history at all, even though 10 trades had actually settled.
- *
- * Verified both mainnet.base.org and arb1.arbitrum.io/rpc answer a single getContractEvents call
- * across these full ranges in well under a second for this narrow a query (one contract address,
- * one event topic) — no need to fragment into many small chunked round trips to stay fast.
- */
-const DESK_STATS_COLD_WINDOW: Partial<Record<OtcPaymentChainId, bigint>> = {
-  base: 220_000n, // ~5.1 days @ ~2.0s/block
-  arb: 1_750_000n, // ~5.1 days @ ~0.2516s/block
-  eth: 40_000n, // ~5.6 days @ ~12s/block — inactive by default, kept for parity
+/** Base public RPC log range cap (2026-08-18). */
+const DESK_STATS_CHUNK = 10_000n
+const DESK_STATS_CHUNKS_PER_CALL = 24
+
+/** First known Base FillSettled: 49_852_856. ARB had no early fills. */
+const DESK_STATS_FLOOR: Partial<Record<OtcPaymentChainId, bigint>> = {
+  base: 49_800_000n,
+  arb: 488_000_000n,
+  eth: 22_800_000n,
+}
+
+function readStatsCache(): StatsCache | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(STATS_CACHE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw) as StatsCache
+  } catch {
+    return null
+  }
+}
+
+function writeStatsCache(c: StatsCache): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(STATS_CACHE_KEY, JSON.stringify(c))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Hydrate the desk bar instantly on return visits — never flash 0 over known history. */
+export function readCachedOtcDeskStats(): OtcDeskStats | null {
+  const c = readStatsCache()
+  if (!c || (c.settledTrades === 0 && c.volumeUsdc === '0' && !c.complete)) return null
+  try {
+    return { settledTrades: c.settledTrades || 0, volumeUsdc: BigInt(c.volumeUsdc || '0') }
+  } catch {
+    return null
+  }
+}
+
+export function rememberOtcDeskStats(stats: OtcDeskStats, complete = false): void {
+  const prev = readStatsCache()
+  writeStatsCache({
+    settledTrades: stats.settledTrades,
+    volumeUsdc: stats.volumeUsdc.toString(),
+    cursor: prev?.cursor || {},
+    complete: complete || prev?.complete,
+    fromServer: true,
+  })
 }
 
 /**
  * Aggregate settled trades + volume from FillSettled logs (chunked).
- * Uses session cache + incremental scan so refreshes stay cheap.
+ * Cumulative — not a rolling lookback. Prefer server stats when present.
  */
 export async function fetchOtcDeskStats(opts?: {
-  /** Max blocks to scan per call when no cache. Omit to use DESK_STATS_COLD_WINDOW per chain. */
-  maxBlocks?: bigint
   chunkSize?: bigint
+  maxChunks?: number
 }): Promise<OtcDeskStats> {
   if (!robinOtcEnabled()) return { settledTrades: 0, volumeUsdc: 0n }
 
-  let settledTrades = 0
-  let volumeUsdc = 0n
-  let cursor: Record<string, string> = {}
-
-  if (typeof window !== 'undefined') {
-    try {
-      const raw = sessionStorage.getItem(STATS_CACHE_KEY)
-      if (raw) {
-        const c = JSON.parse(raw) as StatsCache
-        settledTrades = c.settledTrades || 0
-        volumeUsdc = BigInt(c.volumeUsdc || '0')
-        cursor = c.cursor || {}
-      }
-    } catch {
-      /* fresh */
-    }
+  const cached = readStatsCache()
+  let settledTrades = cached?.settledTrades || 0
+  let volumeUsdc = BigInt(cached?.volumeUsdc || '0')
+  const cursor: Record<string, string> = { ...(cached?.cursor || {}) }
+  // Server totals with no scan cursor: return as-is. A floor rescan would double-count.
+  if (cached?.fromServer && Object.keys(cursor).length === 0) {
+    return { settledTrades, volumeUsdc }
   }
+  const chunkSize = opts?.chunkSize ?? DESK_STATS_CHUNK
+  const maxChunks = opts?.maxChunks ?? DESK_STATS_CHUNKS_PER_CALL
+  let allAtHead = true
 
   await Promise.all(
     livePaymentChains().map(async (chain) => {
@@ -473,82 +509,50 @@ export async function fetchOtcDeskStats(opts?: {
         const latest = await client.getBlockNumber()
         const key = String(chain.chainId)
         const cachedTo = cursor[key] ? BigInt(cursor[key]) : null
-        const chainMaxBlocks = opts?.maxBlocks ?? DESK_STATS_COLD_WINDOW[chain.id] ?? 50_000n
-        // One-shot by default (chunkSize == the whole cold window) — see DESK_STATS_COLD_WINDOW's
-        // comment for why that's fast and safe on both default RPCs. Still fully chunkable via
-        // opts.chunkSize, and a chunk that does fail is caught below (allChunksOk), not swallowed.
-        const chainChunkSize = opts?.chunkSize ?? chainMaxBlocks
-        // Resume after last scanned block; otherwise scan chainMaxBlocks back
-        let fromStart = cachedTo != null ? cachedTo + 1n : latest > chainMaxBlocks ? latest - chainMaxBlocks : 0n
-        if (fromStart > latest) {
+        let from = cachedTo != null ? cachedTo + 1n : (DESK_STATS_FLOOR[chain.id] ?? 0n)
+        if (from > latest) {
           cursor[key] = latest.toString()
           return
         }
 
-        // Found live 2026-08-12: cursor[key] used to be set to `latest` unconditionally after
-        // this loop, even when every getContractEvents chunk below had thrown (public Base/ARB
-        // RPCs rate-limit under the polling this panel now does every 8-12s). A cursor that
-        // advances past a range it never actually read back means any FillSettled in that window
-        // is gone for good — the cursor never revisits it — so "Settled trades"/"Volume" silently
-        // stop moving on a transient RPC hiccup while the offer's real on-chain "Available" balance
-        // (a separate, server-indexed path) keeps updating fine.
-        //
-        // Fix accumulates into LOCAL totals for this pass only, and only merges them into the
-        // shared running totals (and advances the cursor) if every chunk in the pass succeeded.
-        // A partial pass — some chunks ok, one rate-limited — discards its local totals entirely
-        // rather than merging the successful chunks: the cursor stays put either way, so the next
-        // call re-scans this whole range from scratch, and merging the partial totals first would
-        // double-count whatever those already-successful chunks found on that retry.
-        let allChunksOk = true
-        let passTrades = 0
-        let passVolume = 0n
-        let to = latest
-        while (to >= fromStart) {
-          const from = to >= chainChunkSize ? to - chainChunkSize + 1n : fromStart
-          const rangeFrom = from < fromStart ? fromStart : from
+        let chunks = 0
+        while (from <= latest && chunks < maxChunks) {
+          const to = from + chunkSize - 1n > latest ? latest : from + chunkSize - 1n
           try {
             const logs = await client.getContractEvents({
               address: chain.payment,
               abi: PAYMENT_ABI,
               eventName: 'FillSettled',
-              fromBlock: rangeFrom,
+              fromBlock: from,
               toBlock: to,
             })
             for (const log of logs) {
               const proceeds = (log.args.proceeds as bigint) ?? 0n
               const fee = (log.args.fee as bigint) ?? 0n
-              passTrades += 1
-              passVolume += proceeds + fee
+              settledTrades += 1
+              volumeUsdc += proceeds + fee
             }
+            cursor[key] = to.toString()
+            from = to + 1n
+            chunks++
           } catch {
-            allChunksOk = false
+            allAtHead = false
+            break
           }
-          if (rangeFrom <= fromStart) break
-          to = rangeFrom - 1n
         }
-        if (allChunksOk) {
-          settledTrades += passTrades
-          volumeUsdc += passVolume
-          cursor[key] = latest.toString()
-        }
+        if (from <= latest) allAtHead = false
       } catch {
-        /* chain fail — cursor untouched, retried next call */
+        allAtHead = false
       }
     }),
   )
 
-  if (typeof window !== 'undefined') {
-    try {
-      const payload: StatsCache = {
-        settledTrades,
-        volumeUsdc: volumeUsdc.toString(),
-        cursor,
-      }
-      sessionStorage.setItem(STATS_CACHE_KEY, JSON.stringify(payload))
-    } catch {
-      /* ignore */
-    }
-  }
+  writeStatsCache({
+    settledTrades,
+    volumeUsdc: volumeUsdc.toString(),
+    cursor,
+    complete: allAtHead,
+  })
 
   return { settledTrades, volumeUsdc }
 }

@@ -7,6 +7,7 @@ import {
   tokenCount,
   otcOfferCount,
   kvConfigured,
+  loadOtcDeskStats,
 } from '@/lib/arc-indexer/store'
 
 export const dynamic = 'force-dynamic'
@@ -18,6 +19,7 @@ export async function GET() {
     kvConfigured: kvConfigured(),
     tokenCount: await tokenCount(),
     otcOfferCount: await otcOfferCount(),
+    deskStats: await loadOtcDeskStats(),
     state,
   })
 }

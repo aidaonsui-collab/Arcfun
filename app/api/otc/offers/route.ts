@@ -13,11 +13,17 @@ import {
   fetchGoldskyOtcOffers,
   goldskyOtcConfigured,
 } from '@/lib/goldsky-otc'
+import { getPublicOtcDeskStats } from '@/lib/arc-indexer/otc-desk-stats'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
+    const stats = await getPublicOtcDeskStats().catch(() => null)
+    const headers = {
+      'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
+    }
+
     // Prefer Goldsky when configured (sub-second GraphQL vs KV lag).
     if (goldskyOtcConfigured()) {
       const gs = await fetchGoldskyOtcOffers()
@@ -29,12 +35,9 @@ export async function GET() {
             source: 'goldsky',
             at: Date.now(),
             offers: gs,
+            stats,
           },
-          {
-            headers: {
-              'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
-            },
-          },
+          { headers },
         )
       }
       // Fall through to KV on Goldsky failure
@@ -48,12 +51,9 @@ export async function GET() {
         source: 'arc-indexer',
         at: Date.now(),
         offers,
+        stats,
       },
-      {
-        headers: {
-          'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
-        },
-      },
+      { headers },
     )
   } catch (e) {
     return NextResponse.json(

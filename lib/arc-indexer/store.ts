@@ -152,3 +152,28 @@ export async function otcOfferCount(): Promise<number> {
     return 0
   }
 }
+
+/**
+ * Lifetime OTC desk stats (FillSettled count + source USDC volume).
+ * Independent of the offer book so a rolling log window cannot zero the homepage.
+ */
+const OTC_DESK_STATS_KEY = 'arcfun:idx:otc:desk-stats'
+
+export type IndexedOtcDeskStats = {
+  settledTrades: number
+  /** USDC 6dp (proceeds + fee), decimal string */
+  volumeUsdc: string
+  /** chainId -> last fully scanned block (inclusive) */
+  settledCursor: Record<string, string>
+  /** True once every live payment chain has been scanned up to its head. */
+  complete: boolean
+  updatedAt: number
+}
+
+export async function loadOtcDeskStats(): Promise<IndexedOtcDeskStats | null> {
+  return safeGet<IndexedOtcDeskStats>(OTC_DESK_STATS_KEY)
+}
+
+export async function saveOtcDeskStats(row: IndexedOtcDeskStats): Promise<void> {
+  await safeSet(OTC_DESK_STATS_KEY, { ...row, updatedAt: Date.now() })
+}

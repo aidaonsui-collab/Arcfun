@@ -34,6 +34,8 @@ import {
   sumOfferDepth,
   rememberLocalFill,
   fetchOtcDeskStats,
+  readCachedOtcDeskStats,
+  rememberOtcDeskStats,
   OTC_DEFAULT_FEE_BPS,
   OTC_ROBIN_FEE_BPS,
   OTC_MIN_BUY_USDC,
@@ -85,7 +87,10 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
   const [makeAmt, setMakeAmt] = useState('')
   const [sellerPayment, setSellerPayment] = useState('')
   const [busy, setBusy] = useState(false)
-  const [deskStats, setDeskStats] = useState<OtcDeskStats>({ settledTrades: 0, volumeUsdc: 0n })
+  const [deskStats, setDeskStats] = useState<OtcDeskStats>(
+    () => readCachedOtcDeskStats() ?? { settledTrades: 0, volumeUsdc: 0n },
+  )
+  const [statsReady, setStatsReady] = useState(() => readCachedOtcDeskStats() != null)
   /** Buy-flow progress for the step list in the fill modal — 'sign' is a free EIP-712
    *  authorization (see onFill), 'approve'/'confirm' are the two real on-chain signatures. */
   const [fillStep, setFillStep] = useState<'idle' | 'sign' | 'approve' | 'confirm' | 'done'>('idle')
@@ -198,15 +203,26 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
       // POST ingest keep the book warm; poll every few seconds.
       let list: OtcOffer[] = []
       let indexOk = false
+      let apiStats: OtcDeskStats | null = null
+      let apiStatsComplete = false
       try {
         const res = await fetch('/api/otc/offers', { cache: 'no-store' })
         if (res.ok) {
           const data = (await res.json()) as {
             ok?: boolean
             offers?: Parameters<typeof mapApiOffers>[0]
+            stats?: { settledTrades?: number; volumeUsdc?: string; complete?: boolean }
           }
           indexOk = data.ok !== false
           if (data.offers?.length) list = mapApiOffers(data.offers)
+          const s = data.stats
+          if (s && typeof s.settledTrades === 'number') {
+            apiStats = {
+              settledTrades: s.settledTrades,
+              volumeUsdc: BigInt(s.volumeUsdc || '0'),
+            }
+            apiStatsComplete = !!s.complete
+          }
         }
       } catch {
         /* index optional */
@@ -223,11 +239,29 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
       })
       setLoading(false)
 
-      // Stats / fee / voucher — background, never block the book paint
-      void Promise.all([fetchOtcFeeBps(), fetchOtcDeskStats()])
+      if (apiStats && (apiStats.settledTrades > 0 || apiStats.volumeUsdc > 0n || apiStatsComplete)) {
+        setDeskStats(apiStats)
+        setStatsReady(true)
+        rememberOtcDeskStats(apiStats, apiStatsComplete)
+      }
+
+      // Stats / fee / voucher — background, never block the book paint.
+      // Skip the client FillSettled scan when the indexer already has history
+      // (or has finished a full catch-up, including a legitimate zero).
+      const needClientStats = !(
+        apiStats && (apiStats.settledTrades > 0 || apiStats.volumeUsdc > 0n || apiStatsComplete)
+      )
+      void Promise.all([fetchOtcFeeBps(), needClientStats ? fetchOtcDeskStats() : Promise.resolve(null)])
         .then(([fee, stats]) => {
           setFeeBps(fee)
-          setDeskStats(stats)
+          if (!stats) return
+          setDeskStats((prev) => {
+            if (stats.settledTrades === 0 && stats.volumeUsdc === 0n && prev.settledTrades > 0) {
+              return prev
+            }
+            return stats
+          })
+          if (stats.settledTrades > 0 || stats.volumeUsdc > 0n) setStatsReady(true)
         })
         .catch(() => {})
       void refreshRobin()
@@ -728,13 +762,15 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
         <div className="otc-stat">
           <span className="otc-stat-label">Settled trades</span>
           <span className="otc-stat-value">
-            {loading && deskStats.settledTrades === 0 ? '…' : deskStats.settledTrades.toLocaleString()}
+            {!statsReady && deskStats.settledTrades === 0
+              ? '…'
+              : deskStats.settledTrades.toLocaleString()}
           </span>
         </div>
         <div className="otc-stat">
           <span className="otc-stat-label">Volume</span>
           <span className="otc-stat-value accent">
-            {loading && deskStats.volumeUsdc === 0n
+            {!statsReady && deskStats.volumeUsdc === 0n
               ? '…'
               : `${formatUsdcVolume(deskStats.volumeUsdc)} USDC`}
           </span>

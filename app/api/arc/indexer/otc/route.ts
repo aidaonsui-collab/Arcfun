@@ -7,6 +7,7 @@ import { arcPublicClient } from '@/lib/contracts-arc'
 import { loadState, saveState, listOtcOffers, otcOfferCount } from '@/lib/arc-indexer/store'
 import { scanLogsChunked } from '@/lib/arc-indexer/logs'
 import { upsertOtcOffer, removeOtcOffer } from '@/lib/arc-indexer/store'
+import { catchUpOtcDeskStats } from '@/lib/arc-indexer/otc-desk-stats'
 import {
   ROBIN_OTC_LIQUIDITY,
   LIQUIDITY_ABI,
@@ -109,6 +110,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    const desk = await catchUpOtcDeskStats().catch((e) => {
+      console.warn('[indexer/otc] desk stats', e instanceof Error ? e.message : e)
+      return null
+    })
+
     state.updatedAt = Date.now()
     state.lastRun = {
       at: Date.now(),
@@ -128,6 +134,13 @@ export async function GET(req: NextRequest) {
       otcOfferCount: await otcOfferCount(),
       otcCursor: state.otcCursor,
       head: head.toString(),
+      deskStats: desk
+        ? {
+            settledTrades: desk.settledTrades,
+            volumeUsdc: desk.volumeUsdc,
+            complete: desk.complete,
+          }
+        : null,
     })
   } catch (e) {
     return NextResponse.json(
