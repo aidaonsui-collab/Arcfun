@@ -18,11 +18,42 @@ export function kvConfigured(): boolean {
   return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN)
 }
 
-async function safeGet<T>(key: string): Promise<T | null> {
+/**
+ * Thrown when a KV read FAILED, as distinct from a key that is genuinely absent.
+ *
+ * Found live 2026-08-21: every read here used to swallow the error and return null/[], so a
+ * rate-limited or timed-out Upstash read was indistinguishable from "there is no data". That
+ * fed a destructive loop — loadState() returned a zeroed default, the cycle did its work
+ * against that phantom state, then saveState() PERSISTED the reset cursor, wiping the real one
+ * and forcing a full re-scan from the floor (more KV + RPC load → more rate limiting → more
+ * resets). Observed directly: six identical /api/arc/indexer/status calls seconds apart
+ * returned factoryCursor 16761463, 16761463, 16761463, 0, 0, 0 and tokenCount 18/18/18/0/0/18.
+ *
+ * Callers that mutate persisted state MUST let this propagate and abort without saving.
+ * Read-only callers (status route) may catch it and report degraded.
+ */
+export class KvUnavailableError extends Error {
+  constructor(op: string, cause?: unknown) {
+    super(`kv ${op} failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+    this.name = 'KvUnavailableError'
+  }
+}
+
+/** Read that distinguishes "missing" (null) from "unavailable" (throws). */
+async function strictGet<T>(key: string): Promise<T | null> {
   try {
     return (await kv.get<T>(key)) ?? null
   } catch (e) {
     console.warn('[arc-indexer] kv get', key, summarizeRpcError(e))
+    throw new KvUnavailableError(`get ${key}`, e)
+  }
+}
+
+/** Best-effort read for non-critical paths — a failure here cannot corrupt persisted state. */
+async function safeGet<T>(key: string): Promise<T | null> {
+  try {
+    return await strictGet<T>(key)
+  } catch {
     return null
   }
 }
@@ -36,8 +67,13 @@ async function safeSet(key: string, value: unknown, ex?: number): Promise<void> 
   }
 }
 
+/**
+ * Throws KvUnavailableError if the state read fails — callers that go on to saveState() must
+ * NOT treat that as a fresh/empty index (see KvUnavailableError). A genuinely absent key still
+ * returns the zeroed default, which is the correct first-run behaviour.
+ */
 export async function loadState(): Promise<IndexerState> {
-  const s = await safeGet<IndexerState>(STATE_KEY)
+  const s = await strictGet<IndexerState>(STATE_KEY)
   if (s?.version === 1) return s
   return {
     version: 1,
@@ -66,13 +102,19 @@ export async function getToken(token: Address | string): Promise<IndexedToken | 
   return safeGet<IndexedToken>(tokenKey(String(token)))
 }
 
+/**
+ * Throws KvUnavailableError on a failed read. Returning [] here used to make the cycle believe
+ * the registry was empty, which both skipped every token's swap catch-up (swapsTokens: 0, tapes
+ * silently going stale until a human loaded the page) and re-triggered a full factory reseed —
+ * extra KV writes at exactly the moment KV was already failing.
+ */
 export async function listTokenAddresses(): Promise<string[]> {
   try {
     const members = await kv.smembers(TOKEN_SET)
     return (members as string[]).map((m) => m.toLowerCase())
   } catch (e) {
     console.warn('[arc-indexer] smembers tokens', summarizeRpcError(e))
-    return []
+    throw new KvUnavailableError('smembers tokens', e)
   }
 }
 
@@ -137,19 +179,30 @@ export async function listOtcOffers(): Promise<IndexedOtcOffer[]> {
   }
 }
 
+/** Throws KvUnavailableError on failure — 0 must mean "empty", never "couldn't read". */
 export async function tokenCount(): Promise<number> {
   try {
     return Number(await kv.scard(TOKEN_SET)) || 0
-  } catch {
-    return 0
+  } catch (e) {
+    throw new KvUnavailableError('scard tokens', e)
   }
 }
 
+/** Throws KvUnavailableError on failure — see tokenCount. */
 export async function otcOfferCount(): Promise<number> {
   try {
     return Number(await kv.scard(OTC_OFFER_SET)) || 0
+  } catch (e) {
+    throw new KvUnavailableError('scard otc offers', e)
+  }
+}
+
+/** Reporting helper: count, or null when KV could not answer. */
+export async function countOrNull(fn: () => Promise<number>): Promise<number | null> {
+  try {
+    return await fn()
   } catch {
-    return 0
+    return null
   }
 }
 

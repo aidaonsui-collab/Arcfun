@@ -26,6 +26,7 @@ import {
   kvConfigured,
   tokenCount,
   otcOfferCount,
+  countOrNull,
 } from './store'
 import { catchUpOtcDeskStats } from './otc-desk-stats'
 import { computeVolumeWindows } from './volume'
@@ -331,13 +332,47 @@ export type IndexerRunResult = {
 
 export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
   const t0 = Date.now()
-  let state = await loadState()
   let seeded = 0
   let factories = 0
   let otcOffers = 0
   let swapsTokens = 0
 
+  // Load state BEFORE the try that ends in saveState(). A failed KV read must abort the whole
+  // cycle without writing anything: loadState()'s zeroed default is only correct for a genuine
+  // first run, and persisting it after a read failure wipes the real cursor and triggers a full
+  // re-scan from the floor. See KvUnavailableError in ./store. Bailing here is safe — the cron
+  // runs every 2 minutes, so we just skip this tick and retry once KV recovers.
+  let state: IndexerState
   try {
+    state = await loadState()
+  } catch (e) {
+    const ms = Date.now() - t0
+    const error = e instanceof Error ? e.message : String(e)
+    console.error('[arc-indexer] state read unavailable — skipping cycle without saving', error)
+    return {
+      ok: false,
+      ms,
+      kvConfigured: kvConfigured(),
+      seeded,
+      factories,
+      otcOffers,
+      swapsTokens,
+      tokenCount: (await countOrNull(tokenCount)) ?? 0,
+      otcOfferCount: (await countOrNull(otcOfferCount)) ?? 0,
+      state: {
+        version: 1,
+        factoryCursor: '0',
+        otcCursor: '0',
+        swapRotate: 0,
+        updatedAt: 0,
+      },
+      error: `state unavailable, cycle skipped: ${error}`,
+    }
+  }
+
+  try {
+    // Throws KvUnavailableError if the read failed; caught by the outer catch, which records
+    // lastRun.ok=false and leaves the cursor untouched. Only a genuinely empty registry seeds.
     const existing = await listTokenAddresses()
     if (existing.length === 0) {
       seeded = await seedTokensFromFactories()
@@ -384,8 +419,8 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
       factories,
       otcOffers,
       swapsTokens,
-      tokenCount: await tokenCount(),
-      otcOfferCount: await otcOfferCount(),
+      tokenCount: (await countOrNull(tokenCount)) ?? 0,
+      otcOfferCount: (await countOrNull(otcOfferCount)) ?? 0,
       state,
     }
   } catch (e) {
@@ -413,8 +448,8 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
       factories,
       otcOffers,
       swapsTokens,
-      tokenCount: await tokenCount(),
-      otcOfferCount: await otcOfferCount(),
+      tokenCount: (await countOrNull(tokenCount)) ?? 0,
+      otcOfferCount: (await countOrNull(otcOfferCount)) ?? 0,
       state,
       error,
     }
