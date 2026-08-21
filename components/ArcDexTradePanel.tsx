@@ -37,12 +37,13 @@ const BUY_PRESETS = [25, 100, 500]
 /** Sell fraction of wallet balance (Max = 100). */
 const SELL_PCTS = [25, 50, 75, 100] as const
 
-function fmtTok(v: bigint): string {
-  const n = Number(formatUnits(v, 6))
-  if (n === 0) return '0'
+function fmtTok(v: bigint, decimals: number): string {
+  const n = Number(formatUnits(v, decimals))
+  if (!Number.isFinite(n) || n === 0) return '0'
   if (n < 0.0001) return n < 1e-8 ? n.toExponential(2) : '<0.0001'
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  if (n >= 1_000) return n.toLocaleString(undefined, { maximumFractionDigits: 0 })
   return n.toLocaleString(undefined, { maximumFractionDigits: 4 })
 }
 
@@ -108,6 +109,14 @@ export function ArcDexTradePanel({
     query: { enabled: !!address, refetchInterval: 15_000 },
   })
 
+  const { data: tokenDecimals } = useReadContract({
+    address: token,
+    abi: erc20Abi,
+    functionName: 'decimals',
+    query: { staleTime: 3_600_000 },
+  })
+  const tokDec = Number(tokenDecimals ?? ARC.TOKEN_DECIMALS) || ARC.TOKEN_DECIMALS
+
   const approveToken: Address = mode === 'buy' ? ARC.USDC : token
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: approveToken,
@@ -144,7 +153,7 @@ export function ArcDexTradePanel({
           const q = await quoteArcBuy(token, inAmt)
           if (!cancelled) setEstOut(q)
         } else {
-          const inAmt = parseToken(amount)
+          const inAmt = parseToken(amount, tokDec)
           if (inAmt <= 0n) return
           const q = await quoteArcSell(token, inAmt)
           if (!cancelled) setEstOut(q)
@@ -160,11 +169,11 @@ export function ArcDexTradePanel({
       cancelled = true
       clearTimeout(t)
     }
-  }, [amount, mode, token, swapOn])
+  }, [amount, mode, token, swapOn, tokDec])
 
   const needApprove = (() => {
     if (!amount || Number(amount) <= 0) return false
-    const need = mode === 'buy' ? parseUsdc(amount) : parseToken(amount)
+    const need = mode === 'buy' ? parseUsdc(amount) : parseToken(amount, tokDec)
     return (allowance as bigint | undefined ?? 0n) < need
   })()
 
@@ -206,7 +215,7 @@ export function ArcDexTradePanel({
         setTxHash(hash)
         setStatusMsg('Confirming…')
       } else {
-        const inAmt = parseToken(amount)
+        const inAmt = parseToken(amount, tokDec)
         const quoted = estOut ?? (await quoteArcSell(token, inAmt)) ?? 0n
         const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
         if (needApprove) {
@@ -253,15 +262,17 @@ export function ArcDexTradePanel({
 
   const amtNum = Number(amount) || 0
   const payBal = mode === 'buy' ? ((usdcBal as bigint | undefined) ?? 0n) : ((tokenBal as bigint | undefined) ?? 0n)
-  const payBalLabel = mode === 'buy' ? formatUsdc(payBal) : fmtTok(payBal)
+  const payBalLabel = mode === 'buy' ? formatUsdc(payBal) : fmtTok(payBal, tokDec)
   const receiveAmt =
-    quoting ? '…' : estOut == null ? '0' : mode === 'buy' ? fmtTok(estOut) : formatUsdc(estOut)
+    quoting ? '…' : estOut == null ? '0' : mode === 'buy' ? fmtTok(estOut, tokDec) : formatUsdc(estOut)
   const rate = (() => {
     if (!(amtNum > 0) || estOut == null || estOut <= 0n) return null
-    const out = Number(formatUnits(estOut, 6))
+    const out = Number(formatUnits(estOut, mode === 'buy' ? tokDec : 6))
     if (!(out > 0)) return null
     const per = out / amtNum
-    const pretty = per.toLocaleString(undefined, { maximumFractionDigits: 6 })
+    const pretty = per.toLocaleString(undefined, {
+      maximumFractionDigits: per >= 1000 ? 0 : per >= 1 ? 4 : 6,
+    })
     return mode === 'buy' ? `1 USDC = ${pretty} ${symbol}` : `1 ${symbol} = ${pretty} USDC`
   })()
 
@@ -312,7 +323,9 @@ export function ArcDexTradePanel({
                 disabled={payBal === 0n}
                 onClick={() => {
                   if (payBal <= 0n) return
-                  setAmount(mode === 'buy' ? formatUsdc(payBal).replace(/,/g, '') : formatToken(payBal))
+                  setAmount(
+                    mode === 'buy' ? formatUsdc(payBal).replace(/,/g, '') : formatToken(payBal, tokDec),
+                  )
                 }}
                 className="tabular-nums font-medium disabled:opacity-40"
               >
@@ -353,7 +366,7 @@ export function ArcDexTradePanel({
                     disabled={payBal === 0n}
                     onClick={() => {
                       const pctAmt = (payBal * BigInt(pct)) / 100n
-                      if (pctAmt > 0n) setAmount(formatToken(pctAmt))
+                      if (pctAmt > 0n) setAmount(formatToken(pctAmt, tokDec))
                     }}
                     className="px-2.5 py-1 rounded-lg text-[11px] font-semibold tabular-nums text-white/45 bg-white/5 hover:text-white disabled:opacity-40"
                   >
@@ -387,7 +400,7 @@ export function ArcDexTradePanel({
               <span>You receive</span>
               {estOut != null && !quoting && (
                 <span className="tabular-nums text-white/35 truncate max-w-[55%]">
-                  {mode === 'buy' ? formatToken(estOut) : formatUsdc(estOut)}
+                  {mode === 'buy' ? formatToken(estOut, tokDec) : formatUsdc(estOut)}
                 </span>
               )}
             </div>

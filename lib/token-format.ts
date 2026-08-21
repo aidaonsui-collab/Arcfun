@@ -1,16 +1,16 @@
 import { formatUnits, parseUnits } from 'viem'
+import { ARC } from './contracts-arc'
 
 /**
- * Launch-token 6dp formatting helpers, lifted from Robinpad's `lib/monad-launchpad.ts` so
- * `components/ArcDexTradePanel.tsx` (reused verbatim from that codebase) needs zero edits.
+ * Instant / Reflection launch tokens are LaunchToken18. A prior copy of this helper
+ * used 6dp (Robinpad USDC-style), which made buy quotes look 1e12 too large
+ * (70 USDC → "2782591296703107537 EVE" instead of ~2.78M).
  *
- * NOTE: `lib/contracts-arc.ts`'s `ARC.TOKEN_DECIMALS` is documented as 18 ("LaunchToken18"), but
- * the upstream helper this fork carries forward uses 6dp — same mismatch exists in the source
- * repo's ArcDexTradePanel (its own `fmtTok` hardcodes `formatUnits(v, 6)` too). Reproduced as-is
- * rather than "fixed" here since we didn't verify which figure the deployed token actually uses;
- * flag for follow-up if balances look off by 10^12.
+ * Pass `decimals` from token.decimals() when the panel has it; default 18.
  */
-const TOKEN_DECIMALS = 6
+export const DEFAULT_TOKEN_DECIMALS = ARC.TOKEN_DECIMALS
 
-export const parseToken = (v: string | number) => parseUnits(String(v), TOKEN_DECIMALS)
-export const formatToken = (v: bigint) => formatUnits(v, TOKEN_DECIMALS)
+export const parseToken = (v: string | number, decimals: number = DEFAULT_TOKEN_DECIMALS) =>
+  parseUnits(String(v), decimals)
+export const formatToken = (v: bigint, decimals: number = DEFAULT_TOKEN_DECIMALS) =>
+  formatUnits(v, decimals)
