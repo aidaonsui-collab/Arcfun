@@ -93,6 +93,66 @@ const REFLECTION_EXTRA_ABI = [
 
 /** Skip reflect() below this — not worth the gas. $0.25 USDC (6dp). */
 const MIN_REFLECT_USDC = 250_000n
+/**
+ * Skip collectFees when both legs are dust. Empty collects still cost ~0.01–0.05 USDC
+ * of Arc gas; nanopayments cannot pay that (they batch USDC transfers, not L1 Uni collect).
+ * $0.05 quote / 0.01 launch-token is well under one collect tx.
+ */
+const MIN_COLLECT_USDC = 50_000n
+const MIN_COLLECT_TOKEN = 10n ** 16n // 0.01 token (18dp)
+
+const POOL_TOKEN0_ABI = [
+  {
+    type: 'function',
+    name: 'token0',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }],
+  },
+] as const
+
+function collectIsDust(amount0: bigint, amount1: bigint, token0: Address): boolean {
+  const usdcIs0 = token0.toLowerCase() === ARC.USDC.toLowerCase()
+  const quote = usdcIs0 ? amount0 : amount1
+  const tok = usdcIs0 ? amount1 : amount0
+  return quote < MIN_COLLECT_USDC && tok < MIN_COLLECT_TOKEN
+}
+
+/**
+ * eth_call collectFees first. Skip the paid tx when the locker would move dust.
+ * If simulate fails, collect anyway — the write path already swallows reverts.
+ */
+async function skipDustCollect(opts: {
+  client: ReturnType<typeof arcPublicClient>
+  locker: Address
+  positionId: bigint
+  uniPool: Address
+  account: Address
+}): Promise<string | null> {
+  try {
+    const [sim, token0] = await Promise.all([
+      opts.client.simulateContract({
+        account: opts.account,
+        address: opts.locker,
+        abi: MONLOCK_ABI,
+        functionName: 'collectFees',
+        args: [opts.positionId],
+      }),
+      opts.client.readContract({
+        address: opts.uniPool,
+        abi: POOL_TOKEN0_ABI,
+        functionName: 'token0',
+      }) as Promise<Address>,
+    ])
+    const [amount0, amount1] = sim.result as readonly [bigint, bigint]
+    if (collectIsDust(amount0, amount1, token0)) {
+      return `dust collect ${amount0.toString()}/${amount1.toString()}`
+    }
+  } catch {
+    /* simulate failed — try the live collect */
+  }
+  return null
+}
 
 /**
  * Fee tiers the factory's `_swapQuoteForReward` walks (InstantReflectionUsdcFactory).
@@ -169,6 +229,7 @@ export interface KeeperTokenResult {
   kind: 'instant' | 'reflection'
   collectFeesTx?: `0x${string}`
   collectFeesError?: string
+  collectSkippedReason?: string
   forwardFeesTx?: `0x${string}`
   forwardFeesError?: string
   reflectTx?: `0x${string}`
@@ -312,10 +373,30 @@ async function collectInstantPositions(
           abi: INSTANT_QUOTE_FACTORY_ABI,
           functionName: 'getPool',
           args: [token],
-        })) as { positionId: bigint }
-        const positionId = pool?.positionId ?? 0n
+        })) as {
+          creator: Address
+          uniPool: Address
+          positionId: bigint
+          liquidity: bigint
+          tickLower: number
+          tickUpper: number
+        }
+        const positionId = pool.positionId
+        const uniPool = pool.uniPool
         if (positionId <= 0n) {
           r.collectFeesError = 'no position'
+          results.push(r)
+          continue
+        }
+        const skip = await skipDustCollect({
+          client,
+          locker,
+          positionId,
+          uniPool,
+          account: wallet.account.address,
+        })
+        if (skip) {
+          r.collectSkippedReason = skip
           results.push(r)
           continue
         }
@@ -368,21 +449,32 @@ export async function runReflectionKeeperCycle(privateKey: `0x${string}`): Promi
         functionName: 'pools',
         args: [token],
       })) as readonly [Address, Address, Address, Address, bigint, bigint, number, number]
-      const [, rewardToken, feeSink, , positionId] = pool
+      const [, rewardToken, feeSink, uniPool, positionId] = pool
 
       // 1. Sweep the locked LP position's accrued swap fees.
-      try {
-        const hash = await wallet.writeContract({
-          address: locker,
-          abi: MONLOCK_ABI,
-          functionName: 'collectFees',
-          args: [positionId],
-          chain: wallet.chain,
-        })
-        r.collectFeesTx = hash
-        await client.waitForTransactionReceipt({ hash })
-      } catch (e) {
-        r.collectFeesError = (e as Error).message?.slice(0, 200)
+      const skip = await skipDustCollect({
+        client,
+        locker,
+        positionId,
+        uniPool,
+        account: wallet.account.address,
+      })
+      if (skip) {
+        r.collectSkippedReason = skip
+      } else {
+        try {
+          const hash = await wallet.writeContract({
+            address: locker,
+            abi: MONLOCK_ABI,
+            functionName: 'collectFees',
+            args: [positionId],
+            chain: wallet.chain,
+          })
+          r.collectFeesTx = hash
+          await client.waitForTransactionReceipt({ hash })
+        } catch (e) {
+          r.collectFeesError = (e as Error).message?.slice(0, 200)
+        }
       }
 
       // 2. Push whatever the fee sink is holding into the factory's pending accounting.
