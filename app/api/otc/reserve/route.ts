@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { isAddress, isHex, verifyTypedData, type Address, type Hex } from 'viem'
 import { kv } from '@vercel/kv'
 import { arcPublicClient, arcServerWalletClient } from '@/lib/contracts-arc'
+import { upsertOtcReservation } from '@/lib/arc-indexer/store'
 import {
   ROBIN_OTC_LIQUIDITY,
   LIQUIDITY_ABI,
@@ -199,11 +200,22 @@ export async function POST(req: NextRequest) {
       )
     }
     const reservationId = log.topics[1] as Hex
+    const expiresAt = now + OTC_RESERVE_TTL_SEC
+    await upsertOtcReservation({
+      reservationId,
+      offerId: offerId as Hex,
+      amount: amountBig.toString(),
+      expiresAt,
+      txHash: hash,
+      createdAt: now,
+    }).catch((e) => {
+      console.warn('[otc/reserve] kv reservation', e instanceof Error ? e.message : e)
+    })
 
     return NextResponse.json({
       ok: true,
       reservationId,
-      expiresAt: now + OTC_RESERVE_TTL_SEC,
+      expiresAt,
       txHash: hash,
       keeper: wallet.account!.address,
     })

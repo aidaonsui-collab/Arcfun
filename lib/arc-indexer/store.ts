@@ -177,3 +177,54 @@ export async function loadOtcDeskStats(): Promise<IndexedOtcDeskStats | null> {
 export async function saveOtcDeskStats(row: IndexedOtcDeskStats): Promise<void> {
   await safeSet(OTC_DESK_STATS_KEY, { ...row, updatedAt: Date.now() })
 }
+
+/**
+ * Live Arc hard-reserves. Written by POST /api/otc/reserve so a fillOffer that
+ * never mines (out of gas, user reject) is still visible and can be released
+ * without a Reserved-log scan.
+ */
+const OTC_RESERVATION_SET = 'arcfun:idx:otc:reservations'
+const otcReservationKey = (id: string) => `arcfun:idx:otc:reservation:${id.toLowerCase()}`
+
+export type IndexedOtcReservation = {
+  reservationId: Hex
+  offerId: Hex
+  amount: string
+  expiresAt: number
+  txHash?: Hex
+  createdAt: number
+}
+
+export async function upsertOtcReservation(row: IndexedOtcReservation): Promise<void> {
+  const id = row.reservationId.toLowerCase()
+  try {
+    await kv.sadd(OTC_RESERVATION_SET, id)
+  } catch (e) {
+    console.warn('[arc-indexer] sadd reservation', summarizeRpcError(e))
+  }
+  await safeSet(otcReservationKey(id), row, 2 * 60 * 60)
+}
+
+export async function removeOtcReservation(reservationId: Hex | string): Promise<void> {
+  const id = String(reservationId).toLowerCase()
+  try {
+    await kv.srem(OTC_RESERVATION_SET, id)
+    await kv.del(otcReservationKey(id))
+  } catch (e) {
+    console.warn('[arc-indexer] del reservation', summarizeRpcError(e))
+  }
+}
+
+export async function listOtcReservations(): Promise<IndexedOtcReservation[]> {
+  try {
+    const ids = (await kv.smembers(OTC_RESERVATION_SET)) as string[]
+    if (!ids?.length) return []
+    const rows = await Promise.all(
+      ids.map((id) => safeGet<IndexedOtcReservation>(otcReservationKey(id))),
+    )
+    return rows.filter((r): r is IndexedOtcReservation => !!r?.reservationId)
+  } catch (e) {
+    console.warn('[arc-indexer] list reservations', summarizeRpcError(e))
+    return []
+  }
+}

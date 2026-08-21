@@ -731,6 +731,70 @@ export async function fetchPendingReservedByOffer(): Promise<Map<string, bigint>
   return map
 }
 
+/**
+ * Hard-reserves that never made it to a payment-chain FillCreated (fillOffer
+ * reverted / user rejected). Remaining is already deducted on Arc, so without
+ * this the maker card shows 0 available / OPEN with no pending line.
+ */
+export async function fetchHardReservedByOffer(): Promise<Map<string, bigint>> {
+  const map = new Map<string, bigint>()
+  if (!robinOtcEnabled()) return map
+  try {
+    const client = arcClient()
+    const latest = await withArcRetry(() => client.getBlockNumber())
+    // 30m TTL @ ~0.1s/block ≈ 18k; 40k covers a slow block period.
+    const lookback = 40_000n
+    const earliest = latest > lookback ? latest - lookback : 0n
+    const logs: { args: { reservationId?: Hex } }[] = []
+    let to = latest
+    while (to >= earliest) {
+      const from = to > ARC_LOG_CHUNK_BLOCKS ? to - ARC_LOG_CHUNK_BLOCKS + 1n : earliest
+      const rangeFrom = from < earliest ? earliest : from
+      try {
+        const part = await withArcRetry(() =>
+          client.getContractEvents({
+            address: ROBIN_OTC_LIQUIDITY,
+            abi: LIQUIDITY_ABI,
+            eventName: 'Reserved',
+            fromBlock: rangeFrom,
+            toBlock: to,
+          }),
+        )
+        logs.push(...(part as { args: { reservationId?: Hex } }[]))
+      } catch {
+        /* chunk miss */
+      }
+      if (rangeFrom <= earliest) break
+      to = rangeFrom - 1n
+    }
+    const now = Math.floor(Date.now() / 1000)
+    await Promise.all(
+      logs.map(async (log) => {
+        const id = log.args.reservationId
+        if (!id) return
+        try {
+          const row = (await client.readContract({
+            address: ROBIN_OTC_LIQUIDITY,
+            abi: LIQUIDITY_ABI,
+            functionName: 'reservations',
+            args: [id],
+          })) as readonly [Hex, Address, bigint, bigint, boolean, boolean]
+          const [offerId, , amount, expiresAt, consumed, released] = row
+          if (consumed || released) return
+          if (Number(expiresAt) + 120 < now) return
+          const k = offerId.toLowerCase()
+          map.set(k, (map.get(k) ?? 0n) + amount)
+        } catch {
+          /* skip */
+        }
+      }),
+    )
+  } catch {
+    /* optional */
+  }
+  return map
+}
+
 export async function fetchRecentFills(opts?: {
   /** 1 pending, 2 locked, 3 settled, 4 refunded */
   status?: 1 | 2 | 3 | 4
@@ -1132,7 +1196,10 @@ export async function fetchMakerOffers(maker: Address): Promise<OtcOffer[]> {
   const logs = await fetchAllOfferCreatedLogs(client, maker)
 
   const out: OtcOffer[] = []
-  const pending = await fetchPendingReservedByOffer()
+  const [pending, hard] = await Promise.all([
+    fetchPendingReservedByOffer(),
+    fetchHardReservedByOffer(),
+  ])
   for (const log of logs) {
     const offerId = log.args.offerId as Hex
     if (!offerId) continue
@@ -1145,7 +1212,8 @@ export async function fetchMakerOffers(maker: Address): Promise<OtcOffer[]> {
       })) as readonly [Address, Address, number, bigint, boolean]
       const [m, sellerPayment, premiumBps, remaining, active] = row
       // remaining is free inventory (hard reserves already deducted on Arc).
-      const softPending = pending.get(offerId.toLowerCase()) ?? 0n
+      const key = offerId.toLowerCase()
+      const softPending = (pending.get(key) ?? 0n) + (hard.get(key) ?? 0n)
       out.push({
         offerId,
         maker: m,

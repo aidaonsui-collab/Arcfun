@@ -30,6 +30,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { arbitrum, base, mainnet } from 'viem/chains'
 import { arcPublicClient, arcServerWalletClient, ARC_CHAIN_ID } from './contracts-arc'
 import { ROBIN_OTC_LIQUIDITY } from './bridge/robin-otc'
+import { listOtcReservations, removeOtcReservation } from './arc-indexer/store'
 
 const ZERO_BYTES32 =
   '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
@@ -618,6 +619,7 @@ export async function runOtcKeeperTick(opts?: {
   }
 
   await sweepKnownOrphanReservations(arcPub, arcWallet, account, liquidity, dryRun, results)
+  await sweepIndexedReservations(arcPub, arcWallet, account, liquidity, dryRun, results)
 
   return {
     ok: true,
@@ -649,6 +651,9 @@ export async function runOtcKeeperTick(opts?: {
  */
 const KNOWN_ORPHAN_RESERVATIONS: readonly Hex[] = [
   '0x9a9978c04dbbd1e4416f2fe2a0935ce415ea302e2491ab17498c98bd291db201',
+  // 2026-08-19: $120 par offer — fillOffer never mined (buyer out of gas). Released
+  // manually; left here so a replayed keeper tick is a no-op if KV missed it.
+  '0x4b13c857847f6e2751c04f11c6dc455cacf1532a6adcd3f2d4f3ec776cd57989',
 ]
 
 async function sweepKnownOrphanReservations(
@@ -696,6 +701,74 @@ async function sweepKnownOrphanReservations(
         fillId: reservationId,
         action: 'error',
         detail: `known-orphan sweep failed: ${relMsg.slice(0, 160)}`,
+      })
+    }
+  }
+}
+
+async function sweepIndexedReservations(
+  arcPub: ReturnType<typeof arcPublicClient>,
+  arcWallet: ReturnType<typeof arcServerWalletClient>,
+  account: ReturnType<typeof privateKeyToAccount>,
+  liquidity: Address,
+  dryRun: boolean,
+  results: OtcKeeperTickResult[],
+) {
+  const rows = await listOtcReservations().catch(() => [])
+  const now = Math.floor(Date.now() / 1000)
+  for (const row of rows) {
+    const reservationId = row.reservationId
+    try {
+      const onchain = (await arcPub.readContract({
+        address: liquidity,
+        abi: liquidityAbi,
+        functionName: 'reservations',
+        args: [reservationId],
+      })) as readonly [Hex, Address, bigint, bigint, boolean, boolean]
+      const [, , , expiresAt, consumed, released] = onchain
+      if (consumed || released) {
+        await removeOtcReservation(reservationId)
+        continue
+      }
+      if (Number(expiresAt) > now) continue
+      if (dryRun) {
+        results.push({
+          spoke: 'arc',
+          fillId: reservationId,
+          action: 'released',
+          detail: 'dry-run: kv reservation expired',
+        })
+        continue
+      }
+      const hash = await arcWallet.writeContract({
+        account,
+        chain: arcWallet.chain,
+        address: liquidity,
+        abi: liquidityAbi,
+        functionName: 'releaseReservation',
+        args: [reservationId],
+        gas: 150_000n,
+      })
+      await waitReceipt(arcPub as PublicClient, hash, 'releaseReservation')
+      await removeOtcReservation(reservationId)
+      results.push({
+        spoke: 'arc',
+        fillId: reservationId,
+        action: 'released',
+        detail: 'kv reservation expired',
+        txHash: hash,
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (/done/i.test(msg)) {
+        await removeOtcReservation(reservationId)
+        continue
+      }
+      results.push({
+        spoke: 'arc',
+        fillId: reservationId,
+        action: 'error',
+        detail: `kv reservation sweep: ${msg.slice(0, 160)}`,
       })
     }
   }

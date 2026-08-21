@@ -594,21 +594,28 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
       window.setTimeout(() => void refresh(), 2_500)
       window.setTimeout(() => void refresh(), 8_000)
     } catch (e) {
-      // Arc-side reservation (if one was made) is owned by the keeper wallet now, not this
-      // buyer's wallet — it submitted reserve() on the buyer's behalf, so RobinOtcLiquidity's
-      // "reserver anytime; anyone after expiry" release gate means the buyer's own wallet can't
-      // self-release it here even if we offered a cleanup tx. Nothing is stuck either way: it
-      // auto-expires and the OTC keeper's stale-reservation sweep (lib/arc-otc-keeper.ts)
-      // releases it back to the book automatically on its next tick.
+      // Keeper submitted reserve() before payment. If fillOffer never mined, release
+      // immediately so the book does not sit at 0 remaining for the 30m TTL.
+      const reserved = reservationId
+      if (reserved) {
+        void fetch('/api/otc/reserve/release', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reservationId: reserved }),
+        }).catch(() => {})
+      }
       const msg = e instanceof Error ? e.message : String(e)
       setErr(
-        reservationId
-          ? `${msg} — the reserved inventory releases back to the book automatically within ~30 minutes.`
+        reserved
+          ? `${msg} — reserved inventory is being released back to the book.`
           : msg,
       )
       setStatus(null)
       setFillStep('idle')
       void refresh()
+      if (reserved) {
+        window.setTimeout(() => void refresh(), 4_000)
+      }
     } finally {
       setBusy(false)
     }
