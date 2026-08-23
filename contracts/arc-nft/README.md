@@ -16,3 +16,5 @@ Deploy:
 ```bash
 ARCPORT_OWNER=0x… forge script script/Deploy.s.sol:Deploy --rpc-url $ARC_RPC --broadcast
 ```
+
+Then set `NEXT_PUBLIC_ARCPORT_FACTORY` to the proxy address. Port reads `allCollections` from that factory. Secondary marketplace is Seaport 1.6 later.

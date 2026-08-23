@@ -1,8 +1,8 @@
 'use client'
 
 /**
- * Sticky nav — brand mark, search, Launch CTA, wallet chip.
- * Mobile: hamburger sheet — Home, Portfolio, Profile, Arc OTC, Docs (Docs last).
+ * Sticky nav — brand mark, search, ArcPort, OTC, wallet chip.
+ * On /port: Create CTA. Mobile: Home, ArcPort, Portfolio, Profile, Arc OTC, Docs.
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -65,11 +65,17 @@ export function SiteHeader() {
     }
   }, [menuOpen])
 
+  const onPort = pathname.startsWith('/port')
+
   const onSearch = (e: FormEvent) => {
     e.preventDefault()
     const v = q.trim()
     if (!v) return
     setMenuOpen(false)
+    if (onPort) {
+      router.push(`/port?q=${encodeURIComponent(v)}`)
+      return
+    }
     if (/^0x[a-fA-F0-9]{40}$/.test(v)) {
       router.push(`/token/${v}`)
       return
@@ -103,7 +109,7 @@ export function SiteHeader() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search tokens, tickers, addresses"
+            placeholder="Search tokens, collections, addresses"
             className="flex-1 bg-transparent border-0 outline-none text-sm tracking-tightish placeholder:text-white/25"
           />
           <span className="text-[11px] font-semibold text-t3 border border-hair rounded px-1.5 py-0.5">
@@ -114,11 +120,31 @@ export function SiteHeader() {
         <div className="flex-1" />
 
         <Link
+          href="/port"
+          className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
+            onPort
+              ? 'border-lime-line bg-s2 text-white'
+              : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
+          }`}
+        >
+          ArcPort
+        </Link>
+
+        <Link
           href="/otc"
           className="hidden sm:inline-flex h-9 items-center px-3 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
         >
           Arc OTC
         </Link>
+
+        {onPort ? (
+          <Link
+            href="/port/create"
+            className="hidden sm:inline-flex h-9 items-center rounded-xl bg-lime px-3.5 text-sm font-semibold text-white hover:bg-lime-2 hover:text-white"
+          >
+            Create
+          </Link>
+        ) : null}
 
         {isConnected && address ? (
           <div className="flex items-center gap-2">
@@ -212,13 +238,15 @@ export function SiteHeader() {
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search tokens or addresses"
+                placeholder="Search tokens, collections, addresses"
                 className="flex-1 bg-transparent border-0 outline-none text-sm tracking-tightish placeholder:text-white/25"
                 autoFocus
               />
             </form>
 
             {navLink('/', 'Home')}
+            {navLink('/port', 'ArcPort')}
+            {navLink('/port/create', 'Create collection')}
             {navLink('/portfolio', 'Portfolio')}
             {isConnected && address ? (
               navLink(`/creator/${address}`, 'Profile')

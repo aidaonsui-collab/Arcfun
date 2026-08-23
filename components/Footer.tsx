@@ -12,6 +12,9 @@ export function Footer() {
           <Link href="/docs#agents" className="hover:text-white">
             Agents
           </Link>
+          <Link href="/port" className="hover:text-white">
+            ArcPort
+          </Link>
           <Link href="/otc" className="hover:text-white">
             Arc OTC
           </Link>

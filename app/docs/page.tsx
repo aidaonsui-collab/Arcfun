@@ -4,7 +4,7 @@ import Link from 'next/link'
 export const metadata: Metadata = {
   title: 'Docs — Arcfun',
   description:
-    'Arcfun pair types, LP fee splits, Portfolio reflection claims, Instant OTC, and how Instant launches work on Arc.',
+    'Arcfun pair types, LP fee splits, ArcPort NFT launchpad, Portfolio reflection claims, Instant OTC, and how Instant launches work on Arc.',
 }
 
 const TOC = [
@@ -12,6 +12,7 @@ const TOC = [
   { href: '#launches', label: 'Launch types' },
   { href: '#fees', label: 'LP fees' },
   { href: '#portfolio', label: 'Portfolio' },
+  { href: '#port', label: 'ArcPort' },
   { href: '#otc', label: 'Arc OTC' },
   { href: '#agents', label: 'Agents' },
 ] as const
@@ -329,6 +330,36 @@ export default function DocsPage() {
             >
               Open Portfolio
             </Link>
+          </div>
+        </section>
+
+        {/* Port */}
+        <section id="port" className="scroll-mt-24 mt-14">
+          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">ArcPort</h2>
+          <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
+            NFT launchpad and marketplace on the same site as token launches.{' '}
+            <Link href="/port" className="text-lime-t font-semibold hover:text-white">
+              ArcPort
+            </Link>{' '}
+            is the marketplace. Create collection is the launchpad. You do not need to launch a
+            collection to run the pad.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <article className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
+              <h3 className="m-0 text-[17px] font-semibold tracking-tightish">Launchpad</h3>
+              <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
+                Any creator deploys an ERC-721 clone. Creation fee 0.1 native USDC (factory owner
+                free). Mint price is ERC-20 USDC (6dp). 95% of mint proceeds to the creator, 5%
+                to treasury. Royalty 0–10% (EIP-2981, honored on secondary later).
+              </p>
+            </article>
+            <article className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
+              <h3 className="m-0 text-[17px] font-semibold tracking-tightish">Marketplace</h3>
+              <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
+                Browse collections, mint from the sticky bar on phone. Secondary list / buy is
+                Seaport 1.6 (Phase 2) after live primary supply. Phase 1 is create + mint in USDC.
+              </p>
+            </article>
           </div>
         </section>
 
