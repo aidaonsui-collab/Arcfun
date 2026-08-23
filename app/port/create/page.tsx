@@ -451,7 +451,7 @@ export default function PortCreatePage() {
                 </Field>
                 <Field
                   label="Chain"
-                  hint="Collections on ArcPort live on Arc. You cannot switch later."
+                  hint="Collections on ArcStudio live on Arc. You cannot switch later."
                 >
                   <div className="flex h-12 max-w-sm items-center gap-2.5 rounded-full border border-hair bg-s2 px-3.5">
                     <BrandMark className="h-5 w-5" />
@@ -644,7 +644,7 @@ export default function PortCreatePage() {
           </div>
         )}
 
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-hair bg-[rgba(10,15,24,0.92)] backdrop-blur-xl">
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-hair bg-[rgba(10,15,24,0.92)] backdrop-blur-xl lg:left-[88px]">
           <div className="mx-auto flex max-w-[1280px] items-center justify-end gap-3 px-4 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] sm:px-8">
             <Link
               href="/port"

@@ -16,7 +16,7 @@ export function profileEditMessage(address: string, timestamp: number): string {
 
 export function collectionBannerEditMessage(collection: string, timestamp: number): string {
   return [
-    'ArcPort collection edit',
+    'ArcStudio collection edit',
     `Collection: ${getAddress(collection)}`,
     'Action: update-banner',
     `Timestamp: ${timestamp}`,

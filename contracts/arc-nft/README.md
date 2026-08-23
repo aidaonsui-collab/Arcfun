@@ -1,4 +1,4 @@
-# ArcPort NFT launchpad
+# ArcStudio NFT launchpad
 
 Phase 1 contracts for [arcfun](https://arcfun.co) NFT collections on Arc (5042).
 
@@ -19,7 +19,7 @@ Live on Arc mainnet (5042), owner `0x26bD491560b5175ee8bD1DA4998Fe260FfC413c9`:
 
 App reads `ARC.NFT_FACTORY` (`NEXT_PUBLIC_ARCPORT_FACTORY` override). Secondary marketplace is Seaport 1.6 later.
 
-Owner can drop a collection from ArcPort without deleting the 721:
+Owner can drop a collection from ArcStudio without deleting the 721:
 
 ```bash
 cast send $ARCPORT_FACTORY "setHidden(address,bool)" $COLLECTION true --rpc-url $ARC_RPC --private-key $ARCPORT_OWNER_KEY

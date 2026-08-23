@@ -62,7 +62,7 @@ export function PortStudio() {
         </Link>
         <p className="mt-4 text-[14px] leading-relaxed text-t2">
           Publish a 721 on Arc. Set supply, price, and royalty. Items mint in USDC and show on
-          ArcPort as they land.
+          ArcStudio as they land.
         </p>
         <ul className="mt-5 space-y-2.5">
           {POINTS.map(({ icon: Icon, text }) => (

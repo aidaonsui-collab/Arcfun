@@ -1,8 +1,8 @@
 'use client'
 
 /**
- * Sticky nav — brand mark, search, ArcPort, OTC, wallet chip.
- * On /port: Create CTA. Mobile: Home, ArcPort, Portfolio, Profile, Arc OTC, Docs.
+ * Sticky nav — brand mark, search, ArcStudio, OTC, wallet chip.
+ * Mobile: Home, ArcStudio, Create collection, Portfolio, Profile, Arc OTC, Docs.
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -127,7 +127,7 @@ export function SiteHeader() {
               : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
           }`}
         >
-          ArcPort
+          ArcStudio
         </Link>
 
         <Link
@@ -136,15 +136,6 @@ export function SiteHeader() {
         >
           Arc OTC
         </Link>
-
-        {onPort ? (
-          <Link
-            href="/port/create"
-            className="hidden sm:inline-flex h-9 items-center rounded-xl bg-lime px-3.5 text-sm font-semibold text-white hover:bg-lime-2 hover:text-white"
-          >
-            Create
-          </Link>
-        ) : null}
 
         {isConnected && address ? (
           <div className="flex items-center gap-2">
@@ -245,7 +236,7 @@ export function SiteHeader() {
             </form>
 
             {navLink('/', 'Home')}
-            {navLink('/port', 'ArcPort')}
+            {navLink('/port', 'ArcStudio')}
             {navLink('/port/create', 'Create collection')}
             {navLink('/portfolio', 'Portfolio')}
             {isConnected && address ? (

@@ -2,7 +2,7 @@ import { CollectionCard } from '@/components/port/CollectionCard'
 import { PortHow, PortStudio } from '@/components/port/PortStudio'
 import { listCollections } from '@/lib/port/catalog'
 
-export const metadata = { title: 'ArcPort — Arcfun' }
+export const metadata = { title: 'ArcStudio — Arcfun' }
 export const dynamic = 'force-dynamic'
 
 export default async function PortHome({

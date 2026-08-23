@@ -11,7 +11,7 @@ export async function generateMetadata({
 }) {
   const { address } = await Promise.resolve(params)
   const collection = await getCollection(address)
-  return { title: collection ? `${collection.name} — ArcPort` : 'ArcPort — Arcfun' }
+  return { title: collection ? `${collection.name} — ArcStudio` : 'ArcStudio — Arcfun' }
 }
 
 export default async function CollectionPage({
@@ -25,12 +25,12 @@ export default async function CollectionPage({
     return (
       <main className="min-h-screen pt-32 pb-20 text-center text-white">
         <h1 className="text-[32px] font-semibold tracking-display">Collection not found</h1>
-        <p className="mt-2 text-t3">This address isn’t on ArcPort.</p>
+        <p className="mt-2 text-t3">This address isn’t on ArcStudio.</p>
         <Link
           href="/port"
           className="mt-6 inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime text-[16px] font-bold text-white hover:text-white"
         >
-          Back to ArcPort
+          Back to ArcStudio
         </Link>
       </main>
     )

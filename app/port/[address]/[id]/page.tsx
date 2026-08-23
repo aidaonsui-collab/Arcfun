@@ -13,7 +13,7 @@ export async function generateMetadata({
   const collection = await getCollection(address)
   const item = await getItem(address, Number(id))
   return {
-    title: item && collection ? `${item.name} — ArcPort` : 'ArcPort — Arcfun',
+    title: item && collection ? `${item.name} — ArcStudio` : 'ArcStudio — Arcfun',
   }
 }
 

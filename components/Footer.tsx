@@ -13,7 +13,7 @@ export function Footer() {
             Agents
           </Link>
           <Link href="/port" className="hover:text-white">
-            ArcPort
+            ArcStudio
           </Link>
           <Link href="/otc" className="hover:text-white">
             Arc OTC

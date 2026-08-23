@@ -348,7 +348,7 @@ export const ARC = {
   BPS_SOURCE: (process.env.NEXT_PUBLIC_ARC_BPS_SOURCE ??
     '0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE') as Address,
 
-  /** ArcPort NFT factory (UUPS proxy, Deploy.s.sol 2026-08-23 on 5042). */
+  /** ArcStudio NFT factory (UUPS proxy, Deploy.s.sol 2026-08-23 on 5042). */
   NFT_FACTORY: envAddr(
     process.env.NEXT_PUBLIC_ARCPORT_FACTORY,
     '0x0b7aD72020BDF5efECac11890DA8646f1339307e',

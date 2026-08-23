@@ -42,7 +42,7 @@ export async function PUT(
       args: [collection as Address],
     })
     if (!ok) {
-      return NextResponse.json({ ok: false, error: 'not an ArcPort collection' }, { status: 404 })
+      return NextResponse.json({ ok: false, error: 'not an ArcStudio collection' }, { status: 404 })
     }
     owner = (await client.readContract({
       address: collection as Address,

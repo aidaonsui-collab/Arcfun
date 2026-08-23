@@ -4,7 +4,7 @@ import Link from 'next/link'
 export const metadata: Metadata = {
   title: 'Docs — Arcfun',
   description:
-    'Arcfun pair types, LP fee splits, ArcPort NFT launchpad, Portfolio reflection claims, Instant OTC, and how Instant launches work on Arc.',
+    'Arcfun pair types, LP fee splits, ArcStudio NFT launchpad, Portfolio reflection claims, Instant OTC, and how Instant launches work on Arc.',
 }
 
 const TOC = [
@@ -12,7 +12,7 @@ const TOC = [
   { href: '#launches', label: 'Launch types' },
   { href: '#fees', label: 'LP fees' },
   { href: '#portfolio', label: 'Portfolio' },
-  { href: '#port', label: 'ArcPort' },
+  { href: '#port', label: 'ArcStudio' },
   { href: '#otc', label: 'Arc OTC' },
   { href: '#agents', label: 'Agents' },
 ] as const
@@ -335,11 +335,11 @@ export default function DocsPage() {
 
         {/* Port */}
         <section id="port" className="scroll-mt-24 mt-14">
-          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">ArcPort</h2>
+          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">ArcStudio</h2>
           <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
             NFT launchpad and marketplace on the same site as token launches.{' '}
             <Link href="/port" className="text-lime-t font-semibold hover:text-white">
-              ArcPort
+              ArcStudio
             </Link>{' '}
             is the marketplace. Create collection is the launchpad. You do not need to launch a
             collection to run the pad.
