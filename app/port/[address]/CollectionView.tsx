@@ -100,7 +100,7 @@ export function CollectionView({
             <button
               type="button"
               onClick={() => setBannerEdit(true)}
-              className="absolute bottom-3 right-3 inline-flex h-9 items-center gap-1.5 rounded-full border border-hair bg-[rgba(10,15,24,0.78)] px-3 text-[13px] font-semibold text-white backdrop-blur-md hover:border-lime-line"
+              className="absolute bottom-3 right-3 z-20 inline-flex h-9 items-center gap-1.5 rounded-full border border-hair bg-[rgba(10,15,24,0.78)] px-3 text-[13px] font-semibold text-white backdrop-blur-md hover:border-lime-line"
             >
               <Pencil className="h-3.5 w-3.5" />
               {banner ? 'Edit banner' : 'Add banner'}
@@ -109,14 +109,14 @@ export function CollectionView({
         </div>
       </div>
       <div className="mx-auto w-full max-w-desk px-4 pb-28 sm:px-10 lg:pb-16">
-        <div className="rise-in-2 -mt-8 flex items-end gap-4 sm:-mt-10">
+        <div className="rise-in-2 pointer-events-none relative z-10 -mt-8 flex items-end gap-4 sm:-mt-10">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={collection.image}
             alt=""
-            className="h-20 w-20 rounded-2xl object-cover shadow-[0_0_0_1px_rgba(255,255,255,0.08)] sm:h-24 sm:w-24"
+            className="pointer-events-auto h-20 w-20 rounded-2xl object-cover shadow-[0_0_0_1px_rgba(255,255,255,0.08)] sm:h-24 sm:w-24"
           />
-          <div className="min-w-0 pb-1">
+          <div className="pointer-events-auto min-w-0 pb-1">
             <h1 className="flex min-w-0 items-center gap-2.5 text-[28px] font-semibold tracking-display sm:text-[40px]">
               <span className="truncate">{collection.name}</span>
               {collection.originToken ? (
