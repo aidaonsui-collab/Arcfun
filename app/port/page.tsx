@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { CollectionCard } from '@/components/port/CollectionCard'
 import { PortHow, PortStudio } from '@/components/port/PortStudio'
 import { listCollections } from '@/lib/port/catalog'
@@ -25,37 +24,38 @@ export default async function PortHome({
     : collections
 
   const searching = Boolean(q)
+  const empty = list.length === 0
 
   return (
     <main className="relative min-h-screen overflow-hidden pb-20 pt-16 text-white">
       <div aria-hidden="true" className="hero-grid-fade" />
       <div className="relative z-10 mx-auto w-full max-w-desk px-4 sm:px-10">
-        {!searching ? <PortStudio /> : null}
-
         {searching ? (
-          <div className="rise-in flex items-end justify-between gap-4 pb-8 pt-8 sm:pt-12">
+          <div className="rise-in flex items-end justify-between gap-4 pb-6 pt-8 sm:pt-10">
             <div className="min-w-0">
-              <h1 className="text-[32px] font-semibold leading-[1.05] tracking-display sm:text-[40px]">
+              <h1 className="text-[28px] font-semibold leading-[1.1] tracking-display sm:text-[32px]">
                 Search
               </h1>
-              <p className="mt-2 text-[15px] text-t3">Results for “{q}”</p>
+              <p className="mt-1.5 text-[15px] text-t3">Results for “{q}”</p>
             </div>
           </div>
-        ) : list.length > 0 ? (
-          <div className="mt-10 flex items-end justify-between gap-4">
-            <h2 className="text-[21px] font-semibold tracking-tightish">Collections</h2>
-            <Link
-              href="/port/create"
-              className="text-[13px] font-semibold text-t3 hover:text-white"
-            >
-              Create
-            </Link>
-          </div>
+        ) : empty ? (
+          <>
+            <PortStudio />
+            <PortHow />
+          </>
         ) : (
-          <PortHow />
+          <div className="rise-in flex items-end justify-between gap-4 pb-5 pt-8 sm:pt-10">
+            <div className="min-w-0">
+              <h1 className="text-[28px] font-semibold leading-[1.1] tracking-display sm:text-[32px]">
+                All collections
+              </h1>
+              <p className="mt-1.5 text-[15px] text-t2">Live on Arc. Mint in USDC.</p>
+            </div>
+          </div>
         )}
 
-        {list.length === 0 ? (
+        {empty ? (
           searching ? (
             <div className="mt-2 rounded-[24px] border border-hair bg-s1 px-6 py-16 text-center">
               <p className="text-[17px] font-semibold tracking-tightish">No collections for “{q}”</p>
@@ -63,11 +63,7 @@ export default async function PortHome({
             </div>
           ) : null
         ) : (
-          <div
-            className={`grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 ${
-              searching ? '' : 'mt-5'
-            }`}
-          >
+          <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
             {list.map((c) => (
               <CollectionCard key={c.address} collection={c} />
             ))}
