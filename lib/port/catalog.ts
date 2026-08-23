@@ -1,4 +1,4 @@
-import { formatUnits, type Address } from 'viem'
+import { erc20Abi, formatUnits, type Address } from 'viem'
 import { ARC, arcPublicClient } from '@/lib/contracts-arc'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { PORT_FACTORY_ABI, PORT_NFT_ABI } from './abi'
@@ -20,7 +20,15 @@ async function loadOne(
 ): Promise<Collection | null> {
   const client = arcPublicClient()
   try {
-    const [name, symbol, owner, uri, maxSupply, maxPerWallet, price, minted, start, root, payout, royalty] =
+    const hidden = await client.readContract({
+      address: ARC.NFT_FACTORY,
+      abi: PORT_FACTORY_ABI,
+      functionName: 'hidden',
+      args: [address],
+    })
+    if (hidden) return null
+
+    const [name, symbol, owner, uri, maxSupply, maxPerWallet, price, minted, start, root, payout, royalty, origin] =
       await client.multicall({
         allowFailure: true,
         contracts: [
@@ -36,6 +44,7 @@ async function loadOne(
           { address, abi: PORT_NFT_ABI, functionName: 'allowlistRoot' },
           { address, abi: PORT_NFT_ABI, functionName: 'creatorPayout' },
           { address, abi: PORT_NFT_ABI, functionName: 'royaltyInfo', args: [1n, 10_000n] },
+          { address, abi: PORT_NFT_ABI, functionName: 'originToken' },
         ],
       })
 
@@ -48,6 +57,22 @@ async function loadOne(
     const overlay = meta ?? (await getPortCollectionMeta(address))
     const image = overlay?.imageUrl || imageOnchain
     const creator = (owner.status === 'success' ? String(owner.result) : '') || overlay?.creator || ''
+    const originRaw =
+      origin.status === 'success' ? String(origin.result) : overlay?.originToken || ''
+    const originToken =
+      originRaw && originRaw !== '0x0000000000000000000000000000000000000000' ? originRaw : undefined
+    let originSymbol: string | undefined
+    if (originToken) {
+      try {
+        originSymbol = await client.readContract({
+          address: originToken as Address,
+          abi: erc20Abi,
+          functionName: 'symbol',
+        })
+      } catch {
+        originSymbol = undefined
+      }
+    }
 
     return {
       address,
@@ -71,6 +96,8 @@ async function loadOne(
       twitter: overlay?.twitter,
       telegram: overlay?.telegram,
       website: overlay?.website,
+      originToken,
+      originSymbol,
     }
   } catch {
     return null

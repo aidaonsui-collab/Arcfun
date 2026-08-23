@@ -12,6 +12,7 @@ export type PortCollectionMeta = {
   telegram?: string
   website?: string
   creator?: string
+  originToken?: string
 }
 
 export async function setPortCollectionMeta(address: string, meta: PortCollectionMeta) {

@@ -9,6 +9,7 @@ import { ChevronLeft, Rocket } from 'lucide-react'
 import { CREATE_FEE_USDC } from '@/lib/port/types'
 import { formatUsdc } from '@/lib/port/format'
 import { ImageUpload } from '@/components/port/ImageUpload'
+import { OfficialBadge } from '@/components/port/OfficialBadge'
 import { BrandMark } from '@/components/BrandMark'
 import { PORT_FACTORY_ABI } from '@/lib/port/abi'
 import { arcPortEnabled, arcPortFactory } from '@/lib/port/contracts'
@@ -68,6 +69,15 @@ export default function PortCreatePage() {
   const [publicStart, setPublicStart] = useState(localDatetimeValue)
   const [allowlist, setAllowlist] = useState(false)
   const [royalty, setRoyalty] = useState(5)
+  const [originInput, setOriginInput] = useState('')
+  const [originInfo, setOriginInfo] = useState<{
+    token: string
+    name: string
+    symbol: string
+    creator: string
+    linkedCollection: string | null
+  } | null>(null)
+  const [originStatus, setOriginStatus] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [feeWei, setFeeWei] = useState<bigint | null>(null)
@@ -96,6 +106,69 @@ export default function PortCreatePage() {
     }
   }, [live, address, publicClient])
 
+  useEffect(() => {
+    const raw = originInput.trim()
+    if (!raw) {
+      setOriginInfo(null)
+      setOriginStatus('')
+      return
+    }
+    if (!isAddress(raw)) {
+      setOriginInfo(null)
+      setOriginStatus('')
+      return
+    }
+    let cancelled = false
+    setOriginStatus('Checking…')
+    const t = setTimeout(() => {
+      fetch(`/api/port/origin-token?token=${raw}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (cancelled) return
+          if (!d?.ok) {
+            setOriginInfo(null)
+            setOriginStatus('Not a live Instant or Reflection token on Arc.')
+            return
+          }
+          setOriginInfo({
+            token: d.token,
+            name: d.name,
+            symbol: d.symbol,
+            creator: d.creator,
+            linkedCollection: d.linkedCollection,
+          })
+          setName((n) => (n.trim() ? n : d.name || ''))
+          setSymbol((s) => (s.trim() ? s : String(d.symbol || '').toUpperCase().slice(0, 8)))
+          if (d.linkedCollection) {
+            setOriginStatus(`$${d.symbol} already has a linked collection.`)
+          } else {
+            setOriginStatus(`$${d.symbol} · creator ${d.creator.slice(0, 6)}…${d.creator.slice(-4)}`)
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setOriginInfo(null)
+            setOriginStatus('Could not look up that token.')
+          }
+        })
+    }, 400)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [originInput])
+
+  function originBlocked(): string | null {
+    const raw = originInput.trim()
+    if (!raw) return null
+    if (!isAddress(raw) || !originInfo) return 'Token is not a live Instant or Reflection launch.'
+    if (originInfo.linkedCollection) return `$${originInfo.symbol} already has a linked collection.`
+    if (address && originInfo.creator.toLowerCase() !== address.toLowerCase()) {
+      return `Only the creator of $${originInfo.symbol} can link this collection.`
+    }
+    return null
+  }
+
   function goMintSettings() {
     setError('')
     if (!imageFile && !image) {
@@ -108,6 +181,11 @@ export default function PortCreatePage() {
     }
     if (symbol.trim().length < 2) {
       setError('Symbol needs at least 2 characters')
+      return
+    }
+    const blocked = originBlocked()
+    if (blocked) {
+      setError(blocked)
       return
     }
     setStep(2)
@@ -145,6 +223,11 @@ export default function PortCreatePage() {
     }
     if (creatorWallet.trim() && !isAddress(creatorWallet.trim())) {
       setError('Creator rewards wallet must be a valid 0x address (or leave blank)')
+      return
+    }
+    const blocked = originBlocked()
+    if (blocked) {
+      setError(blocked)
       return
     }
     setBusy(true)
@@ -190,6 +273,7 @@ export default function PortCreatePage() {
             allowlistRoot: '0x0000000000000000000000000000000000000000000000000000000000000000',
             royaltyBps: BigInt(royalty * 100),
             creatorRewardsWallet: payout,
+            originToken: (originInfo?.token as Address) || zeroAddress,
           },
         ],
         value: due > 0n ? due : undefined,
@@ -217,6 +301,7 @@ export default function PortCreatePage() {
           telegram: telegram.trim(),
           website: website.trim(),
           creator: address,
+          originToken: originInfo?.token,
         }),
       }).catch(() => null)
       router.push(`/port/${collection}`)
@@ -347,6 +432,36 @@ export default function PortCreatePage() {
                     <BrandMark className="h-5 w-5" />
                     <span className="text-[15px] font-semibold">Arc</span>
                   </div>
+                </Field>
+                <Field
+                  label="Link a live token"
+                  hint="Optional. Only the Instant/Reflection token creator can bind a collection. Stops copycats minting under someone else's ticker."
+                >
+                  <input
+                    value={originInput}
+                    onChange={(e) => setOriginInput(e.target.value.trim())}
+                    placeholder="0x… token address"
+                    className={inputClass}
+                  />
+                  {originStatus ? (
+                    <span
+                      className={`mt-1.5 flex items-center gap-1.5 text-[13px] ${
+                        originInfo &&
+                        !originInfo.linkedCollection &&
+                        (!address || originInfo.creator.toLowerCase() === address.toLowerCase())
+                          ? 'text-[#e2b340]'
+                          : 'text-t3'
+                      }`}
+                    >
+                      {originInfo &&
+                      !originInfo.linkedCollection &&
+                      (!address || originInfo.creator.toLowerCase() === address.toLowerCase()) ? (
+                        <OfficialBadge symbol={originInfo.symbol} size="sm" />
+                      ) : (
+                        originStatus
+                      )}
+                    </span>
+                  ) : null}
                 </Field>
               </div>
               {error ? <p className="mt-6 max-w-xl text-[13px] text-coral">{error}</p> : null}

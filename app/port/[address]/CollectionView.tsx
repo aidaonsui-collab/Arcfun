@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { SlidersHorizontal } from 'lucide-react'
 import { CreatorChip } from '@/components/port/CreatorChip'
+import { OfficialBadge } from '@/components/port/OfficialBadge'
 import { NftCard } from '@/components/port/NftCard'
 import { Price } from '@/components/port/Price'
 import { RoyaltyLine } from '@/components/port/RoyaltyLine'
@@ -100,12 +101,26 @@ export function CollectionView({
             className="h-20 w-20 rounded-2xl object-cover shadow-[0_0_0_1px_rgba(255,255,255,0.08)] sm:h-24 sm:w-24"
           />
           <div className="min-w-0 pb-1">
-            <h1 className="truncate text-[28px] font-semibold tracking-display sm:text-[40px]">
-              {collection.name}
+            <h1 className="flex min-w-0 items-center gap-2.5 text-[28px] font-semibold tracking-display sm:text-[40px]">
+              <span className="truncate">{collection.name}</span>
+              {collection.originToken ? (
+                <OfficialBadge
+                  symbol={collection.originSymbol}
+                  href={`/token/${collection.originToken}`}
+                  size="md"
+                  label={false}
+                />
+              ) : null}
             </h1>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <CreatorChip address={collection.creator} name={collection.creatorName} />
               <RoyaltyLine royalty={collection.royalty} />
+              {collection.originToken ? (
+                <OfficialBadge
+                  symbol={collection.originSymbol}
+                  href={`/token/${collection.originToken}`}
+                />
+              ) : null}
             </div>
           </div>
         </div>

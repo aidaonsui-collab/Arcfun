@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { collectionStatus, type Collection } from '@/lib/port/types'
 import { formatInt } from '@/lib/port/format'
 import { Price } from './Price'
+import { OfficialBadge } from './OfficialBadge'
 
 export function CollectionCard({ collection }: { collection: Collection }) {
   const status = collectionStatus(collection)
@@ -20,7 +21,12 @@ export function CollectionCard({ collection }: { collection: Collection }) {
       </div>
       <div className="mt-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-[15px] font-semibold tracking-tightish">{collection.name}</div>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <div className="truncate text-[15px] font-semibold tracking-tightish">{collection.name}</div>
+            {collection.originToken ? (
+              <OfficialBadge symbol={collection.originSymbol} size="sm" label={false} />
+            ) : null}
+          </div>
           <div className="mt-0.5 text-[13px] tabular-nums text-t3">
             {formatInt(collection.minted)} / {formatInt(collection.maxSupply)}
           </div>

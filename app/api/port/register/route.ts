@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
     telegram?: string
     website?: string
     creator?: string
+    originToken?: string
   }
 
   const address = body.address
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
       telegram: body.telegram?.trim() || undefined,
       website: body.website?.trim() || undefined,
       creator: body.creator,
+      originToken: body.originToken,
     })
   } catch {
     /* kv best-effort */

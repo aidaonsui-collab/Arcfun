@@ -12,6 +12,7 @@ contract ArcNftTest is Test {
     ArcNftCollectionFactory factory;
     ArcNft721 implementation;
     MockUSDC usdc;
+    MockInstant instant;
 
     address owner = makeAddr("owner");
     address treasury = makeAddr("treasury");
@@ -27,9 +28,11 @@ contract ArcNftTest is Test {
         usdc = new MockUSDC();
         implementation = new ArcNft721();
 
+        instant = new MockInstant();
         ArcNftCollectionFactory impl = new ArcNftCollectionFactory();
         bytes memory data = abi.encodeCall(
-            ArcNftCollectionFactory.initialize, (owner, treasury, address(usdc), address(implementation), CREATION_FEE)
+            ArcNftCollectionFactory.initialize,
+            (owner, treasury, address(usdc), address(implementation), CREATION_FEE, address(instant), address(0))
         );
         factory = ArcNftCollectionFactory(address(new ERC1967Proxy(address(impl), data)));
 
@@ -38,6 +41,7 @@ contract ArcNftTest is Test {
         vm.deal(creator, 10 ether);
         vm.deal(owner, 10 ether);
         vm.deal(alice, 1 ether);
+        vm.deal(bob, 10 ether);
     }
 
     function _params() internal view returns (ArcNftCollectionFactory.CreateParams memory p) {
@@ -55,7 +59,8 @@ contract ArcNftTest is Test {
             allowlistMintEnd: uint64(block.timestamp + 1 days),
             allowlistRoot: bytes32(0),
             royaltyBps: 500,
-            creatorRewardsWallet: payout
+            creatorRewardsWallet: payout,
+            originToken: address(0)
         });
     }
 
@@ -232,5 +237,84 @@ contract ArcNftTest is Test {
         col.mint(1);
         assertEq(col.ownerOf(1), alice);
         assertEq(usdc.balanceOf(payout), 0);
+    }
+
+    function test_originToken_onlyCreator_oneCollection() public {
+        address eve = makeAddr("eveToken");
+        address pool = makeAddr("pool");
+        instant.set(eve, creator, pool);
+
+        ArcNftCollectionFactory.CreateParams memory p = _params();
+        p.originToken = eve;
+        p.publicMintStart = uint64(block.timestamp);
+
+        vm.prank(bob);
+        vm.expectRevert(ArcNftCollectionFactory.NotTokenCreator.selector);
+        factory.createCollection{value: CREATION_FEE}(p);
+
+        vm.prank(creator);
+        ArcNft721 col = ArcNft721(factory.createCollection{value: CREATION_FEE}(p));
+        assertEq(col.originToken(), eve);
+        assertEq(factory.originTokenOf(address(col)), eve);
+        assertEq(factory.collectionOfToken(eve), address(col));
+        assertEq(factory.tokenCreator(eve), creator);
+
+        vm.prank(creator);
+        vm.expectRevert(ArcNftCollectionFactory.TokenAlreadyLinked.selector);
+        factory.createCollection{value: CREATION_FEE}(p);
+
+        p.originToken = makeAddr("unknown");
+        vm.prank(creator);
+        vm.expectRevert(ArcNftCollectionFactory.UnknownToken.selector);
+        factory.createCollection{value: CREATION_FEE}(p);
+    }
+
+    function test_setHidden_ownerOnly_freesOrigin() public {
+        address eve = makeAddr("eveToken");
+        instant.set(eve, creator, makeAddr("pool"));
+        ArcNftCollectionFactory.CreateParams memory p = _params();
+        p.originToken = eve;
+        vm.prank(creator);
+        ArcNft721 col = ArcNft721(factory.createCollection{value: CREATION_FEE}(p));
+
+        vm.prank(creator);
+        vm.expectRevert();
+        factory.setHidden(address(col), true);
+
+        vm.prank(owner);
+        factory.setHidden(address(col), true);
+        assertTrue(factory.hidden(address(col)));
+        assertEq(factory.collectionOfToken(eve), address(0));
+
+        vm.prank(creator);
+        ArcNft721 col2 = ArcNft721(factory.createCollection{value: CREATION_FEE}(p));
+        assertEq(factory.collectionOfToken(eve), address(col2));
+
+        vm.prank(owner);
+        factory.setHidden(address(col), false);
+        assertFalse(factory.hidden(address(col)));
+        // origin already taken by col2
+        assertEq(factory.collectionOfToken(eve), address(col2));
+    }
+}
+
+contract MockInstant {
+    struct Pool {
+        address creator;
+        address uniPool;
+        uint256 positionId;
+        uint128 liquidity;
+        int24 tickLower;
+        int24 tickUpper;
+    }
+
+    mapping(address => Pool) internal _pools;
+
+    function set(address token, address creator, address uniPool) external {
+        _pools[token] = Pool(creator, uniPool, 1, 1, 0, 0);
+    }
+
+    function getPool(address token) external view returns (Pool memory) {
+        return _pools[token];
     }
 }

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useAccount } from 'wagmi'
 import { CreatorChip } from '@/components/port/CreatorChip'
+import { OfficialBadge } from '@/components/port/OfficialBadge'
 import { Price } from '@/components/port/Price'
 import { RoyaltyLine } from '@/components/port/RoyaltyLine'
 import { StickyMintBar } from '@/components/port/StickyMintBar'
@@ -38,9 +39,12 @@ export function ItemView({ collection, item }: { collection: Collection; item: N
           <div className="rise-in-2">
             <Link
               href={`/port/${collection.address}`}
-              className="text-[13px] font-medium text-t3 hover:text-t2"
+              className="inline-flex items-center gap-1.5 text-[13px] font-medium text-t3 hover:text-t2"
             >
               {collection.name}
+              {collection.originToken ? (
+                <OfficialBadge symbol={collection.originSymbol} size="sm" label={false} />
+              ) : null}
             </Link>
             <h1 className="mt-2 text-[32px] font-semibold tracking-display sm:text-[40px]">
               {item.name}
@@ -48,6 +52,12 @@ export function ItemView({ collection, item }: { collection: Collection; item: N
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <CreatorChip address={item.owner} name={you ? 'You' : undefined} />
               <RoyaltyLine royalty={collection.royalty} />
+              {collection.originToken ? (
+                <OfficialBadge
+                  symbol={collection.originSymbol}
+                  href={`/token/${collection.originToken}`}
+                />
+              ) : null}
             </div>
             <div className="mt-6">
               <div className="text-[13px] text-t3">Mint price</div>

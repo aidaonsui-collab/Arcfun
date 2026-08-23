@@ -22,6 +22,8 @@ export type Collection = {
   twitter?: string
   telegram?: string
   website?: string
+  originToken?: string
+  originSymbol?: string
 }
 
 export type NftItem = {

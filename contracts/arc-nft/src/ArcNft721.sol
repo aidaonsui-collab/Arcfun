@@ -49,12 +49,15 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
         address treasury;
         address usdc;
         address factory;
+        address originToken;
     }
 
     address public factory;
     address public creatorPayout;
     address public treasury;
     IERC20 public usdc;
+    /// @notice Instant/Reflection token this collection is bound to. Zero if unbound.
+    address public originToken;
 
     uint256 public maxSupply;
     uint256 public maxPerWallet;
@@ -98,6 +101,7 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
         creatorPayout = c.creatorPayout;
         treasury = c.treasury;
         usdc = IERC20(c.usdc);
+        originToken = c.originToken;
 
         maxSupply = c.maxSupply;
         maxPerWallet = c.maxPerWallet;
