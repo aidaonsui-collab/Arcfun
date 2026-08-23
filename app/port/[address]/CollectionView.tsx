@@ -1,8 +1,8 @@
 'use client'
 
 import { useMemo, useState, type ReactNode } from 'react'
-import Link from 'next/link'
-import { SlidersHorizontal } from 'lucide-react'
+import { useAccount } from 'wagmi'
+import { Pencil, SlidersHorizontal } from 'lucide-react'
 import { CreatorChip } from '@/components/port/CreatorChip'
 import { OfficialBadge } from '@/components/port/OfficialBadge'
 import { NftCard } from '@/components/port/NftCard'
@@ -11,6 +11,7 @@ import { RoyaltyLine } from '@/components/port/RoyaltyLine'
 import { StickyMintBar } from '@/components/port/StickyMintBar'
 import { MintSheet } from '@/components/port/MintSheet'
 import { PortSheet } from '@/components/port/PortSheet'
+import { EditBannerSheet } from '@/components/port/EditBannerSheet'
 import { collectionStatus, type Collection, type NftItem } from '@/lib/port/types'
 import { formatInt, timeUntil } from '@/lib/port/format'
 import { cn } from '@/lib/cn'
@@ -22,10 +23,15 @@ export function CollectionView({
   collection: Collection
   items: NftItem[]
 }) {
+  const { address } = useAccount()
   const [trait, setTrait] = useState<string | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [showAll, setShowAll] = useState(false)
   const [mintOpen, setMintOpen] = useState(false)
+  const [bannerEdit, setBannerEdit] = useState(false)
+  const [banner, setBanner] = useState(collection.banner)
+  const isCreator =
+    !!address && collection.creator && address.toLowerCase() === collection.creator.toLowerCase()
 
   const traits = useMemo(() => {
     const map = new Map<string, number>()
@@ -83,13 +89,23 @@ export function CollectionView({
   return (
     <>
       <div className="relative">
-        <div className="aspect-video w-full overflow-hidden bg-s1 sm:mx-auto sm:mt-6 sm:max-w-desk sm:rounded-[28px]">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={collection.banner || collection.image}
-            alt=""
-            className="h-full w-full object-cover rise-in"
-          />
+        <div className="relative h-[180px] w-full overflow-hidden bg-s1 sm:mx-auto sm:mt-6 sm:h-[220px] sm:max-w-desk sm:rounded-[28px] lg:h-[280px]">
+          {banner ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={banner} alt="" className="h-full w-full object-cover rise-in" />
+          ) : (
+            <div className="h-full w-full bg-[radial-gradient(ellipse_at_top,rgba(47,132,219,0.18),transparent_60%)]" />
+          )}
+          {isCreator ? (
+            <button
+              type="button"
+              onClick={() => setBannerEdit(true)}
+              className="absolute bottom-3 right-3 inline-flex h-9 items-center gap-1.5 rounded-full border border-hair bg-[rgba(10,15,24,0.78)] px-3 text-[13px] font-semibold text-white backdrop-blur-md hover:border-lime-line"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              {banner ? 'Edit banner' : 'Add banner'}
+            </button>
+          ) : null}
         </div>
       </div>
       <div className="mx-auto w-full max-w-desk px-4 pb-28 sm:px-10 lg:pb-16">
@@ -204,6 +220,16 @@ export function CollectionView({
       </div>
       <StickyMintBar collection={collection} onMint={() => setMintOpen(true)} />
       <MintSheet collection={collection} open={mintOpen} onClose={() => setMintOpen(false)} />
+      <EditBannerSheet
+        collection={collection.address}
+        currentBanner={banner}
+        open={bannerEdit}
+        onClose={() => setBannerEdit(false)}
+        onSaved={(url) => {
+          setBanner(url)
+          setBannerEdit(false)
+        }}
+      />
       <PortSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} title="Traits">
         {filterBody}
       </PortSheet>

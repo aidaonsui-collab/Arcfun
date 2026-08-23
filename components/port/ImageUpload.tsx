@@ -7,20 +7,23 @@ import { cn } from '@/lib/cn'
 export function ImageUpload({
   value,
   onChange,
+  onClear,
   label = 'Collection image',
   hint = '1000 × 1000 · JPG, PNG, WEBP',
   variant = 'tile',
 }: {
   value: string
   onChange: (src: string, file?: File) => void
+  onClear?: () => void
   label?: string
   hint?: string
-  variant?: 'tile' | 'hero'
+  variant?: 'tile' | 'hero' | 'banner'
 }) {
   const ref = useRef<HTMLInputElement>(null)
   const [err, setErr] = useState('')
   const [over, setOver] = useState(false)
   const hero = variant === 'hero'
+  const banner = variant === 'banner'
 
   function onFile(file?: File) {
     if (!file) return
@@ -40,7 +43,7 @@ export function ImageUpload({
   }
 
   return (
-    <div className={hero ? 'flex h-full min-h-[280px] flex-col' : ''}>
+    <div className={hero ? 'flex h-full min-h-[220px] flex-col' : ''}>
       <span className="mb-2 block text-[13px] font-medium text-t2">{label}</span>
       <button
         type="button"
@@ -54,8 +57,10 @@ export function ImageUpload({
         className={cn(
           'relative overflow-hidden rounded-[20px] border border-dashed text-t3 transition-colors',
           hero
-            ? 'flex min-h-[280px] flex-1 w-full items-center justify-center bg-s1 sm:min-h-[420px]'
-            : 'flex aspect-square w-full max-w-[220px] items-center justify-center bg-s2',
+            ? 'flex min-h-[220px] flex-1 w-full items-center justify-center bg-s1 sm:min-h-[300px]'
+            : banner
+              ? 'flex aspect-[3/1] w-full items-center justify-center bg-s1'
+              : 'flex aspect-square w-full max-w-[220px] items-center justify-center bg-s2',
           over ? 'border-lime-line bg-s2' : 'border-hair hover:border-lime-line',
         )}
       >
@@ -82,6 +87,15 @@ export function ImageUpload({
         className="hidden"
         onChange={(e) => onFile(e.target.files?.[0])}
       />
+      {value && onClear ? (
+        <button
+          type="button"
+          onClick={onClear}
+          className="mt-1.5 text-[13px] font-medium text-t3 hover:text-white"
+        >
+          Remove
+        </button>
+      ) : null}
       {err ? <p className="mt-1.5 text-[13px] text-coral">{err}</p> : null}
     </div>
   )

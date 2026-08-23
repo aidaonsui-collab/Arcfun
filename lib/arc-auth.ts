@@ -14,6 +14,15 @@ export function profileEditMessage(address: string, timestamp: number): string {
   ].join('\n')
 }
 
+export function collectionBannerEditMessage(collection: string, timestamp: number): string {
+  return [
+    'ArcPort collection edit',
+    `Collection: ${getAddress(collection)}`,
+    'Action: update-banner',
+    `Timestamp: ${timestamp}`,
+  ].join('\n')
+}
+
 export function followMessage(
   follower: string,
   target: string,

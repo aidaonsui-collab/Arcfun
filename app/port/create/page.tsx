@@ -56,6 +56,8 @@ export default function PortCreatePage() {
   const [step, setStep] = useState<1 | 2>(1)
   const [image, setImage] = useState('')
   const [imageFile, setImageFile] = useState<File | null>(null)
+  const [banner, setBanner] = useState('')
+  const [bannerFile, setBannerFile] = useState<File | null>(null)
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
   const [description, setDescription] = useState('')
@@ -236,6 +238,10 @@ export default function PortCreatePage() {
       if (imageFile) {
         imageUrl = await uploadImageToCloudinary(imageFile, 'port')
       }
+      let bannerUrl = ''
+      if (bannerFile) {
+        bannerUrl = await uploadImageToCloudinary(bannerFile, 'port')
+      }
       const start = publicStart
         ? Math.floor(new Date(publicStart).getTime() / 1000)
         : Math.floor(Date.now() / 1000)
@@ -297,6 +303,7 @@ export default function PortCreatePage() {
           symbol: symbol.trim().toUpperCase(),
           description: description.trim(),
           imageUrl,
+          bannerUrl: bannerUrl || undefined,
           twitter: twitter.trim(),
           telegram: telegram.trim(),
           website: website.trim(),
@@ -371,12 +378,30 @@ export default function PortCreatePage() {
             <div className="flex flex-col border-b border-hair p-5 pb-24 sm:p-8 lg:border-b-0 lg:border-r lg:pb-28">
               <ImageUpload
                 variant="hero"
+                label="Collection image"
+                hint="1000 × 1000 · JPG, PNG, WEBP"
                 value={image}
                 onChange={(src, file) => {
                   setImage(src)
                   setImageFile(file ?? null)
                 }}
               />
+              <div className="mt-5">
+                <ImageUpload
+                  variant="banner"
+                  label="Banner"
+                  hint="Optional · 1500 × 500 · JPG, PNG, WEBP"
+                  value={banner}
+                  onChange={(src, file) => {
+                    setBanner(src)
+                    setBannerFile(file ?? null)
+                  }}
+                  onClear={() => {
+                    setBanner('')
+                    setBannerFile(null)
+                  }}
+                />
+              </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-hair bg-s2 px-2.5 text-[11px] font-semibold tracking-wide text-t2">
                   <BrandMark className="h-3.5 w-3.5" />
@@ -471,6 +496,12 @@ export default function PortCreatePage() {
           <div className="mx-auto grid max-w-[1280px] lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
             <div className="hidden border-r border-hair p-8 lg:block">
               <div className="overflow-hidden rounded-[20px] border border-hair bg-s1">
+                {banner ? (
+                  <div className="aspect-[3/1] bg-s2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={banner} alt="" className="h-full w-full object-cover" />
+                  </div>
+                ) : null}
                 <div className="aspect-square bg-s2">
                   {image ? (
                     // eslint-disable-next-line @next/next/no-img-element

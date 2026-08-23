@@ -56,6 +56,8 @@ async function loadOne(
     const imageOnchain = uri.status === 'success' ? String(uri.result) : ''
     const overlay = meta ?? (await getPortCollectionMeta(address))
     const image = overlay?.imageUrl || imageOnchain
+    const bannerRaw = overlay?.bannerUrl || ''
+    const banner = bannerRaw && bannerRaw !== image ? bannerRaw : ''
     const creator = (owner.status === 'success' ? String(owner.result) : '') || overlay?.creator || ''
     const originRaw =
       origin.status === 'success' ? String(origin.result) : overlay?.originToken || ''
@@ -81,7 +83,7 @@ async function loadOne(
       symbol: overlay?.symbol || (symbol.status === 'success' ? String(symbol.result) : ''),
       description: overlay?.description || '',
       image,
-      banner: overlay?.bannerUrl || image,
+      banner,
       creator,
       creatorRewardsWallet:
         (payout.status === 'success' ? String(payout.result) : '') || creator,

@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
       symbol: body.symbol,
       description: body.description,
       imageUrl: body.imageUrl,
-      bannerUrl: body.bannerUrl || body.imageUrl,
+      bannerUrl: body.bannerUrl || undefined,
       twitter: body.twitter?.trim() || undefined,
       telegram: body.telegram?.trim() || undefined,
       website: body.website?.trim() || undefined,
