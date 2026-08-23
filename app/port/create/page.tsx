@@ -1,12 +1,15 @@
 'use client'
 
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAccount, useConnect, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi'
 import { isAddress, parseEventLogs, parseUnits, zeroAddress, type Address } from 'viem'
+import { ChevronLeft, Rocket } from 'lucide-react'
 import { CREATE_FEE_USDC } from '@/lib/port/types'
-import { formatUsdc, shortAddr } from '@/lib/port/format'
+import { formatUsdc } from '@/lib/port/format'
 import { ImageUpload } from '@/components/port/ImageUpload'
+import { BrandMark } from '@/components/BrandMark'
 import { PORT_FACTORY_ABI } from '@/lib/port/abi'
 import { arcPortEnabled, arcPortFactory } from '@/lib/port/contracts'
 import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
@@ -26,9 +29,9 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-[13px] font-medium text-t2">{label}</span>
+      <span className="mb-2 block text-[13px] font-medium text-white">{label}</span>
       {children}
-      {hint ? <span className="mt-1.5 block text-[13px] text-t3">{hint}</span> : null}
+      {hint ? <span className="mt-1.5 block text-[13px] leading-snug text-t3">{hint}</span> : null}
     </label>
   )
 }
@@ -49,6 +52,7 @@ export default function PortCreatePage() {
   const live = arcPortEnabled()
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
 
+  const [step, setStep] = useState<1 | 2>(1)
   const [image, setImage] = useState('')
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [name, setName] = useState('')
@@ -92,8 +96,24 @@ export default function PortCreatePage() {
     }
   }, [live, address, publicClient])
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
+  function goMintSettings() {
+    setError('')
+    if (!imageFile && !image) {
+      setError('Add a collection image')
+      return
+    }
+    if (name.trim().length < 2) {
+      setError('Name needs at least 2 characters')
+      return
+    }
+    if (symbol.trim().length < 2) {
+      setError('Symbol needs at least 2 characters')
+      return
+    }
+    setStep(2)
+  }
+
+  async function publish() {
     setError('')
     if (!isConnected) {
       const c = connectors[0]
@@ -105,19 +125,7 @@ export default function PortCreatePage() {
       return
     }
     if (!live) {
-      setError('Port factory is not deployed yet. Marketplace UI is live; create waits on that address.')
-      return
-    }
-    if (!imageFile && !image) {
-      setError('Add an image')
-      return
-    }
-    if (name.trim().length < 2) {
-      setError('Name needs at least 2 characters')
-      return
-    }
-    if (symbol.trim().length < 2) {
-      setError('Symbol needs at least 2 characters')
+      setError('Factory is not deployed yet. Publish will send createCollection once it is live.')
       return
     }
     const supply = Number(maxSupply)
@@ -145,10 +153,13 @@ export default function PortCreatePage() {
       if (imageFile) {
         imageUrl = await uploadImageToCloudinary(imageFile, 'port')
       }
-      const start = publicStart ? Math.floor(new Date(publicStart).getTime() / 1000) : Math.floor(Date.now() / 1000)
-      const payout = creatorWallet.trim() && isAddress(creatorWallet.trim())
-        ? (creatorWallet.trim() as Address)
-        : zeroAddress
+      const start = publicStart
+        ? Math.floor(new Date(publicStart).getTime() / 1000)
+        : Math.floor(Date.now() / 1000)
+      const payout =
+        creatorWallet.trim() && isAddress(creatorWallet.trim())
+          ? (creatorWallet.trim() as Address)
+          : zeroAddress
       const due =
         feeWei ??
         (publicClient
@@ -176,8 +187,7 @@ export default function PortCreatePage() {
             publicMintStart: BigInt(start),
             allowlistMintStart: 0n,
             allowlistMintEnd: 0n,
-            allowlistRoot:
-              '0x0000000000000000000000000000000000000000000000000000000000000000',
+            allowlistRoot: '0x0000000000000000000000000000000000000000000000000000000000000000',
             royaltyBps: BigInt(royalty * 100),
             creatorRewardsWallet: payout,
           },
@@ -219,236 +229,293 @@ export default function PortCreatePage() {
     }
   }
 
-  const priceNum = Number(mintPrice) || 0
-  const rewardsPreview = creatorWallet.trim()
-    ? shortAddr(creatorWallet.trim())
-    : address
-      ? 'Your wallet'
-      : 'Your wallet'
+  function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (step === 1) goMintSettings()
+    else void publish()
+  }
+
+  const primaryLabel =
+    step === 1
+      ? 'Continue'
+      : !isConnected
+        ? 'Connect'
+        : switching
+          ? 'Switch network…'
+          : wrongChain
+            ? 'Switch to Arc'
+            : busy
+              ? 'Publishing…'
+              : 'Publish contract'
 
   return (
-    <main className="min-h-screen pt-16 pb-24 text-white">
-      <div className="mx-auto w-full max-w-desk px-4 sm:px-10">
-        <div className="grid gap-10 pb-10 pt-8 sm:pt-12 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
-          <form onSubmit={onSubmit} className="rise-in max-w-xl">
-            <h1 className="text-[32px] font-semibold tracking-display sm:text-[40px]">
-              Create collection
-            </h1>
-            <p className="mt-2 text-[15px] text-t3">
-              Launchpad for creators. Collectors mint in USDC on ArcPort.
-            </p>
+    <main className="min-h-screen pt-16 text-white">
+      <div className="flex h-12 items-center gap-3 border-b border-hair2 px-4 sm:px-6">
+        <Link
+          href={step === 1 ? '/port' : '#'}
+          onClick={(e) => {
+            if (step === 2) {
+              e.preventDefault()
+              setError('')
+              setStep(1)
+            }
+          }}
+          className="grid h-9 w-9 place-items-center rounded-xl text-t2 hover:bg-s2 hover:text-white"
+          aria-label="Back"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </Link>
+        <div className="flex min-w-0 items-center gap-2 text-[13px]">
+          <span className={step === 1 ? 'font-semibold text-white' : 'text-t3'}>Create collection</span>
+          <span className="text-t3">/</span>
+          <span className={step === 1 ? 'font-semibold text-white' : 'text-t3'}>
+            Deploy smart contract
+          </span>
+          {step === 2 ? (
+            <>
+              <span className="text-t3">/</span>
+              <span className="font-semibold text-white">Mint</span>
+            </>
+          ) : null}
+        </div>
+      </div>
 
-            <div className="mt-8 space-y-5">
+      <form onSubmit={onSubmit} className="pb-28">
+        {step === 1 ? (
+          <div className="mx-auto grid min-h-[calc(100vh-8.5rem)] max-w-[1280px] lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
+            <div className="flex flex-col border-b border-hair p-5 pb-24 sm:p-8 lg:border-b-0 lg:border-r lg:pb-28">
               <ImageUpload
+                variant="hero"
                 value={image}
                 onChange={(src, file) => {
                   setImage(src)
                   setImageFile(file ?? null)
                 }}
-                label="Collection image"
               />
-              <Field label="Name">
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Untitled"
-                  maxLength={32}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label="Symbol">
-                <input
-                  value={symbol}
-                  onChange={(e) =>
-                    setSymbol(e.target.value.toUpperCase().replace(/\$/g, '').slice(0, 8))
-                  }
-                  placeholder="TICKER"
-                  maxLength={8}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label="Description">
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Say what it is in one line."
-                  maxLength={280}
-                  className={`${inputClass} h-auto min-h-[96px] resize-none py-3`}
-                />
-              </Field>
-              <Field label="X / Twitter">
-                <input
-                  value={twitter}
-                  onChange={(e) => setTwitter(e.target.value)}
-                  placeholder="@handle or URL"
-                  className={inputClass}
-                />
-              </Field>
-              <Field label="Telegram">
-                <input
-                  value={telegram}
-                  onChange={(e) => setTelegram(e.target.value)}
-                  placeholder="t.me/…"
-                  className={inputClass}
-                />
-              </Field>
-              <Field label="Website">
-                <input
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                  placeholder="https://…"
-                  className={inputClass}
-                />
-              </Field>
-              <Field label="Creator rewards wallet" hint="Leave blank to use your connected wallet">
-                <input
-                  value={creatorWallet}
-                  onChange={(e) => setCreatorWallet(e.target.value)}
-                  placeholder="0x…"
-                  className={inputClass}
-                />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Max supply">
-                  <input
-                    inputMode="numeric"
-                    value={maxSupply}
-                    onChange={(e) => setMaxSupply(e.target.value.replace(/[^\d]/g, ''))}
-                    className={inputClass}
-                  />
-                </Field>
-                <Field label="Max per wallet">
-                  <input
-                    inputMode="numeric"
-                    value={maxPerWallet}
-                    onChange={(e) => setMaxPerWallet(e.target.value.replace(/[^\d]/g, ''))}
-                    className={inputClass}
-                  />
-                </Field>
-              </div>
-              <Field label="Mint price">
-                <div className="relative">
-                  <input
-                    inputMode="decimal"
-                    value={mintPrice}
-                    onChange={(e) => setMintPrice(e.target.value.replace(/[^\d.]/g, ''))}
-                    className={`${inputClass} pr-16`}
-                  />
-                  <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-[13px] text-t3">
-                    USDC
-                  </span>
-                </div>
-              </Field>
-              <Field label="Public start">
-                <input
-                  type="datetime-local"
-                  value={publicStart}
-                  onChange={(e) => setPublicStart(e.target.value)}
-                  className={inputClass}
-                />
-              </Field>
-              <label className="flex h-12 items-center justify-between rounded-xl border border-hair bg-s2 px-3.5">
-                <span className="text-[15px]">Allowlist</span>
-                <input
-                  type="checkbox"
-                  checked={allowlist}
-                  onChange={(e) => setAllowlist(e.target.checked)}
-                  className="h-5 w-5 accent-[#2f84db]"
-                />
-              </label>
-              <Field label={`Royalty · ${royalty}%`}>
-                <input
-                  type="range"
-                  min={0}
-                  max={10}
-                  step={1}
-                  value={royalty}
-                  onChange={(e) => setRoyalty(Number(e.target.value))}
-                  className="mt-1 w-full accent-[#2f84db]"
-                />
-                <div className="mt-1 flex justify-between text-[13px] text-t3">
-                  <span>0%</span>
-                  <span>10%</span>
-                </div>
-              </Field>
-            </div>
-
-            <div className="mt-8 rounded-[24px] border border-hair bg-s1 p-4">
-              <div className="flex items-center justify-between text-[15px]">
-                <span className="text-t3">Creation fee</span>
-                <span className="font-semibold tabular-nums">
-                  {feeWei === 0n ? 'Free' : `${formatUsdc(CREATE_FEE_USDC)} USDC`}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-hair bg-s2 px-2.5 text-[11px] font-semibold tracking-wide text-t2">
+                  <BrandMark className="h-3.5 w-3.5" />
+                  ARC
+                </span>
+                <span className="inline-flex h-7 items-center rounded-full border border-hair bg-s2 px-2.5 text-[11px] font-semibold tracking-wide text-t2">
+                  ERC-721
                 </span>
               </div>
-              <p className="mt-1 text-[13px] text-t3">
-                {live
-                  ? '0.1 native USDC. Factory owner skips this fee.'
-                  : 'Same Instant create fee. Factory owner skips it once deployed.'}
-              </p>
             </div>
 
-            {error ? <p className="mt-4 text-[13px] text-coral">{error}</p> : null}
+            <div className="flex flex-col justify-center px-5 py-8 sm:px-10 lg:px-14">
+              <div className="mb-6 grid h-11 w-11 place-items-center rounded-xl border border-hair bg-s2">
+                <Rocket className="h-5 w-5 text-t2" strokeWidth={1.7} />
+              </div>
+              <h1 className="text-[28px] font-semibold tracking-display sm:text-[32px]">
+                Start with your collection contract
+              </h1>
+              <p className="mt-2 max-w-lg text-[15px] leading-relaxed text-t2">
+                Every collection lives on its own ERC-721. We deploy one for you on Arc so
+                collectors can mint in USDC.
+              </p>
 
+              <div className="mt-8 max-w-xl space-y-5">
+                <Field
+                  label="Name"
+                  hint="Your contract name is the same as your collection name. You cannot update it later."
+                >
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Add contract name"
+                    maxLength={32}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label="Token symbol" hint="Cannot be changed after your contract is deployed.">
+                  <input
+                    value={symbol}
+                    onChange={(e) =>
+                      setSymbol(e.target.value.toUpperCase().replace(/\$/g, '').slice(0, 8))
+                    }
+                    placeholder="TICKER"
+                    maxLength={8}
+                    className={`${inputClass} max-w-[220px]`}
+                  />
+                </Field>
+                <Field
+                  label="Chain"
+                  hint="Collections on ArcPort live on Arc. You cannot switch later."
+                >
+                  <div className="flex h-12 max-w-sm items-center gap-2.5 rounded-full border border-hair bg-s2 px-3.5">
+                    <BrandMark className="h-5 w-5" />
+                    <span className="text-[15px] font-semibold">Arc</span>
+                  </div>
+                </Field>
+              </div>
+              {error ? <p className="mt-6 max-w-xl text-[13px] text-coral">{error}</p> : null}
+            </div>
+          </div>
+        ) : (
+          <div className="mx-auto grid max-w-[1280px] lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
+            <div className="hidden border-r border-hair p-8 lg:block">
+              <div className="overflow-hidden rounded-[20px] border border-hair bg-s1">
+                <div className="aspect-square bg-s2">
+                  {image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={image} alt="" className="h-full w-full object-cover" />
+                  ) : null}
+                </div>
+                <div className="p-4">
+                  <div className="truncate text-[17px] font-semibold">{name.trim() || 'Untitled'}</div>
+                  <div className="mt-1 text-[13px] text-t3">
+                    {symbol.trim() || 'TICKER'} · Arc · ERC-721
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-8 sm:px-10 lg:px-14">
+              <h1 className="text-[28px] font-semibold tracking-display sm:text-[32px]">Mint</h1>
+              <p className="mt-2 max-w-lg text-[15px] leading-relaxed text-t2">
+                The contract needs a supply and a USDC price at deploy. Set them here, then
+                publish.
+              </p>
+              <div className="mt-8 max-w-xl space-y-5">
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Max supply">
+                    <input
+                      inputMode="numeric"
+                      value={maxSupply}
+                      onChange={(e) => setMaxSupply(e.target.value.replace(/[^\d]/g, ''))}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="Max per wallet">
+                    <input
+                      inputMode="numeric"
+                      value={maxPerWallet}
+                      onChange={(e) => setMaxPerWallet(e.target.value.replace(/[^\d]/g, ''))}
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
+                <Field label="Mint price">
+                  <div className="relative">
+                    <input
+                      inputMode="decimal"
+                      value={mintPrice}
+                      onChange={(e) => setMintPrice(e.target.value.replace(/[^\d.]/g, ''))}
+                      className={`${inputClass} pr-16`}
+                    />
+                    <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-[13px] text-t3">
+                      USDC
+                    </span>
+                  </div>
+                </Field>
+                <Field label="Public start">
+                  <input
+                    type="datetime-local"
+                    value={publicStart}
+                    onChange={(e) => setPublicStart(e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label={`Royalty · ${royalty}%`}>
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={1}
+                    value={royalty}
+                    onChange={(e) => setRoyalty(Number(e.target.value))}
+                    className="mt-2 w-full accent-[#2f84db]"
+                  />
+                  <div className="mt-1 flex justify-between text-[13px] text-t3">
+                    <span>0%</span>
+                    <span>10%</span>
+                  </div>
+                </Field>
+                <Field label="Creator rewards wallet" hint="Leave blank to use your connected wallet.">
+                  <input
+                    value={creatorWallet}
+                    onChange={(e) => setCreatorWallet(e.target.value)}
+                    placeholder="0x…"
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label="Description">
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Optional"
+                    maxLength={280}
+                    className={`${inputClass} h-auto min-h-[96px] resize-none py-3`}
+                  />
+                </Field>
+                <Field label="X / Twitter">
+                  <input
+                    value={twitter}
+                    onChange={(e) => setTwitter(e.target.value)}
+                    placeholder="@handle or URL"
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label="Telegram">
+                  <input
+                    value={telegram}
+                    onChange={(e) => setTelegram(e.target.value)}
+                    placeholder="t.me/…"
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label="Website">
+                  <input
+                    value={website}
+                    onChange={(e) => setWebsite(e.target.value)}
+                    placeholder="https://…"
+                    className={inputClass}
+                  />
+                </Field>
+                <label className="flex h-12 items-center justify-between rounded-xl border border-hair bg-s2 px-3.5">
+                  <span className="text-[15px]">Allowlist</span>
+                  <input
+                    type="checkbox"
+                    checked={allowlist}
+                    onChange={(e) => setAllowlist(e.target.checked)}
+                    className="h-5 w-5 accent-[#2f84db]"
+                  />
+                </label>
+                <div className="rounded-[20px] border border-hair bg-s1 p-4">
+                  <div className="flex items-center justify-between text-[15px]">
+                    <span className="text-t3">Creation fee</span>
+                    <span className="font-semibold tabular-nums">
+                      {feeWei === 0n ? 'Free' : `${formatUsdc(CREATE_FEE_USDC)} USDC`}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[13px] text-t3">
+                    0.1 native USDC. Factory owner wallets skip this fee.
+                  </p>
+                </div>
+              </div>
+              {error ? <p className="mt-6 max-w-xl text-[13px] text-coral">{error}</p> : null}
+            </div>
+          </div>
+        )}
+
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-hair bg-[rgba(10,15,24,0.92)] backdrop-blur-xl">
+          <div className="mx-auto flex max-w-[1280px] items-center justify-end gap-3 px-4 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] sm:px-8">
+            <Link
+              href="/port"
+              className="inline-flex h-11 items-center rounded-full border border-hair px-5 text-[14px] font-semibold text-t2 hover:text-white"
+            >
+              Cancel
+            </Link>
             <button
               type="submit"
               disabled={isPending || switching || busy}
-              className="mt-6 h-14 w-full rounded-xl bg-lime text-[16px] font-bold text-white hover:bg-lime-2 disabled:opacity-50"
+              className="inline-flex h-11 min-w-[160px] items-center justify-center rounded-full bg-lime px-6 text-[14px] font-semibold text-white hover:bg-lime-2 disabled:opacity-50"
             >
-              {!isConnected
-                ? 'Connect to create'
-                : switching
-                  ? 'Switch network…'
-                  : wrongChain
-                    ? 'Switch to Arc'
-                    : busy
-                      ? 'Creating…'
-                      : live
-                        ? 'Create collection'
-                        : 'Factory not deployed'}
+              {primaryLabel}
             </button>
-          </form>
-
-          <aside className="rise-in-2 hidden lg:sticky lg:top-24 lg:block">
-            <div className="text-[13px] font-medium text-t3">Live preview</div>
-            <div className="mt-3 overflow-hidden rounded-[24px] border border-hair bg-s1">
-              <div className="aspect-square bg-s2">
-                {image ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={image} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="grid h-full place-items-center text-[13px] text-t3">Image</div>
-                )}
-              </div>
-              <div className="p-4">
-                <div className="truncate text-[17px] font-semibold tracking-tightish">
-                  {name.trim() || 'Untitled'}
-                </div>
-                <div className="mt-1 text-[13px] text-t3">
-                  {symbol.trim() || 'TICKER'} · {formatUsdc(priceNum)} USDC
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-2 text-[13px]">
-                  <div className="rounded-xl bg-s2 px-3 py-2">
-                    <div className="text-t3">Supply</div>
-                    <div className="font-medium tabular-nums">{maxSupply || '—'}</div>
-                  </div>
-                  <div className="rounded-xl bg-s2 px-3 py-2">
-                    <div className="text-t3">Royalty</div>
-                    <div className="font-medium tabular-nums">{royalty}%</div>
-                  </div>
-                  <div className="rounded-xl bg-s2 px-3 py-2">
-                    <div className="text-t3">Rewards to</div>
-                    <div className="truncate font-medium">{rewardsPreview}</div>
-                  </div>
-                  <div className="rounded-xl bg-s2 px-3 py-2">
-                    <div className="text-t3">Allowlist</div>
-                    <div className="font-medium">{allowlist ? 'On' : 'Off'}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </aside>
+          </div>
         </div>
-      </div>
+      </form>
     </main>
   )
 }
