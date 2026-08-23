@@ -456,32 +456,31 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
   }
 }
 
-/** Catalog enrichment helper — live tape: volumes, 24h change, 5m spark closes. */
+/**
+ * Catalog enrichment from the indexer snapshot (`arcfun:idx:vol:*`).
+ * Do not re-lrange 400 trades per token here — that was the home-grid stall.
+ */
 export async function enrichTokensWithIndexVolume<
   T extends { coinType?: string; poolId?: string; volume1h?: number; priceChange24h?: number },
 >(tokens: T[]): Promise<T[]> {
-  const { computeVolumeWindows } = await import('./volume')
-  return Promise.all(
-    tokens.map(async (t) => {
-      const id = (t.coinType || t.poolId || '').toLowerCase()
-      if (!id) return t
-      try {
-        const v = await computeVolumeWindows(id)
-        return {
-          ...t,
-          volume1h: v.volume1h,
-          volume6h: v.volume6h,
-          volume12h: v.volume12h,
-          volume24h: v.volume24h,
-          lastTradeAt: v.lastTradeAt || (t as { lastTradeAt?: number }).lastTradeAt,
-          priceChange24h: v.priceChange24h ?? t.priceChange24h ?? 0,
-          sparkCloses: v.sparkCloses,
-        }
-      } catch {
-        return t
-      }
-    }),
-  )
+  if (tokens.length === 0) return tokens
+  const { getVolumesMap } = await import('./store')
+  const map = await getVolumesMap(tokens.map((t) => t.coinType || t.poolId || ''))
+  return tokens.map((t) => {
+    const id = (t.coinType || t.poolId || '').toLowerCase()
+    const v = id ? map[id] : undefined
+    if (!v) return t
+    return {
+      ...t,
+      volume1h: v.volume1h,
+      volume6h: v.volume6h,
+      volume12h: v.volume12h,
+      volume24h: v.volume24h,
+      lastTradeAt: v.lastTradeAt || (t as { lastTradeAt?: number }).lastTradeAt,
+      priceChange24h: v.priceChange24h ?? t.priceChange24h ?? 0,
+      sparkCloses: v.sparkCloses,
+    }
+  })
 }
 
 /** Live OTC book from index + fee mult. */

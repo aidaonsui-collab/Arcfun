@@ -5,7 +5,7 @@ import { formatUnits, type Address } from 'viem'
 import { ARC, ARC_UNI_V3, arcInstantEnabled, arcCurveEnabled, arcReflectionEnabled, arcPublicClient } from './contracts-arc'
 import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
 import { erc20Abi as ERC20_ABI } from 'viem'
-import { getArcTokenMeta } from './arc-token-meta'
+import { getArcTokenMeta, getArcTokenMetas } from './arc-token-meta'
 import { type PoolToken } from './tokens'
 import { summarizeRpcError } from './rpc-error'
 
@@ -497,6 +497,94 @@ export async function fetchArcReflectionPoolToken(token: Address): Promise<PoolT
   }
 }
 
+type McContract = {
+  address: Address
+  abi: readonly unknown[]
+  functionName: string
+  args?: readonly unknown[]
+}
+
+async function multicallChunked(
+  client: ReturnType<typeof arcPublicClient>,
+  contracts: McContract[],
+  size = 80,
+): Promise<{ status: 'success' | 'failure'; result?: unknown }[]> {
+  const out: { status: 'success' | 'failure'; result?: unknown }[] = []
+  for (let i = 0; i < contracts.length; i += size) {
+    const part = (await client.multicall({
+      contracts: contracts.slice(i, i + size) as never,
+      allowFailure: true,
+    })) as { status: 'success' | 'failure'; result?: unknown }[]
+    out.push(...part)
+  }
+  return out
+}
+
+function mcOk<T>(row: { status: 'success' | 'failure'; result?: unknown } | undefined): T | null {
+  if (!row || row.status !== 'success') return null
+  return row.result as T
+}
+
+function asInstantPool(raw: unknown): InstantQuotePool | null {
+  if (!raw) return null
+  if (Array.isArray(raw)) {
+    const [creator, uniPool, positionId, liquidity, tickLower, tickUpper] = raw as [
+      Address,
+      Address,
+      bigint,
+      bigint,
+      number,
+      number,
+    ]
+    if (!creator || creator === ZERO || !uniPool || uniPool === ZERO) return null
+    return { creator, uniPool, positionId, liquidity, tickLower, tickUpper }
+  }
+  const p = raw as InstantQuotePool
+  if (!p.creator || p.creator === ZERO || !p.uniPool || p.uniPool === ZERO) return null
+  return p
+}
+
+/** Hydrate Instant-shaped rows (name/symbol/decimals/slot0/token0 + KV meta) in a few RPC batches. */
+async function hydrateInstantRows(
+  rows: { token: Address; factory: Address; launchVq: bigint; pool: InstantQuotePool }[],
+): Promise<PoolToken[]> {
+  if (rows.length === 0) return []
+  const client = arcPublicClient()
+  const metas = await getArcTokenMetas(rows.map((r) => r.token)).catch(() => new Map())
+  const extra = await multicallChunked(
+    client,
+    rows.flatMap(({ token, pool }) => [
+      { address: token, abi: ERC20_ABI, functionName: 'name' },
+      { address: token, abi: ERC20_ABI, functionName: 'symbol' },
+      { address: token, abi: ERC20_ABI, functionName: 'decimals' },
+      { address: pool.uniPool, abi: SLOT0_ABI, functionName: 'slot0' },
+      { address: pool.uniPool, abi: T0_ABI, functionName: 'token0' },
+    ]),
+  )
+  const out: PoolToken[] = []
+  for (let i = 0; i < rows.length; i++) {
+    const { token, factory, launchVq, pool } = rows[i]
+    const base = i * 5
+    const name = mcOk<string>(extra[base]) || ''
+    const symbol = mcOk<string>(extra[base + 1]) || ''
+    const tokenDecimals = Number(mcOk<number>(extra[base + 2]) ?? ARC.TOKEN_DECIMALS)
+    const slot0 = mcOk<readonly [bigint, ...unknown[]]>(extra[base + 3])
+    const token0 = mcOk<Address>(extra[base + 4])
+    const dec = Number.isFinite(tokenDecimals) && tokenDecimals > 0 ? tokenDecimals : ARC.TOKEN_DECIMALS
+    const defaultPrice = defaultArcInstantPriceUsdc(launchVq, dec)
+    let live: number | null = null
+    if (slot0 && token0 && slot0[0] > 0n) {
+      const tokenIs0 = token0.toLowerCase() === token.toLowerCase()
+      const usdc = usdcPerTokenFromSqrtX96(slot0[0], tokenIs0, dec, USDC_DECIMALS)
+      if (usdc > 0) live = usdc
+    }
+    const priceUsdc = live != null && live > 0 ? live : defaultPrice > 0 ? defaultPrice : 0
+    const meta = metas.get(token.toLowerCase()) ?? null
+    out.push(toPoolToken(token, pool, name, symbol, priceUsdc, meta, launchVq, undefined, factory))
+  }
+  return out
+}
+
 /** Full Reflection catalog for home grid — mirrors listInstantFactoryTokens below. */
 export async function fetchArcReflectionPoolTokens(): Promise<PoolToken[]> {
   if (!arcReflectionEnabled()) return []
@@ -513,28 +601,44 @@ export async function fetchArcReflectionPoolTokens(): Promise<PoolToken[]> {
     if (!Number.isFinite(count) || count <= 0) return []
 
     const n = Math.min(count, 200)
-    const indices = Array.from({ length: n }, (_, i) => count - 1 - i)
-    const addrs: Address[] = []
-    for (let i = 0; i < indices.length; i += 25) {
-      const chunk = indices.slice(i, i + 25)
-      const rows = await Promise.all(
-        chunk.map((idx) =>
-          client
-            .readContract({ address: factory, abi: REFLECTION_POOL_ABI, functionName: 'allTokens', args: [BigInt(idx)] })
-            .catch(() => null) as Promise<Address | null>,
-        ),
-      )
-      for (const a of rows) if (a && a !== ZERO) addrs.push(a)
-    }
+    const listed = await multicallChunked(
+      client,
+      Array.from({ length: n }, (_, i) => ({
+        address: factory,
+        abi: REFLECTION_POOL_ABI,
+        functionName: 'allTokens',
+        args: [BigInt(count - 1 - i)],
+      })),
+    )
+    const addrs = listed
+      .map((r) => mcOk<Address>(r))
+      .filter((a): a is Address => !!a && a !== ZERO)
     if (addrs.length === 0) return []
 
-    const out: PoolToken[] = []
-    for (let i = 0; i < addrs.length; i += 10) {
-      const batch = addrs.slice(i, i + 10)
-      const rows = await Promise.all(batch.map((token) => fetchArcReflectionPoolToken(token).catch(() => null)))
-      for (const r of rows) if (r) out.push(r)
+    const poolRows = await multicallChunked(
+      client,
+      addrs.map((token) => ({
+        address: factory,
+        abi: REFLECTION_POOL_ABI,
+        functionName: 'pools',
+        args: [token],
+      })),
+    )
+    const launchVq = 5_500_000_000n
+    const rows: { token: Address; factory: Address; launchVq: bigint; pool: InstantQuotePool }[] = []
+    for (let i = 0; i < addrs.length; i++) {
+      const p = mcOk<ReflectionPoolTuple>(poolRows[i])
+      if (!p) continue
+      const [creator, , , uniPool, positionId, liquidity, tickLower, tickUpper] = p
+      if (!creator || creator === ZERO || !uniPool || uniPool === ZERO) continue
+      rows.push({
+        token: addrs[i],
+        factory,
+        launchVq,
+        pool: { creator, uniPool, positionId, liquidity, tickLower, tickUpper },
+      })
     }
-    return out
+    return hydrateInstantRows(rows)
   } catch (e) {
     console.error('[arc-reflection-tokens] catalog', summarizeRpcError(e))
     return []
@@ -557,26 +661,18 @@ async function listInstantFactoryTokens(
   if (!Number.isFinite(count) || count <= 0) return { addrs: [], launchVq: 5_500_000_000n }
 
   const n = Math.min(count, max)
-  const indices = Array.from({ length: n }, (_, i) => count - 1 - i)
-  const addrs: Address[] = []
-  for (let i = 0; i < indices.length; i += 25) {
-    const chunk = indices.slice(i, i + 25)
-    const rows = await Promise.all(
-      chunk.map((idx) =>
-        client
-          .readContract({
-            address: factory,
-            abi: INSTANT_QUOTE_FACTORY_ABI,
-            functionName: 'allTokens',
-            args: [BigInt(idx)],
-          })
-          .catch(() => null) as Promise<Address | null>,
-      ),
-    )
-    for (const a of rows) {
-      if (a && a !== ZERO) addrs.push(a)
-    }
-  }
+  const listed = await multicallChunked(
+    client,
+    Array.from({ length: n }, (_, i) => ({
+      address: factory,
+      abi: INSTANT_QUOTE_FACTORY_ABI,
+      functionName: 'allTokens',
+      args: [BigInt(count - 1 - i)],
+    })),
+  )
+  const addrs = listed
+    .map((r) => mcOk<Address>(r))
+    .filter((a): a is Address => !!a && a !== ZERO)
   const launchVq = (await client
     .readContract({
       address: factory,
@@ -614,41 +710,22 @@ export async function fetchArcInstantPoolTokens(): Promise<PoolToken[]> {
     }
     if (entries.length === 0) return []
 
-    const out: PoolToken[] = []
-    for (let i = 0; i < entries.length; i += 10) {
-      const batch = entries.slice(i, i + 10)
-      const rows = await Promise.all(
-        batch.map(async ({ token, factory, launchVq }) => {
-          try {
-            const p = (await client.readContract({
-              address: factory,
-              abi: INSTANT_QUOTE_FACTORY_ABI,
-              functionName: 'getPool',
-              args: [token],
-            })) as InstantQuotePool
-            if (!p?.creator || p.creator === ZERO || !p.uniPool || p.uniPool === ZERO) return null
-            const [name, symbol, meta, live, tokenDecimals] = await Promise.all([
-              client.readContract({ address: token, abi: ERC20_ABI, functionName: 'name' }).catch(() => '') as Promise<string>,
-              client.readContract({ address: token, abi: ERC20_ABI, functionName: 'symbol' }).catch(() => '') as Promise<string>,
-              getArcTokenMeta(token).catch(() => null),
-              getArcLivePriceUsdc(token, p.uniPool).catch(() => null),
-              client
-                .readContract({ address: token, abi: ERC20_ABI, functionName: 'decimals' })
-                .then((d) => Number(d))
-                .catch(() => ARC.TOKEN_DECIMALS) as Promise<number>,
-            ])
-            const dec = Number.isFinite(tokenDecimals) && tokenDecimals > 0 ? tokenDecimals : ARC.TOKEN_DECIMALS
-            const defaultPrice = defaultArcInstantPriceUsdc(launchVq, dec)
-            const priceUsdc = live != null && live > 0 ? live : defaultPrice > 0 ? defaultPrice : 0
-            return toPoolToken(token, p, name, symbol, priceUsdc, meta, launchVq)
-          } catch {
-            return null
-          }
-        }),
-      )
-      for (const r of rows) if (r) out.push(r)
+    const poolRows = await multicallChunked(
+      client,
+      entries.map(({ token, factory }) => ({
+        address: factory,
+        abi: INSTANT_QUOTE_FACTORY_ABI,
+        functionName: 'getPool',
+        args: [token],
+      })),
+    )
+    const rows: { token: Address; factory: Address; launchVq: bigint; pool: InstantQuotePool }[] = []
+    for (let i = 0; i < entries.length; i++) {
+      const p = asInstantPool(mcOk(poolRows[i]))
+      if (!p) continue
+      rows.push({ ...entries[i], pool: p })
     }
-    return out
+    return hydrateInstantRows(rows)
   } catch (e) {
     console.error('[arc-instant-tokens] catalog', summarizeRpcError(e))
     return []

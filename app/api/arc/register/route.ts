@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { setArcTokenMeta } from '@/lib/arc-token-meta'
+import { invalidateArcHomeCatalog } from '@/lib/arc-catalog-cache'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +47,12 @@ export async function POST(req: NextRequest) {
     } catch {
       /* meta best-effort */
     }
+  }
+
+  try {
+    await invalidateArcHomeCatalog()
+  } catch {
+    /* catalog will refresh on TTL */
   }
 
   return NextResponse.json({ ok: true, chain: 'arc', token })

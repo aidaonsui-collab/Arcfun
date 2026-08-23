@@ -133,17 +133,25 @@ export async function getVolume(token: Address | string): Promise<IndexedVolume 
   return safeGet<IndexedVolume>(volumeKey(String(token)))
 }
 
-/** Batch volume for catalog enrichment. */
+/** Batch volume for catalog enrichment — one mget, not N sequential reads. */
 export async function getVolumesMap(
   tokens: string[],
 ): Promise<Record<string, IndexedVolume>> {
   const out: Record<string, IndexedVolume> = {}
-  await Promise.all(
-    tokens.map(async (t) => {
-      const v = await getVolume(t)
-      if (v) out[t.toLowerCase()] = v
-    }),
-  )
+  const ids = Array.from(new Set(tokens.map((t) => t.toLowerCase()).filter(Boolean)))
+  if (ids.length === 0) return out
+  try {
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50)
+      const vals = (await kv.mget(...chunk.map(volumeKey))) as (IndexedVolume | null)[]
+      chunk.forEach((id, j) => {
+        const v = vals[j]
+        if (v) out[id] = v
+      })
+    }
+  } catch (e) {
+    console.warn('[arc-indexer] mget volumes', summarizeRpcError(e))
+  }
   return out
 }
 

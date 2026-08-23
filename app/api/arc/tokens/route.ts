@@ -3,8 +3,7 @@
  */
 import { NextResponse } from 'next/server'
 import { arcInstantEnabled, arcCurveEnabled } from '@/lib/contracts-arc'
-import { buildArcCatalog } from '@/lib/arc-instant-tokens'
-import { isHiddenToken } from '@/lib/tokens'
+import { CATALOG_CACHE_HEADERS, getArcHomeCatalog } from '@/lib/arc-catalog-cache'
 import { jsonSafe } from '@/lib/json-safe'
 import { summarizeRpcError } from '@/lib/rpc-error'
 
@@ -18,19 +17,10 @@ export async function GET() {
     )
   }
   try {
-    let { tokens, source } = await buildArcCatalog()
-    tokens = tokens.filter((t) => !isHiddenToken(t.coinType ?? t.poolId))
-    // Overlay volume windows from Arc event indexer when available.
-    try {
-      const { enrichTokensWithIndexVolume } = await import('@/lib/arc-indexer/run')
-      tokens = await enrichTokensWithIndexVolume(tokens)
-      source = `${source}+idx`
-    } catch {
-      /* indexer optional */
-    }
+    const { tokens, source, at } = await getArcHomeCatalog()
     return jsonSafe(
-      { ok: true, source, at: Date.now(), tokens },
-      { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } },
+      { ok: true, source, at, tokens },
+      { headers: CATALOG_CACHE_HEADERS },
     )
   } catch (e) {
     console.error('[api/arc/tokens]', summarizeRpcError(e))
