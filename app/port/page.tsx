@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { CollectionCard } from '@/components/port/CollectionCard'
+import { PortHow, PortStudio } from '@/components/port/PortStudio'
 import { listCollections } from '@/lib/port/catalog'
-import { arcPortEnabled } from '@/lib/port/contracts'
 
 export const metadata = { title: 'ArcPort — Arcfun' }
 export const dynamic = 'force-dynamic'
@@ -23,48 +23,51 @@ export default async function PortHome({
           c.slug.toLowerCase().includes(q),
       )
     : collections
-  const live = arcPortEnabled()
+
+  const searching = Boolean(q)
 
   return (
-    <main className="min-h-screen pt-16 pb-20 text-white">
-      <div className="mx-auto w-full max-w-desk px-4 sm:px-10">
-        <div className="rise-in flex items-end justify-between gap-4 pb-8 pt-8 sm:pt-12">
-          <div className="min-w-0">
-            <h1 className="text-[40px] font-semibold leading-[1.05] tracking-display sm:text-[56px]">
-              ArcPort
-            </h1>
-            <p className="mt-2 text-[15px] text-t3 sm:text-[17px]">NFT launchpad and marketplace on Arc</p>
+    <main className="relative min-h-screen overflow-hidden pb-20 pt-16 text-white">
+      <div aria-hidden="true" className="hero-grid-fade" />
+      <div className="relative z-10 mx-auto w-full max-w-desk px-4 sm:px-10">
+        {!searching ? <PortStudio /> : null}
+
+        {searching ? (
+          <div className="rise-in flex items-end justify-between gap-4 pb-8 pt-8 sm:pt-12">
+            <div className="min-w-0">
+              <h1 className="text-[32px] font-semibold leading-[1.05] tracking-display sm:text-[40px]">
+                Search
+              </h1>
+              <p className="mt-2 text-[15px] text-t3">Results for “{q}”</p>
+            </div>
           </div>
-          <Link
-            href="/port/create"
-            className="mb-1 inline-flex h-9 shrink-0 items-center rounded-xl bg-lime px-3.5 text-sm font-semibold text-white hover:bg-lime-2 hover:text-white"
-          >
-            Create
-          </Link>
-        </div>
-        {list.length === 0 ? (
-          <div className="rounded-[24px] border border-hair bg-s1 px-6 py-16 text-center">
-            <p className="text-[17px] font-semibold tracking-tightish">
-              {q
-                ? `No collections for “${q}”`
-                : live
-                  ? 'No collections yet'
-                  : 'Marketplace is ready'}
-            </p>
-            <p className="mt-2 text-[15px] text-t3">
-              {live
-                ? 'Creators launch collections here. Collectors mint in USDC.'
-                : 'Factory not deployed yet. Create and mint go live on the same factory tx.'}
-            </p>
+        ) : list.length > 0 ? (
+          <div className="mt-10 flex items-end justify-between gap-4">
+            <h2 className="text-[21px] font-semibold tracking-tightish">Collections</h2>
             <Link
               href="/port/create"
-              className="mt-6 inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime text-[16px] font-bold text-white hover:text-white"
+              className="text-[13px] font-semibold text-t3 hover:text-white"
             >
-              Create collection
+              Create
             </Link>
           </div>
         ) : (
-          <div className="rise-in-2 grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+          <PortHow />
+        )}
+
+        {list.length === 0 ? (
+          searching ? (
+            <div className="mt-2 rounded-[24px] border border-hair bg-s1 px-6 py-16 text-center">
+              <p className="text-[17px] font-semibold tracking-tightish">No collections for “{q}”</p>
+              <p className="mt-2 text-[15px] text-t3">Try another name, ticker, or address.</p>
+            </div>
+          ) : null
+        ) : (
+          <div
+            className={`grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 ${
+              searching ? '' : 'mt-5'
+            }`}
+          >
             {list.map((c) => (
               <CollectionCard key={c.address} collection={c} />
             ))}
