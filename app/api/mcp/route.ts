@@ -8,6 +8,15 @@
 import { createMcpHandler } from 'mcp-handler'
 import { z } from 'zod'
 import {
+  X402_VERSION,
+  buildRequirements,
+  decodePaymentHeader,
+  encodePaymentResponse,
+  settlePayment,
+  verifyPayment,
+  x402Enabled,
+} from '@/lib/x402'
+import {
   mcpAbout,
   mcpCandles,
   mcpError,
@@ -210,17 +219,90 @@ const handler = createMcpHandler(
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept, Mcp-Session-Id, MCP-Protocol-Version',
+  'Access-Control-Allow-Headers':
+    'Content-Type, Authorization, Accept, Mcp-Session-Id, MCP-Protocol-Version, X-PAYMENT',
+  // Browser clients can't read a response header unless it's explicitly exposed.
+  'Access-Control-Expose-Headers': 'X-PAYMENT-RESPONSE, Mcp-Session-Id',
 }
 
 export function OPTIONS() {
   return new Response(null, { status: 204, headers: CORS })
 }
 
+/**
+ * Free to call even when x402 is on. Discovery has to be free or the protocol is unusable: an
+ * agent cannot decide whether a tool is worth paying for until it can see the tool list, and
+ * `about` is explicitly documented as "call this first". Charging for orientation would also
+ * mean charging for the handshake every MCP client performs automatically on connect.
+ */
+const FREE_METHODS = new Set(['initialize', 'notifications/initialized', 'tools/list', 'ping'])
+const FREE_TOOLS = new Set(['about'])
+
+/** Which tool a JSON-RPC body is invoking, if it's a billable tools/call. null = free. */
+function billableTool(body: string): string | null {
+  try {
+    const msg = JSON.parse(body) as { method?: string; params?: { name?: string } }
+    if (!msg?.method || FREE_METHODS.has(msg.method)) return null
+    if (msg.method !== 'tools/call') return null
+    const name = msg.params?.name
+    if (!name || FREE_TOOLS.has(name)) return null
+    return name
+  } catch {
+    return null // unparseable — let the MCP handler produce the protocol error
+  }
+}
+
+function corsJson(status: number, body: unknown, extra?: Record<string, string>) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...CORS, ...(extra || {}) },
+  })
+}
+
 async function withCors(req: Request) {
-  const res = await handler(req)
+  // Fast path: x402 off (the default) — behaviour is byte-identical to before.
+  if (!x402Enabled() || req.method !== 'POST') {
+    const res = await handler(req)
+    const headers = new Headers(res.headers)
+    for (const [k, v] of Object.entries(CORS)) headers.set(k, v)
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
+  }
+
+  // Body can only be read once, so buffer it and hand the handler a fresh Request.
+  const body = await req.text()
+  const tool = billableTool(body)
+  const replay = () => new Request(req.url, { method: req.method, headers: req.headers, body })
+
+  let settleHeader: string | undefined
+  if (tool) {
+    const requirements = buildRequirements(new URL(req.url).toString(), `ArcFun MCP tool: ${tool}`)
+
+    const decoded = decodePaymentHeader(req.headers.get('X-PAYMENT'))
+    if (!decoded.ok) {
+      return corsJson(402, { x402Version: X402_VERSION, error: decoded.error, accepts: [requirements] })
+    }
+    const verified = await verifyPayment(decoded.payload, requirements)
+    if (!verified.ok) {
+      return corsJson(402, { x402Version: X402_VERSION, error: verified.error, accepts: [requirements] })
+    }
+
+    // Settle BEFORE doing the work: the tool reads live chain state and is the expensive part,
+    // so a payment that fails to land must not get a free answer.
+    const settled = await settlePayment(decoded.payload)
+    if (!settled.ok) {
+      return corsJson(
+        402,
+        { x402Version: X402_VERSION, error: `settlement failed: ${settled.error}`, accepts: [requirements] },
+        { 'X-PAYMENT-RESPONSE': encodePaymentResponse(settled) },
+      )
+    }
+    settleHeader = encodePaymentResponse(settled)
+  }
+
+  const res = await handler(replay())
   const headers = new Headers(res.headers)
   for (const [k, v] of Object.entries(CORS)) headers.set(k, v)
+  if (settleHeader) headers.set('X-PAYMENT-RESPONSE', settleHeader)
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
 }
 
