@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { getCollection, getItem } from '@/lib/port/catalog'
+import { isListing } from '@/lib/port/listings'
 import { getActivity, syncCollection } from '@/lib/port/market'
 import { ItemView } from './ItemView'
 
@@ -47,7 +48,8 @@ export default async function ItemPage({
     syncCollection(collection.address),
     getActivity(collection.address, String(tokenId)),
   ])
-  const listing = market.listings.find((l) => l.tokenId === String(tokenId)) ?? null
+  const listing =
+    market.listings.find((l) => l.tokenId === String(tokenId) && isListing(l)) ?? null
   return (
     <main className="min-h-screen pt-16 text-white">
       <ItemView collection={collection} item={item} listing={listing} activity={activity} />

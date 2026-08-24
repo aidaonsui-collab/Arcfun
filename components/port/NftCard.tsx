@@ -2,7 +2,15 @@ import Link from 'next/link'
 import type { NftItem } from '@/lib/port/types'
 import { formatUsdc } from '@/lib/port/format'
 
-export function NftCard({ item, address }: { item: NftItem; address: string }) {
+export function NftCard({
+  item,
+  address,
+  onClick,
+}: {
+  item: NftItem
+  address: string
+  onClick?: () => void
+}) {
   const minted = item.minted !== false
   const body = (
     <>
@@ -24,6 +32,17 @@ export function NftCard({ item, address }: { item: NftItem; address: string }) {
   )
   if (!minted) {
     return <div className="min-w-0">{body}</div>
+  }
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="group block min-w-0 w-full text-left text-white hover:text-white"
+      >
+        {body}
+      </button>
+    )
   }
   return (
     <Link href={`/studio/${address}/${item.id}`} className="group block min-w-0 text-white hover:text-white">

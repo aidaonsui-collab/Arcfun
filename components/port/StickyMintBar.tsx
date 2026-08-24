@@ -51,7 +51,7 @@ export function StickyItemBar({
   disabled,
   onClick,
 }: {
-  priceUsdc: number
+  priceUsdc: number | null
   priceLabel: string
   cta: string
   disabled?: boolean
@@ -61,8 +61,14 @@ export function StickyItemBar({
     <div className="fixed inset-x-0 bottom-0 z-30 border-t border-hair bg-[rgba(10,15,24,0.9)] backdrop-blur-xl lg:hidden">
       <div className="flex items-center gap-3 px-4 pt-3 pb-safe-cta">
         <div className="min-w-0">
-          <div className="text-[13px] text-t3">{priceLabel}</div>
-          <Price value={priceUsdc} size="lg" />
+          {priceUsdc == null ? (
+            <div className="text-[17px] font-semibold tracking-tightish">{priceLabel}</div>
+          ) : (
+            <>
+              <div className="text-[13px] text-t3">{priceLabel}</div>
+              <Price value={priceUsdc} size="lg" />
+            </>
+          )}
         </div>
         <button
           type="button"

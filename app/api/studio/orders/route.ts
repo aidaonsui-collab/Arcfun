@@ -13,15 +13,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { kv } from '@vercel/kv'
 import { isAddress, verifyTypedData, type Address, type Hex } from 'viem'
-import { arcPublicClient } from '@/lib/contracts-arc'
+import { ARC, arcPublicClient } from '@/lib/contracts-arc'
 import {
   SEAPORT_ABI,
   SEAPORT_ADDRESS,
   SEAPORT_ORDER_TYPES,
+  ItemType,
+  orderKindOf,
   seaportDomain,
   type OrderComponents,
 } from '@/lib/port/seaport'
-import { reviveOrder } from '@/lib/port/listings'
+import { reviveOrder, type Listing } from '@/lib/port/listings'
 import {
   COLLECTION_SET,
   ORDER_KEY,
@@ -55,12 +57,51 @@ export async function POST(req: NextRequest) {
   }
 
   const offer = order.offer[0]
-  if (order.offer.length !== 1 || offer.itemType !== 2) {
-    return NextResponse.json({ ok: false, error: 'only single ERC-721 listings are accepted' }, { status: 400 })
+  const consid0 = order.consideration[0]
+  if (!offer || !consid0) {
+    return NextResponse.json({ ok: false, error: 'empty order' }, { status: 400 })
+  }
+  const kind = orderKindOf(order)
+  const usdc = ARC.USDC.toLowerCase()
+  const erc20s = [...order.offer, ...order.consideration].filter((i) => i.itemType === ItemType.ERC20)
+  if (erc20s.some((i) => i.token.toLowerCase() !== usdc)) {
+    return NextResponse.json({ ok: false, error: 'only Arc USDC' }, { status: 400 })
+  }
+  if (kind === 'listing') {
+    if (order.offer.length !== 1 || offer.itemType !== ItemType.ERC721) {
+      return NextResponse.json({ ok: false, error: 'only single ERC-721 listings are accepted' }, { status: 400 })
+    }
+    if (order.consideration.some((i) => i.itemType !== ItemType.ERC20)) {
+      return NextResponse.json({ ok: false, error: 'listings must be priced in USDC' }, { status: 400 })
+    }
+  } else {
+    if (offer.itemType !== ItemType.ERC20) {
+      return NextResponse.json({ ok: false, error: 'offers must be priced in USDC' }, { status: 400 })
+    }
+    if (kind === 'offer' && consid0.itemType !== ItemType.ERC721) {
+      return NextResponse.json({ ok: false, error: 'item offers must name one ERC-721' }, { status: 400 })
+    }
+    if (kind === 'collection-offer') {
+      if (consid0.itemType !== ItemType.ERC721_WITH_CRITERIA) {
+        return NextResponse.json({ ok: false, error: 'collection offers must use criteria' }, { status: 400 })
+      }
+      if (consid0.identifierOrCriteria !== 0n) {
+        return NextResponse.json({ ok: false, error: 'collection offers must be collection-wide' }, { status: 400 })
+      }
+    }
+    if (order.consideration.slice(1).some((i) => i.itemType !== ItemType.ERC20)) {
+      return NextResponse.json({ ok: false, error: 'offer fees must be USDC' }, { status: 400 })
+    }
   }
   if (order.endTime <= BigInt(Math.floor(Date.now() / 1000))) {
     return NextResponse.json({ ok: false, error: 'order already expired' }, { status: 400 })
   }
+
+  const nft = (kind === 'listing' ? offer.token : consid0.token) as Address
+  const tokenId = kind === 'collection-offer' ? '0' : (kind === 'listing' ? offer.identifierOrCriteria : consid0.identifierOrCriteria).toString()
+  const priceAtomic = kind === 'listing'
+    ? order.consideration.reduce((a, i) => a + i.startAmount, 0n)
+    : offer.startAmount
 
   const c = client()
 
@@ -104,48 +145,49 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'signature does not match offerer' }, { status: 400 })
   }
 
-  // Seller must still own the token, or the listing is dead on arrival.
-  const owner = (await c.readContract({
-    address: offer.token,
-    abi: [
-      { type: 'function', name: 'ownerOf', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'address' }] },
-    ] as const,
-    functionName: 'ownerOf',
-    args: [offer.identifierOrCriteria],
-  }).catch(() => null)) as Address | null
-  if (!owner || owner.toLowerCase() !== order.offerer.toLowerCase()) {
-    return NextResponse.json({ ok: false, error: 'offerer does not own this token' }, { status: 400 })
+  if (kind === 'listing') {
+    const owner = (await c.readContract({
+      address: nft,
+      abi: [
+        { type: 'function', name: 'ownerOf', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'address' }] },
+      ] as const,
+      functionName: 'ownerOf',
+      args: [offer.identifierOrCriteria],
+    }).catch(() => null)) as Address | null
+    if (!owner || owner.toLowerCase() !== order.offerer.toLowerCase()) {
+      return NextResponse.json({ ok: false, error: 'offerer does not own this token' }, { status: 400 })
+    }
   }
 
-  const price = order.consideration.reduce((a, i) => a + i.startAmount, 0n)
   const row: StoredOrder = {
     orderHash,
     order: body.order,
     signature: body.signature,
-    collection: offer.token,
-    tokenId: offer.identifierOrCriteria.toString(),
-    priceAtomic: price.toString(),
+    collection: nft,
+    tokenId,
+    priceAtomic: priceAtomic.toString(),
     offerer: order.offerer,
     endTime: order.endTime.toString(),
     createdAt: Date.now(),
+    kind,
   }
   await kv.set(ORDER_KEY(orderHash), row, { ex: MAX_TTL_SEC })
-  await kv.sadd(COLLECTION_SET(offer.token), orderHash)
+  await kv.sadd(COLLECTION_SET(nft), orderHash)
 
-  // One live listing per token in the book. Older signatures stay fillable until the seller
-  // cancels them on-chain; the UI cancels before replacing.
-  try {
-    const hashes = ((await kv.smembers(COLLECTION_SET(offer.token))) as string[]) || []
-    const others = (
-      await Promise.all(hashes.filter((h) => h.toLowerCase() !== orderHash.toLowerCase()).map((h) => kv.get<StoredOrder>(ORDER_KEY(h))))
-    ).filter((r): r is StoredOrder => !!r && r.tokenId === row.tokenId)
-    await Promise.all(others.map((r) => kv.srem(COLLECTION_SET(offer.token), r.orderHash)))
-  } catch {
-    /* kv optional */
+  if (kind === 'listing') {
+    try {
+      const hashes = ((await kv.smembers(COLLECTION_SET(nft))) as string[]) || []
+      const others = (
+        await Promise.all(hashes.filter((h) => h.toLowerCase() !== orderHash.toLowerCase()).map((h) => kv.get<StoredOrder>(ORDER_KEY(h))))
+      ).filter((r): r is StoredOrder => !!r && r.tokenId === row.tokenId && (r.kind || 'listing') === 'listing')
+      await Promise.all(others.map((r) => kv.srem(COLLECTION_SET(nft), r.orderHash)))
+    } catch {
+      /* kv optional */
+    }
   }
 
   await recordActivity({
-    type: 'list',
+    type: kind === 'listing' ? 'list' : 'offer',
     collection: row.collection,
     tokenId: row.tokenId,
     priceAtomic: row.priceAtomic,
@@ -153,9 +195,9 @@ export async function POST(req: NextRequest) {
     orderHash,
     at: Date.now(),
   })
-  const { snapshot } = await syncCollection(offer.token)
+  const { snapshot } = await syncCollection(nft)
 
-  return NextResponse.json({ ok: true, orderHash, priceAtomic: row.priceAtomic, ...snapshot })
+  return NextResponse.json({ ok: true, orderHash, priceAtomic: row.priceAtomic, kind, ...snapshot })
 }
 
 export async function GET(req: NextRequest) {
@@ -167,7 +209,16 @@ export async function GET(req: NextRequest) {
 
   try {
     const { listings, snapshot } = await syncCollection(collection)
-    const rows = tokenId ? listings.filter((l) => l.tokenId === tokenId) : listings
+    const kind = req.nextUrl.searchParams.get('kind') as Listing['kind'] | null
+    let rows = listings
+    if (kind === 'listing') rows = rows.filter((l) => (l.kind || 'listing') === 'listing')
+    if (kind === 'offer') {
+      rows = rows.filter((l) => l.kind === 'offer' || l.kind === 'collection-offer')
+    }
+    if (kind === 'collection-offer') rows = rows.filter((l) => l.kind === 'collection-offer')
+    if (tokenId) {
+      rows = rows.filter((l) => l.tokenId === tokenId || l.kind === 'collection-offer')
+    }
     return NextResponse.json({ ok: true, listings: rows, ...snapshot })
   } catch {
     return NextResponse.json({ ok: false, error: 'order store unavailable', listings: [] }, { status: 503 })
@@ -180,6 +231,7 @@ export async function PATCH(req: NextRequest) {
     action?: 'filled' | 'cancel'
     txHash?: string
     buyer?: string
+    tokenId?: string
   } | null
   const orderHash = (body?.orderHash || '').trim()
   const action = body?.action
@@ -217,7 +269,7 @@ export async function PATCH(req: NextRequest) {
   await recordActivity({
     type: filled ? 'sale' : 'cancel',
     collection: row.collection,
-    tokenId: row.tokenId,
+    tokenId: body?.tokenId || row.tokenId,
     priceAtomic: row.priceAtomic,
     from: row.offerer,
     to: body?.buyer,

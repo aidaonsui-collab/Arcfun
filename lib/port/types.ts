@@ -23,6 +23,7 @@ export type Collection = {
   floorUsdc?: number | null
   listed?: number
   volume24hUsdc?: number
+  topOfferUsdc?: number | null
   twitter?: string
   telegram?: string
   website?: string

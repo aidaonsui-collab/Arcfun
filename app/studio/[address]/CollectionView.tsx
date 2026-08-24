@@ -1,9 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useAccount } from 'wagmi'
+import { useRouter } from 'next/navigation'
+import { useAccount, usePublicClient } from 'wagmi'
 import { Pencil } from 'lucide-react'
+import { PORT_NFT_ABI } from '@/lib/port/abi'
+import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
+import type { Address } from 'viem'
 import { CreatorChip } from '@/components/port/CreatorChip'
 import { OfficialBadge } from '@/components/port/OfficialBadge'
 import { RoyaltyLine } from '@/components/port/RoyaltyLine'
@@ -12,9 +16,14 @@ import { MintSheet } from '@/components/port/MintSheet'
 import { EditBannerSheet } from '@/components/port/EditBannerSheet'
 import { CollectionItems } from '@/components/port/CollectionItems'
 import { MarketActivityList } from '@/components/port/MarketActivityList'
+import { OfferSheet } from '@/components/port/OfferSheet'
+import { AcceptOfferSheet } from '@/components/port/AcceptOfferSheet'
+import { BatchListSheet } from '@/components/port/BatchListSheet'
+import { CancelOrderButton } from '@/components/port/CancelOrderButton'
+import { fetchListings, sortByPriceDesc, type Listing } from '@/lib/port/listings'
+import { atomicToUsdc, type MarketActivity } from '@/lib/port/market'
 import { collectionStatus, type Collection, type NftItem } from '@/lib/port/types'
-import type { MarketActivity } from '@/lib/port/market'
-import { formatInt, formatUsdc, timeUntil } from '@/lib/port/format'
+import { formatInt, formatUsdc, shortAddr, timeUntil } from '@/lib/port/format'
 
 export function CollectionView({
   collection,
@@ -25,13 +34,55 @@ export function CollectionView({
   items: NftItem[]
   activity?: MarketActivity[]
 }) {
+  const router = useRouter()
   const { address } = useAccount()
+  const publicClient = usePublicClient({ chainId: ARC_CHAIN_ID })
   const [mintOpen, setMintOpen] = useState(false)
   const [bannerEdit, setBannerEdit] = useState(false)
   const [banner, setBanner] = useState(collection.banner)
+  const [offerOpen, setOfferOpen] = useState(false)
+  const [batchItems, setBatchItems] = useState<NftItem[] | null>(null)
+  const [ownedIds, setOwnedIds] = useState<number[]>([])
+  const [colOffers, setColOffers] = useState<Listing[]>([])
+  const [accept, setAccept] = useState<Listing | null>(null)
   const isCreator = Boolean(
     address && collection.creator && address.toLowerCase() === collection.creator.toLowerCase(),
   )
+
+  useEffect(() => {
+    void fetchListings(collection.address, undefined, 'collection-offer').then((rows) =>
+      setColOffers(sortByPriceDesc(rows)),
+    )
+  }, [collection.address])
+
+  useEffect(() => {
+    const minted = items.filter((i) => i.minted !== false).slice(0, 200)
+    if (!address || !publicClient || minted.length === 0) {
+      setOwnedIds([])
+      return
+    }
+    void publicClient
+      .multicall({
+        allowFailure: true,
+        contracts: minted.map((i) => ({
+          address: collection.address as Address,
+          abi: PORT_NFT_ABI,
+          functionName: 'ownerOf' as const,
+          args: [BigInt(i.id)] as const,
+        })),
+      })
+      .then((rows) => {
+        setOwnedIds(
+          minted
+            .filter((_, i) => {
+              const r = rows[i]
+              return r.status === 'success' && String(r.result).toLowerCase() === address.toLowerCase()
+            })
+            .map((i) => i.id),
+        )
+      })
+      .catch(() => setOwnedIds([]))
+  }, [address, items, collection.address, publicClient])
 
   const status = collectionStatus(collection)
   const mintLabel =
@@ -97,13 +148,17 @@ export function CollectionView({
                 value={collection.floorUsdc != null ? formatUsdc(collection.floorUsdc) : '—'}
                 suffix={collection.floorUsdc != null ? 'USDC' : undefined}
               />
+              <HeroStat
+                label="Top offer"
+                value={collection.topOfferUsdc != null ? formatUsdc(collection.topOfferUsdc) : '—'}
+                suffix={collection.topOfferUsdc != null ? 'USDC' : undefined}
+              />
               <HeroStat label="Listed" value={formatInt(collection.listed ?? 0)} />
               <HeroStat
                 label="24h vol"
                 value={formatUsdc(collection.volume24hUsdc ?? 0)}
                 suffix="USDC"
               />
-              <HeroStat label="Minted" value={formatInt(collection.minted)} />
             </div>
           </div>
         </div>
@@ -123,6 +178,13 @@ export function CollectionView({
           >
             {mintLabel}
           </button>
+          <button
+            type="button"
+            onClick={() => setOfferOpen(true)}
+            className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
+          >
+            Collection offer
+          </button>
           {isCreator ? (
             <Link
               href={`/studio/${collection.address}/items`}
@@ -133,18 +195,67 @@ export function CollectionView({
           ) : null}
         </div>
 
-        {isCreator ? (
-          <div className="mt-4 lg:hidden">
+        <div className="mt-4 flex flex-wrap gap-2 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setOfferOpen(true)}
+            className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[13px] font-semibold"
+          >
+            Collection offer
+          </button>
+          {isCreator ? (
             <Link
               href={`/studio/${collection.address}/items`}
               className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[13px] font-semibold"
             >
               Upload items
             </Link>
+          ) : null}
+        </div>
+
+        <CollectionItems
+          collection={collection}
+          items={items}
+          isCreator={isCreator}
+          ownedIds={ownedIds}
+          onListSelected={setBatchItems}
+        />
+
+        {colOffers.length > 0 ? (
+          <div className="mt-10">
+            <h2 className="text-[17px] font-semibold tracking-tightish">Collection offers</h2>
+            <div className="mt-4 divide-y divide-hair2 overflow-hidden rounded-[24px] border border-hair bg-s1">
+              {colOffers.map((o) => (
+                <div key={o.orderHash} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div>
+                    <div className="text-[14px] font-semibold tabular-nums">
+                      {formatUsdc(atomicToUsdc(o.priceAtomic))} USDC
+                    </div>
+                    <div className="text-[13px] text-t3">{shortAddr(o.offerer)}</div>
+                  </div>
+                  {address && o.offerer.toLowerCase() === address.toLowerCase() ? (
+                    <CancelOrderButton
+                      order={o}
+                      onDone={() =>
+                        void fetchListings(collection.address, undefined, 'collection-offer').then((rows) =>
+                          setColOffers(sortByPriceDesc(rows)),
+                        )
+                      }
+                    />
+                  ) : ownedIds.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setAccept(o)}
+                      className="h-10 rounded-xl bg-lime px-4 text-[13px] font-semibold text-white"
+                    >
+                      Accept
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
-
-        <CollectionItems collection={collection} items={items} isCreator={isCreator} />
 
         <div className="mt-10">
           <h2 className="text-[17px] font-semibold tracking-tightish">Activity</h2>
@@ -155,6 +266,35 @@ export function CollectionView({
       </div>
       <StickyMintBar collection={collection} onMint={() => setMintOpen(true)} />
       <MintSheet collection={collection} open={mintOpen} onClose={() => setMintOpen(false)} />
+      <OfferSheet
+        collection={collection}
+        open={offerOpen}
+        onClose={() => {
+          setOfferOpen(false)
+          void fetchListings(collection.address, undefined, 'collection-offer').then((rows) =>
+            setColOffers(sortByPriceDesc(rows)),
+          )
+        }}
+      />
+      <BatchListSheet
+        collection={collection}
+        items={batchItems || []}
+        open={!!batchItems}
+        onClose={() => setBatchItems(null)}
+      />
+      <AcceptOfferSheet
+        offer={accept}
+        tokenId={ownedIds[0] || 1}
+        ownedIds={ownedIds}
+        open={!!accept}
+        onClose={() => {
+          setAccept(null)
+          void fetchListings(collection.address, undefined, 'collection-offer').then((rows) =>
+            setColOffers(sortByPriceDesc(rows)),
+          )
+          router.refresh()
+        }}
+      />
       <EditBannerSheet
         collection={collection.address}
         currentBanner={banner}

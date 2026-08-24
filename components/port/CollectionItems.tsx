@@ -15,10 +15,14 @@ export function CollectionItems({
   collection,
   items,
   isCreator,
+  ownedIds = [],
+  onListSelected,
 }: {
   collection: Collection
   items: NftItem[]
   isCreator: boolean
+  ownedIds?: number[]
+  onListSelected?: (items: NftItem[]) => void
 }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<'all' | 'minted' | 'listed'>('all')
@@ -26,6 +30,8 @@ export function CollectionItems({
   const [sort, setSort] = useState<'id-asc' | 'id-desc' | 'price-asc' | 'price-desc'>('id-asc')
   const [page, setPage] = useState(1)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [selecting, setSelecting] = useState(false)
+  const [pickedIds, setPickedIds] = useState<number[]>([])
 
   const listedN = items.filter((i) => i.listPriceUsdc != null).length
   const mintedN = items.filter((i) => i.minted !== false).length
@@ -202,6 +208,35 @@ export function CollectionItems({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[17px] font-semibold tracking-tightish">Items</h2>
         <div className="flex items-center gap-2">
+          {ownedIds.length > 0 && onListSelected ? (
+            <>
+              {selecting ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPickedIds(
+                      filtered
+                        .filter((i) => i.minted !== false && ownedIds.includes(i.id))
+                        .map((i) => i.id),
+                    )
+                  }
+                  className="inline-flex h-11 items-center rounded-xl border border-hair px-3 text-[13px] font-semibold"
+                >
+                  Select all
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelecting((s) => !s)
+                  setPickedIds([])
+                }}
+                className="inline-flex h-11 items-center rounded-xl border border-hair px-3 text-[13px] font-semibold"
+              >
+                {selecting ? 'Cancel' : 'Select'}
+              </button>
+            </>
+          ) : null}
           <select
             value={sort}
             onChange={(e) => {
@@ -283,10 +318,59 @@ export function CollectionItems({
           ) : (
             <>
               <div className="grid grid-cols-2 gap-4 sm:gap-5 lg:grid-cols-3">
-                {visible.map((item) => (
-                  <NftCard key={item.id} item={item} address={collection.address} />
-                ))}
+                {visible.map((item) => {
+                  const mine = ownedIds.includes(item.id)
+                  const on = pickedIds.includes(item.id)
+                  return (
+                    <div key={item.id} className="relative">
+                      {selecting && mine ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPickedIds((ids) =>
+                              on ? ids.filter((x) => x !== item.id) : [...ids, item.id],
+                            )
+                          }
+                          className={cn(
+                            'absolute left-2 top-2 z-10 h-7 w-7 rounded-lg border text-[13px] font-bold',
+                            on ? 'border-lime-line bg-lime text-white' : 'border-hair bg-s1/90 text-t3',
+                          )}
+                          aria-label={on ? 'Deselect' : 'Select'}
+                        >
+                          {on ? '✓' : ''}
+                        </button>
+                      ) : null}
+                      <NftCard
+                        item={item}
+                        address={collection.address}
+                        onClick={
+                          selecting && mine
+                            ? () =>
+                                setPickedIds((ids) =>
+                                  on ? ids.filter((x) => x !== item.id) : [...ids, item.id],
+                                )
+                            : undefined
+                        }
+                      />
+                    </div>
+                  )
+                })}
               </div>
+              {selecting && pickedIds.length > 0 && onListSelected ? (
+                <div className="pointer-events-none fixed inset-x-0 bottom-[5.5rem] z-40 px-4 lg:static lg:bottom-auto lg:z-auto lg:mt-6 lg:px-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onListSelected(items.filter((i) => pickedIds.includes(i.id)))
+                      setSelecting(false)
+                      setPickedIds([])
+                    }}
+                    className="pointer-events-auto w-full rounded-xl bg-lime py-3 text-[14px] font-semibold text-white shadow-[0_12px_32px_rgba(0,0,0,0.35)]"
+                  >
+                    List {pickedIds.length} item{pickedIds.length === 1 ? '' : 's'}
+                  </button>
+                </div>
+              ) : null}
               {filtered.length > visible.length ? (
                 <button
                   type="button"

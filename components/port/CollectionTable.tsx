@@ -8,6 +8,7 @@ import { cn } from '@/lib/cn'
 const COLS = [
   { key: 'collection', label: 'Collection', align: 'left' },
   { key: 'floor', label: 'Floor', align: 'right' },
+  { key: 'offer', label: 'Top offer', align: 'right' },
   { key: 'listed', label: 'Listed', align: 'right' },
   { key: 'vol', label: '24h vol', align: 'right' },
   { key: 'minted', label: 'Minted', align: 'right' },
@@ -16,7 +17,7 @@ const COLS = [
 export function CollectionTable({ collections }: { collections: Collection[] }) {
   return (
     <div className="overflow-x-auto rounded-[24px] border border-hair bg-s1">
-      <table className="w-full min-w-[640px] border-collapse text-left">
+      <table className="w-full min-w-[720px] border-collapse text-left">
         <thead>
           <tr className="border-b border-hair2 text-[11px] font-semibold uppercase tracking-[0.08em] text-t3">
             {COLS.map((col) => (
@@ -63,6 +64,13 @@ export function CollectionTable({ collections }: { collections: Collection[] }) 
                     <span className="text-[13px] text-t3">Sold out</span>
                   ) : c.floorUsdc != null ? (
                     <Price value={c.floorUsdc} />
+                  ) : (
+                    <span className="text-[13px] text-t3">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right sm:px-5">
+                  {c.topOfferUsdc != null ? (
+                    <Price value={c.topOfferUsdc} />
                   ) : (
                     <span className="text-[13px] text-t3">—</span>
                   )}

@@ -13,6 +13,8 @@ const SEEN_KEY = (hash: string, type: string) => `arcfun:studio:actseen:${hash.t
 const ACTIVITY_CAP = 100
 const DAY_MS = 86_400_000
 
+export type OrderKind = 'listing' | 'offer' | 'collection-offer'
+
 export type StoredOrder = {
   orderHash: Hex
   order: Record<string, unknown>
@@ -23,10 +25,11 @@ export type StoredOrder = {
   offerer: Address
   endTime: string
   createdAt: number
+  kind?: OrderKind
 }
 
 export type MarketActivity = {
-  type: 'list' | 'sale' | 'cancel'
+  type: 'list' | 'sale' | 'cancel' | 'offer'
   collection: string
   tokenId: string
   priceAtomic: string
@@ -41,10 +44,17 @@ export type MarketSnapshot = {
   floorUsdc: number | null
   listed: number
   volume24hUsdc: number
+  topOfferUsdc: number | null
   updatedAt: number
 }
 
-const EMPTY_SNAP: MarketSnapshot = { floorUsdc: null, listed: 0, volume24hUsdc: 0, updatedAt: 0 }
+const EMPTY_SNAP: MarketSnapshot = {
+  floorUsdc: null,
+  listed: 0,
+  volume24hUsdc: 0,
+  topOfferUsdc: null,
+  updatedAt: 0,
+}
 
 export function atomicToUsdc(atomic: string | number | bigint): number {
   return Number(atomic) / 1e6
@@ -113,8 +123,16 @@ export async function getSnapshots(addresses: string[]): Promise<Map<string, Mar
   return out
 }
 
-async function writeSnapshot(collection: string, listings: Listing[]): Promise<MarketSnapshot> {
+function kindOf(r: StoredOrder | Listing): OrderKind {
+  if ('kind' in r && r.kind) return r.kind
+  return 'listing'
+}
+
+async function writeSnapshot(collection: string, live: Listing[]): Promise<MarketSnapshot> {
+  const listings = live.filter((l) => kindOf(l) === 'listing')
+  const offers = live.filter((l) => kindOf(l) !== 'listing')
   const prices = listings.map((l) => Number(l.priceAtomic)).filter((n) => Number.isFinite(n) && n > 0)
+  const bids = offers.map((l) => Number(l.priceAtomic)).filter((n) => Number.isFinite(n) && n > 0)
   const activity = await getActivity(collection)
   const cutoff = Date.now() - DAY_MS
   const volume24hUsdc = activity
@@ -124,6 +142,7 @@ async function writeSnapshot(collection: string, listings: Listing[]): Promise<M
     floorUsdc: prices.length ? Math.min(...prices) / 1e6 : null,
     listed: listings.length,
     volume24hUsdc,
+    topOfferUsdc: bids.length ? Math.max(...bids) / 1e6 : null,
     updatedAt: Date.now(),
   }
   try {
@@ -144,6 +163,7 @@ function toListing(r: StoredOrder): Listing {
     priceAtomic: r.priceAtomic,
     offerer: r.offerer,
     endTime: r.endTime,
+    kind: r.kind || 'listing',
   }
 }
 

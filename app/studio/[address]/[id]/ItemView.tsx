@@ -11,11 +11,15 @@ import { StickyItemBar } from '@/components/port/StickyMintBar'
 import { MintSheet } from '@/components/port/MintSheet'
 import { ListSheet } from '@/components/port/ListSheet'
 import { BuySheet } from '@/components/port/BuySheet'
+import { OfferSheet } from '@/components/port/OfferSheet'
+import { AcceptOfferSheet } from '@/components/port/AcceptOfferSheet'
 import { MarketActivityList } from '@/components/port/MarketActivityList'
-import { fetchActivity, fetchListings, type Listing } from '@/lib/port/listings'
+import { CancelOrderButton } from '@/components/port/CancelOrderButton'
+import { fetchActivity, fetchListings, sortByPriceDesc, type Listing } from '@/lib/port/listings'
+import { atomicToUsdc } from '@/lib/port/market'
 import type { MarketActivity } from '@/lib/port/market'
 import { collectionStatus, type Collection, type NftItem } from '@/lib/port/types'
-import { shortAddr, timeUntil } from '@/lib/port/format'
+import { formatUsdc, shortAddr, timeUntil } from '@/lib/port/format'
 
 export function ItemView({
   collection,
@@ -33,15 +37,20 @@ export function ItemView({
   const [listOpen, setListOpen] = useState(false)
   const [buyOpen, setBuyOpen] = useState(false)
   const [listing, setListing] = useState<Listing | null>(listingProp)
+  const [offers, setOffers] = useState<Listing[]>([])
+  const [offerOpen, setOfferOpen] = useState(false)
+  const [accept, setAccept] = useState<Listing | null>(null)
   const [activity, setActivity] = useState<MarketActivity[]>(activityProp)
   const you = Boolean(wallet && item.owner.toLowerCase() === wallet.toLowerCase())
 
   const loadListing = useCallback(async () => {
-    const [rows, tape] = await Promise.all([
-      fetchListings(collection.address, item.id),
+    const [rows, bids, tape] = await Promise.all([
+      fetchListings(collection.address, item.id, 'listing'),
+      fetchListings(collection.address, item.id, 'offer'),
       fetchActivity(collection.address, item.id),
     ])
     setListing(rows[0] ?? null)
+    setOffers(sortByPriceDesc(bids))
     setActivity(tape)
   }, [collection.address, item.id])
 
@@ -100,8 +109,26 @@ export function ItemView({
               ) : null}
             </div>
             <div className="mt-6">
-              <div className="text-[13px] text-t3">{listing ? 'Listed for' : 'Mint price'}</div>
-              <Price value={listing ? Number(listing.priceAtomic) / 1e6 : collection.mintPriceUsdc} size="lg" />
+              {listing ? (
+                <>
+                  <div className="text-[13px] text-t3">Listed for</div>
+                  <Price value={Number(listing.priceAtomic) / 1e6} size="lg" />
+                </>
+              ) : item.minted ? (
+                offers[0] ? (
+                  <>
+                    <div className="text-[13px] text-t3">Best offer</div>
+                    <Price value={atomicToUsdc(offers[0].priceAtomic)} size="lg" />
+                  </>
+                ) : (
+                  <div className="text-[17px] font-semibold tracking-tightish">Not listed</div>
+                )
+              ) : (
+                <>
+                  <div className="text-[13px] text-t3">Mint price</div>
+                  <Price value={collection.mintPriceUsdc} size="lg" />
+                </>
+              )}
             </div>
             <div className="mt-8 hidden gap-3 lg:flex">
               {item.minted && you ? (
@@ -124,20 +151,29 @@ export function ItemView({
                   ) : null}
                 </>
               ) : listing ? (
-                <button
-                  type="button"
-                  onClick={() => setBuyOpen(true)}
-                  className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime px-8 text-[16px] font-bold text-white"
-                >
-                  Buy for {listedPrice} USDC
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setBuyOpen(true)}
+                    className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime px-8 text-[16px] font-bold text-white"
+                  >
+                    Buy for {listedPrice} USDC
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOfferOpen(true)}
+                    className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
+                  >
+                    Make offer
+                  </button>
+                </>
               ) : item.minted ? (
                 <button
                   type="button"
-                  disabled
-                  className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl border border-hair text-[16px] font-semibold text-t3"
+                  onClick={() => setOfferOpen(true)}
+                  className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime px-8 text-[16px] font-bold text-white"
                 >
-                  Not listed
+                  Make offer
                 </button>
               ) : (
                 <button
@@ -172,6 +208,38 @@ export function ItemView({
               {you ? 'You' : shortAddr(item.owner)}
             </p>
 
+            {offers.length > 0 ? (
+              <>
+                <h2 className="mt-10 text-[13px] font-medium text-t3">Offers</h2>
+                <div className="mt-3 divide-y divide-hair2 overflow-hidden rounded-[24px] border border-hair bg-s1">
+                  {offers.map((o) => (
+                    <div key={o.orderHash} className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div>
+                        <div className="text-[14px] font-semibold tabular-nums">
+                          {formatUsdc(atomicToUsdc(o.priceAtomic))} USDC
+                        </div>
+                        <div className="text-[13px] text-t3">
+                          {o.kind === 'collection-offer' ? 'Collection · ' : ''}
+                          {shortAddr(o.offerer)}
+                        </div>
+                      </div>
+                      {wallet && o.offerer.toLowerCase() === wallet.toLowerCase() ? (
+                        <CancelOrderButton order={o} onDone={loadListing} />
+                      ) : you ? (
+                        <button
+                          type="button"
+                          onClick={() => setAccept(o)}
+                          className="h-10 rounded-xl bg-lime px-4 text-[13px] font-semibold text-white"
+                        >
+                          Accept
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
             <h2 className="mt-10 text-[13px] font-medium text-t3">Activity</h2>
             <div className="mt-3">
               <MarketActivityList events={activity} />
@@ -180,8 +248,26 @@ export function ItemView({
         </div>
       </div>
       <StickyItemBar
-        priceUsdc={listing ? Number(listing.priceAtomic) / 1e6 : collection.mintPriceUsdc}
-        priceLabel={listing ? 'Listed for' : item.minted ? (you ? 'You own this' : 'Unlisted') : 'Mint'}
+        priceUsdc={
+          listing
+            ? Number(listing.priceAtomic) / 1e6
+            : item.minted
+              ? offers[0]
+                ? atomicToUsdc(offers[0].priceAtomic)
+                : null
+              : collection.mintPriceUsdc
+        }
+        priceLabel={
+          listing
+            ? 'Listed for'
+            : item.minted
+              ? you
+                ? 'You own this'
+                : offers[0]
+                  ? 'Best offer'
+                  : 'Unlisted'
+              : 'Mint'
+        }
         cta={
           item.minted && you
             ? listing
@@ -190,7 +276,7 @@ export function ItemView({
             : listing
               ? `Buy for ${listedPrice} USDC`
               : item.minted
-                ? 'Not listed'
+                ? 'Make offer'
                 : mintLabel
         }
         disabled={
@@ -199,13 +285,14 @@ export function ItemView({
             : listing
               ? false
               : item.minted
-                ? true
+                ? false
                 : status !== 'live'
         }
         onClick={() => {
           if (item.minted && you) setListOpen(true)
           else if (listing) setBuyOpen(true)
-          else if (!item.minted) setOpen(true)
+          else if (item.minted) setOfferOpen(true)
+          else setOpen(true)
         }}
       />
       <MintSheet collection={collection} open={open} onClose={() => setOpen(false)} />
@@ -224,6 +311,24 @@ export function ItemView({
         open={buyOpen}
         onClose={() => {
           setBuyOpen(false)
+          loadListing()
+        }}
+      />
+      <OfferSheet
+        collection={collection}
+        tokenId={item.id}
+        open={offerOpen}
+        onClose={() => {
+          setOfferOpen(false)
+          loadListing()
+        }}
+      />
+      <AcceptOfferSheet
+        offer={accept}
+        tokenId={item.id}
+        open={!!accept}
+        onClose={() => {
+          setAccept(null)
           loadListing()
         }}
       />

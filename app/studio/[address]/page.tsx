@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { getCollection, getItems } from '@/lib/port/catalog'
-import { withListPrices } from '@/lib/port/listings'
+import { isListing, withListPrices } from '@/lib/port/listings'
 import { getActivity, syncCollection } from '@/lib/port/market'
 import { CollectionView } from './CollectionView'
 
@@ -42,12 +42,13 @@ export default async function CollectionPage({
     syncCollection(collection.address),
     getActivity(collection.address),
   ])
-  const priced = withListPrices(items, market.listings)
+  const priced = withListPrices(items, market.listings.filter(isListing))
   const col = {
     ...collection,
     floorUsdc: market.snapshot.floorUsdc,
     listed: market.snapshot.listed,
     volume24hUsdc: market.snapshot.volume24hUsdc,
+    topOfferUsdc: market.snapshot.topOfferUsdc,
   }
   return (
     <main className="min-h-screen pt-16 text-white">

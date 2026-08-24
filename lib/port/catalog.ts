@@ -101,6 +101,7 @@ async function loadOne(
         floorUsdc: snap.floorUsdc,
         listed: snap.listed,
         volume24hUsdc: snap.volume24hUsdc,
+        topOfferUsdc: snap.topOfferUsdc,
       }))(await getSnapshot(address)),
       twitter: overlay?.twitter,
       telegram: overlay?.telegram,

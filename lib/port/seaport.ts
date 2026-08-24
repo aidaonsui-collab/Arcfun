@@ -178,6 +178,26 @@ export const SEAPORT_ABI = [
   { type: 'function', name: 'cancel', stateMutability: 'nonpayable',
     inputs: [{ name: 'orders', type: 'tuple[]', components: ORDER_COMPONENTS }],
     outputs: [{ name: 'cancelled', type: 'bool' }] },
+  { type: 'function', name: 'fulfillAdvancedOrder', stateMutability: 'payable',
+    inputs: [
+      { name: 'advancedOrder', type: 'tuple', components: [
+        { name: 'parameters', type: 'tuple', components: ORDER_PARAMETERS },
+        { name: 'numerator', type: 'uint120' },
+        { name: 'denominator', type: 'uint120' },
+        { name: 'signature', type: 'bytes' },
+        { name: 'extraData', type: 'bytes' },
+      ] },
+      { name: 'criteriaResolvers', type: 'tuple[]', components: [
+        { name: 'orderIndex', type: 'uint256' },
+        { name: 'side', type: 'uint8' },
+        { name: 'index', type: 'uint256' },
+        { name: 'identifier', type: 'uint256' },
+        { name: 'criteriaProof', type: 'bytes32[]' },
+      ] },
+      { name: 'fulfillerConduitKey', type: 'bytes32' },
+      { name: 'recipient', type: 'address' },
+    ],
+    outputs: [{ name: 'fulfilled', type: 'bool' }] },
 ] as const
 
 /** Platform cut on secondary sales, in bps. */
@@ -241,6 +261,92 @@ export function buildListing(a: BuildListingArgs): OrderComponents {
     conduitKey: CONDUIT_KEY,
     counter: a.counter,
   }
+}
+
+export type BuildOfferArgs = {
+  collection: Address
+  /** Omit or 0n for a collection-wide offer (any token). */
+  tokenId?: bigint
+  priceAtomic: bigint
+  buyer: Address
+  royaltyReceiver: Address
+  royaltyAmount: bigint
+  platformTreasury: Address
+  counter: bigint
+  startTime: bigint
+  endTime: bigint
+  salt: bigint
+}
+
+/**
+ * Buyer bid: offer USDC, consider the NFT (or any NFT in the collection).
+ *
+ * Seaport sends offer items to the fulfiller first, then pulls consideration from the
+ * fulfiller. Royalty + studio fee are extra USDC consideration, so they come out of the
+ * USDC the seller just received — the buyer still only signs and approves `priceAtomic`.
+ */
+export function buildOffer(a: BuildOfferArgs): OrderComponents {
+  const fee = (a.priceAtomic * BigInt(STUDIO_FEE_BPS)) / 10_000n
+  const royalty = a.royaltyAmount
+  if (a.priceAtomic - fee - royalty <= 0n) throw new Error('price too low to cover royalty + platform fee')
+
+  const usdc = ARC.USDC as Address
+  const collectionWide = !a.tokenId || a.tokenId === 0n
+  const nftItem: ConsiderationItem = {
+    itemType: collectionWide ? ItemType.ERC721_WITH_CRITERIA : ItemType.ERC721,
+    token: a.collection,
+    identifierOrCriteria: collectionWide ? 0n : a.tokenId!,
+    startAmount: 1n,
+    endAmount: 1n,
+    recipient: a.buyer,
+  }
+  const consideration: ConsiderationItem[] = [nftItem]
+  if (royalty > 0n && a.royaltyReceiver !== zeroAddress) {
+    consideration.push({
+      itemType: ItemType.ERC20, token: usdc, identifierOrCriteria: 0n,
+      startAmount: royalty, endAmount: royalty, recipient: a.royaltyReceiver,
+    })
+  }
+  if (fee > 0n) {
+    consideration.push({
+      itemType: ItemType.ERC20, token: usdc, identifierOrCriteria: 0n,
+      startAmount: fee, endAmount: fee, recipient: a.platformTreasury,
+    })
+  }
+
+  return {
+    offerer: a.buyer,
+    zone: zeroAddress,
+    offer: [
+      { itemType: ItemType.ERC20, token: usdc, identifierOrCriteria: 0n, startAmount: a.priceAtomic, endAmount: a.priceAtomic },
+    ],
+    consideration,
+    orderType: OrderType.FULL_OPEN,
+    startTime: a.startTime,
+    endTime: a.endTime,
+    zoneHash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+    salt: a.salt,
+    conduitKey: CONDUIT_KEY,
+    counter: a.counter,
+  }
+}
+
+export function studioTreasury(): Address {
+  return (process.env.NEXT_PUBLIC_ARC_PLATFORM_TREASURY ||
+    '0x26bD491560b5175ee8bD1DA4998Fe260FfC413c9') as Address
+}
+
+export function orderKindOf(order: OrderComponents): 'listing' | 'offer' | 'collection-offer' {
+  const offer0 = order.offer[0]
+  const consid0 = order.consideration[0]
+  if (offer0?.itemType === ItemType.ERC721) return 'listing'
+  if (consid0?.itemType === ItemType.ERC721_WITH_CRITERIA) return 'collection-offer'
+  return 'offer'
+}
+
+export function feePortion(priceAtomic: bigint, royaltyAmount: bigint): bigint {
+  const fee = (priceAtomic * BigInt(STUDIO_FEE_BPS)) / 10_000n
+  return fee + royaltyAmount
 }
 
 /** Shape fulfillOrder() wants: same fields, but counter replaced by totalOriginalConsiderationItems. */

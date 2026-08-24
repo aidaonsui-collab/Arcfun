@@ -13,6 +13,7 @@ export type Listing = {
   priceAtomic: string
   offerer: string
   endTime: string
+  kind?: 'listing' | 'offer' | 'collection-offer'
 }
 
 /** JSON round-trip gives decimal strings; Seaport needs bigints. */
@@ -43,11 +44,16 @@ export function reviveOrder(o: Record<string, unknown>): OrderComponents {
   }
 }
 
-/** Active listings for a collection (optionally one token). Never throws — no listings is normal. */
-export async function fetchListings(collection: string, tokenId?: number): Promise<Listing[]> {
+/** Active orders for a collection. Never throws — none is normal. */
+export async function fetchListings(
+  collection: string,
+  tokenId?: number,
+  kind?: Listing['kind'],
+): Promise<Listing[]> {
   try {
     const q = new URLSearchParams({ collection })
     if (tokenId != null) q.set('tokenId', String(tokenId))
+    if (kind) q.set('kind', kind)
     const res = await fetch(`/api/studio/orders?${q}`, { cache: 'no-store' })
     if (!res.ok) return []
     const j = (await res.json()) as { listings?: Listing[] }
@@ -57,8 +63,18 @@ export async function fetchListings(collection: string, tokenId?: number): Promi
   }
 }
 
+export function isListing(l: Listing) {
+  return (l.kind || 'listing') === 'listing'
+}
+
+export function sortByPriceDesc(rows: Listing[]): Listing[] {
+  return [...rows].sort((a, b) => Number(BigInt(b.priceAtomic) - BigInt(a.priceAtomic)))
+}
+
 export function withListPrices(items: NftItem[], listings: Listing[]): NftItem[] {
-  const map = new Map(listings.map((l) => [l.tokenId, atomicToUsdc(l.priceAtomic)]))
+  const map = new Map(
+    listings.filter(isListing).map((l) => [l.tokenId, atomicToUsdc(l.priceAtomic)]),
+  )
   return items.map((item) => {
     const price = map.get(String(item.id))
     return price != null ? { ...item, listPriceUsdc: price } : item

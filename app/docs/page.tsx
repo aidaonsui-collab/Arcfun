@@ -348,15 +348,15 @@ export default function DocsPage() {
               <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
                 Any creator deploys an ERC-721 clone. Creation fee 0.1 native USDC (factory owner
                 free). Mint price is ERC-20 USDC (6dp). 95% of mint proceeds to the creator, 5%
-                to treasury. Royalty 0–10% (EIP-2981, honored on secondary later).
+                to treasury. Royalty 0–10% (EIP-2981), paid on secondary sales.
               </p>
             </article>
             <article className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
               <h3 className="m-0 text-[17px] font-semibold tracking-tightish">Marketplace</h3>
               <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
-                Browse collections, mint from the sticky bar on phone. Secondary list, buy, and
-                cancel run on Seaport 1.6. Floor, listed count, and 24h volume come from live
-                listings — not invented stats.
+                Browse collections, mint from the sticky bar on phone. Secondary list, buy,
+                item and collection offers, batch list, and cancel run on Seaport 1.6. Floor,
+                top offer, listed count, and 24h volume come from live orders. No invented stats.
               </p>
             </article>
             <article className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">

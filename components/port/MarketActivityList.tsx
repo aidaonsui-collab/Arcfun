@@ -7,6 +7,7 @@ const LABEL: Record<MarketActivity['type'], string> = {
   list: 'Listed',
   sale: 'Sold',
   cancel: 'Cancelled',
+  offer: 'Offer',
 }
 
 export function MarketActivityList({
@@ -28,13 +29,13 @@ export function MarketActivityList({
   return (
     <div className="divide-y divide-hair2 overflow-hidden rounded-[24px] border border-hair bg-s1">
       {events.map((e) => {
-        const href = collection ? `/studio/${collection}/${e.tokenId}` : undefined
+        const href = collection && e.tokenId !== '0' ? `/studio/${collection}/${e.tokenId}` : undefined
         const row = (
           <div className="flex items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
               <div className="text-[14px] font-medium">{LABEL[e.type]}</div>
               <div className="mt-0.5 text-[13px] text-t3">
-                #{e.tokenId}
+                {e.tokenId === '0' ? 'Collection' : `#${e.tokenId}`}
                 <span className="text-white/20"> · </span>
                 {timeAgo(e.at)}
               </div>
