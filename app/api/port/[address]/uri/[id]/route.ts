@@ -19,12 +19,16 @@ export async function GET(
   const item = await getPortItem(address, id)
   const name = item?.name || `${collection.name} #${id}`
   const image = item?.imageUrl || collection.image
+  const attributes = [
+    ...(item?.traits || []).map((t) => ({ trait_type: t.type, value: t.value })),
+    { trait_type: 'Token ID', value: id },
+  ]
   return NextResponse.json(
     {
       name,
       description: item?.description || collection.description || '',
       image,
-      attributes: [{ trait_type: 'Token ID', value: id }],
+      attributes,
     },
     { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300' } },
   )

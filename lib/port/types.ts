@@ -33,6 +33,7 @@ export type NftItem = {
   image: string
   owner: string
   traits: Trait[]
+  minted?: boolean
 }
 
 export const CREATE_FEE_USDC = 0.1

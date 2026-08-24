@@ -159,29 +159,40 @@ export async function getCollection(address: string): Promise<Collection | undef
   }
 }
 
+function nftFrom(
+  collection: Collection,
+  id: number,
+  meta?: { imageUrl?: string; name?: string; traits?: { type: string; value: string }[] } | null,
+  owner = '',
+): NftItem {
+  return {
+    collection: collection.address,
+    id,
+    name: meta?.name || `${collection.name} #${id}`,
+    image: meta?.imageUrl || collection.image,
+    owner,
+    minted: id <= collection.minted,
+    traits: meta?.traits?.filter((t) => t.type && t.value) ?? [],
+  }
+}
+
 export function itemsFor(collection: Collection): NftItem[] {
-  return Array.from({ length: collection.minted }, (_, i) => {
-    const id = i + 1
-    return {
-      collection: collection.address,
-      id,
-      name: `${collection.name} #${id}`,
-      image: collection.image,
-      owner: '',
-      traits: [],
-    }
-  })
+  return Array.from({ length: collection.minted }, (_, i) => nftFrom(collection, i + 1))
 }
 
 export async function getItems(address: string): Promise<NftItem[]> {
   const collection = await getCollection(address)
   if (!collection) return []
   const store = await getPortItems(address)
-  return itemsFor(collection).map((item) => {
-    const meta = store.items[String(item.id)]
-    if (!meta?.imageUrl) return item
-    return { ...item, image: meta.imageUrl, name: meta.name || item.name }
-  })
+  const ids = new Set<number>()
+  for (let i = 1; i <= collection.minted; i++) ids.add(i)
+  for (const key of Object.keys(store.items)) {
+    const id = Number(key)
+    if (Number.isInteger(id) && id >= 1 && id <= collection.maxSupply) ids.add(id)
+  }
+  return [...ids]
+    .sort((a, b) => a - b)
+    .map((id) => nftFrom(collection, id, store.items[String(id)]))
 }
 
 export async function getItem(address: string, id: number): Promise<NftItem | undefined> {
@@ -199,12 +210,5 @@ export async function getItem(address: string, id: number): Promise<NftItem | un
   } catch {
     owner = ''
   }
-  return {
-    collection: collection.address,
-    id,
-    name: meta?.name || `${collection.name} #${id}`,
-    image: meta?.imageUrl || collection.image,
-    owner,
-    traits: [],
-  }
+  return nftFrom(collection, id, meta, owner)
 }

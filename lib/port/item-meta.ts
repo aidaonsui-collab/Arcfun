@@ -1,4 +1,5 @@
 import { kv } from '@vercel/kv'
+import type { Trait } from './types'
 
 const KEY = (a: string) => `arcfun:port:items:${a.toLowerCase()}`
 
@@ -6,6 +7,24 @@ export type PortItemMeta = {
   imageUrl: string
   name?: string
   description?: string
+  traits?: Trait[]
+}
+
+export function cleanTraits(raw: unknown): Trait[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out: Trait[] = []
+  for (const row of raw.slice(0, 16)) {
+    const rec = (row || {}) as { type?: unknown; trait_type?: unknown; value?: unknown }
+    const type = String(rec.type || rec.trait_type || '')
+      .trim()
+      .slice(0, 32)
+    const value = String(rec.value || '')
+      .trim()
+      .slice(0, 48)
+    if (!type || !value) continue
+    out.push({ type, value })
+  }
+  return out.length ? out : undefined
 }
 
 export type PortItemsStore = {
@@ -36,7 +55,16 @@ export async function mergePortItems(
   const items = { ...prev.items }
   for (const [id, meta] of Object.entries(patch)) {
     if (!meta || !meta.imageUrl) delete items[id]
-    else items[id] = meta
+    else {
+      const prevRow = items[id]
+      const traits = cleanTraits(meta.traits) ?? prevRow?.traits
+      items[id] = {
+        imageUrl: meta.imageUrl,
+        name: meta.name || prevRow?.name,
+        description: meta.description || prevRow?.description,
+        ...(traits ? { traits } : {}),
+      }
+    }
   }
   const next: PortItemsStore = { items, updatedAt: Date.now() }
   await kv.set(KEY(address), next)

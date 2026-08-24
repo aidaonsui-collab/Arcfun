@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isAddress } from 'viem'
 import { collectionItemsEditMessage, verifyWalletAuth } from '@/lib/arc-auth'
-import { getPortItems, mergePortItems, type PortItemMeta } from '@/lib/port/item-meta'
+import { cleanTraits, getPortItems, mergePortItems, type PortItemMeta } from '@/lib/port/item-meta'
 import { readCollectionOwner } from '@/lib/port/owner'
 
 export const dynamic = 'force-dynamic'
@@ -55,10 +55,12 @@ export async function PUT(
       continue
     }
     if (!meta.imageUrl || !/^https?:\/\//i.test(meta.imageUrl)) continue
+    const traits = cleanTraits(meta.traits)
     cleaned[String(n)] = {
       imageUrl: meta.imageUrl.trim().slice(0, 512),
       name: meta.name?.trim().slice(0, 64),
       description: meta.description?.trim().slice(0, 280),
+      ...(traits ? { traits } : {}),
     }
   }
   const store = await mergePortItems(collection, cleaned)

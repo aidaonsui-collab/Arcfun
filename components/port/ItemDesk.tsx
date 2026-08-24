@@ -7,7 +7,7 @@ import { useSignMessage } from 'wagmi'
 import { Loader2, Upload } from 'lucide-react'
 import type { Collection } from '@/lib/port/types'
 import type { PortItemMeta } from '@/lib/port/item-meta'
-import { studioItemBaseUri } from '@/lib/port/item-meta'
+import { cleanTraits, studioItemBaseUri } from '@/lib/port/item-meta'
 import { collectionItemsEditMessage } from '@/lib/arc-auth'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
 import { PORT_NFT_ABI } from '@/lib/port/abi'
@@ -23,6 +23,7 @@ export function ItemDesk({ collection }: { collection: Collection }) {
   const { writeContract, data: tx, isPending: revealing, error: revealErr } = useWriteContract()
   const { isLoading: revealingWait, isSuccess: revealedOk } = useWaitForTransactionReceipt({ hash: tx })
   const fileRef = useRef<HTMLInputElement>(null)
+  const traitsRef = useRef<HTMLInputElement>(null)
 
   const mine = Boolean(address && collection.creator && address.toLowerCase() === collection.creator.toLowerCase())
   const [items, setItems] = useState<Record<string, PortItemMeta>>({})
@@ -92,6 +93,32 @@ export function ItemDesk({ collection }: { collection: Collection }) {
     }
   }
 
+  async function onTraitsJson(files: FileList | null) {
+    const file = files?.[0]
+    if (!file) return
+    setErr('')
+    setBusy(true)
+    try {
+      const raw = JSON.parse(await file.text()) as unknown
+      const map = parseTraitPayload(raw)
+      const patch: Record<string, PortItemMeta> = {}
+      for (const [id, traits] of Object.entries(map)) {
+        const existing = itemsRef.current[id]
+        if (!existing?.imageUrl) continue
+        patch[id] = { ...existing, traits }
+      }
+      if (Object.keys(patch).length === 0) {
+        throw new Error('No matching items. Upload images first, then import metadata JSON.')
+      }
+      await save(patch)
+    } catch (e) {
+      setErr((e as Error).message || 'Traits import failed')
+    } finally {
+      setBusy(false)
+      if (traitsRef.current) traitsRef.current.value = ''
+    }
+  }
+
   function reveal() {
     setErr('')
     writeContract({
@@ -139,8 +166,9 @@ export function ItemDesk({ collection }: { collection: Collection }) {
       </Link>
       <h1 className="mt-3 text-[28px] font-semibold tracking-display sm:text-[32px]">Items</h1>
       <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-t2">
-        Drop art in mint order (#1, #2, …). Collectors mint the next ID. When the set is ready,
-        reveal so each minted piece uses its own image instead of the collection placeholder.
+        Drop art in mint order (#1, #2, …). Collectors mint the next ID. Optional: import a
+        metadata JSON with attributes so the collection page can filter by traits. When the set
+        is ready, reveal so each minted piece uses its own image.
       </p>
       <p className="mt-2 text-[13px] text-t3">
         {filled} / {collection.maxSupply} uploaded
@@ -165,6 +193,14 @@ export function ItemDesk({ collection }: { collection: Collection }) {
         >
           {revealing || revealingWait ? 'Revealing…' : 'Reveal on-chain'}
         </button>
+        <button
+          type="button"
+          disabled={busy || filled === 0}
+          onClick={() => traitsRef.current?.click()}
+          className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[14px] font-semibold text-white hover:border-lime-line disabled:opacity-50"
+        >
+          Import traits JSON
+        </button>
         <input
           ref={fileRef}
           type="file"
@@ -172,6 +208,13 @@ export function ItemDesk({ collection }: { collection: Collection }) {
           multiple
           className="hidden"
           onChange={(e) => void onFiles(e.target.files)}
+        />
+        <input
+          ref={traitsRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => void onTraitsJson(e.target.files)}
         />
       </div>
       {err || revealErr ? (
@@ -221,4 +264,36 @@ export function ItemDesk({ collection }: { collection: Collection }) {
       ) : null}
     </div>
   )
+}
+
+function parseTraitPayload(raw: unknown): Record<string, { type: string; value: string }[]> {
+  const out: Record<string, { type: string; value: string }[]> = {}
+  const add = (id: number, attrs: unknown) => {
+    if (!Number.isInteger(id) || id < 1) return
+    const traits = cleanTraits(attrs)
+    if (traits) out[String(id)] = traits
+  }
+  if (Array.isArray(raw)) {
+    for (const row of raw) {
+      const rec = (row || {}) as Record<string, unknown>
+      add(Number(rec.id ?? rec.tokenId ?? rec.edition), rec.attributes || rec.traits)
+    }
+    return out
+  }
+  if (!raw || typeof raw !== 'object') return out
+  const obj = raw as Record<string, unknown>
+  const nested = obj.items || obj.tokens || obj.nfts
+  if (Array.isArray(nested)) return parseTraitPayload(nested)
+  if (nested && typeof nested === 'object') return parseTraitPayload(nested)
+  for (const [key, value] of Object.entries(obj)) {
+    const id = Number(key)
+    if (!Number.isInteger(id)) continue
+    if (Array.isArray(value)) {
+      add(id, value)
+      continue
+    }
+    const rec = (value || {}) as Record<string, unknown>
+    add(id, rec.attributes || rec.traits)
+  }
+  return out
 }

@@ -79,6 +79,7 @@ async function listHeldItems(owner: string, collections: Collection[]): Promise<
         name: `${c.name} #${id}`,
         image: c.image,
         owner,
+        minted: true,
         traits: [],
       })
     })
