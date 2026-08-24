@@ -24,6 +24,9 @@ import {
   type OrderComponents,
 } from '@/lib/port/seaport'
 import { reviveOrder, type Listing } from '@/lib/port/listings'
+import { assertAcceptedStudioOrder } from '@/lib/port/order-policy'
+import { isTxHash, readCancelFromReceipt, readFillFromReceipt } from '@/lib/port/fill'
+import { limitOr429 } from '@/lib/rate-limit'
 import {
   COLLECTION_SET,
   ORDER_KEY,
@@ -45,6 +48,8 @@ function client() {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = await limitOr429(req, 'studio-orders-post', 30)
+  if (limited) return limited
   const body = (await req.json().catch(() => null)) as { order?: Record<string, unknown>; signature?: Hex } | null
   if (!body?.order || !body?.signature) {
     return NextResponse.json({ ok: false, error: 'order and signature required' }, { status: 400 })
@@ -68,41 +73,20 @@ export async function POST(req: NextRequest) {
   if (erc20s.some((i) => i.token.toLowerCase() !== usdc)) {
     return NextResponse.json({ ok: false, error: 'only Arc USDC' }, { status: 400 })
   }
-  if (kind === 'listing') {
-    if (order.offer.length !== 1 || offer.itemType !== ItemType.ERC721) {
-      return NextResponse.json({ ok: false, error: 'only single ERC-721 listings are accepted' }, { status: 400 })
-    }
-    if (order.consideration.some((i) => i.itemType !== ItemType.ERC20)) {
-      return NextResponse.json({ ok: false, error: 'listings must be priced in USDC' }, { status: 400 })
-    }
-  } else {
-    if (offer.itemType !== ItemType.ERC20) {
-      return NextResponse.json({ ok: false, error: 'offers must be priced in USDC' }, { status: 400 })
-    }
-    if (kind === 'offer' && consid0.itemType !== ItemType.ERC721) {
-      return NextResponse.json({ ok: false, error: 'item offers must name one ERC-721' }, { status: 400 })
-    }
-    if (kind === 'collection-offer') {
-      if (consid0.itemType !== ItemType.ERC721_WITH_CRITERIA) {
-        return NextResponse.json({ ok: false, error: 'collection offers must use criteria' }, { status: 400 })
-      }
-      if (consid0.identifierOrCriteria !== 0n) {
-        return NextResponse.json({ ok: false, error: 'collection offers must be collection-wide' }, { status: 400 })
-      }
-    }
-    if (order.consideration.slice(1).some((i) => i.itemType !== ItemType.ERC20)) {
-      return NextResponse.json({ ok: false, error: 'offer fees must be USDC' }, { status: 400 })
-    }
-  }
   if (order.endTime <= BigInt(Math.floor(Date.now() / 1000))) {
     return NextResponse.json({ ok: false, error: 'order already expired' }, { status: 400 })
   }
 
-  const nft = (kind === 'listing' ? offer.token : consid0.token) as Address
-  const tokenId = kind === 'collection-offer' ? '0' : (kind === 'listing' ? offer.identifierOrCriteria : consid0.identifierOrCriteria).toString()
-  const priceAtomic = kind === 'listing'
-    ? order.consideration.reduce((a, i) => a + i.startAmount, 0n)
-    : offer.startAmount
+  let accepted
+  try {
+    accepted = await assertAcceptedStudioOrder(order)
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: (e as Error).message || 'order rejected' }, { status: 400 })
+  }
+  const { nft, tokenId, priceAtomic, kind: acceptedKind } = accepted
+  if (acceptedKind !== kind) {
+    return NextResponse.json({ ok: false, error: 'order kind mismatch' }, { status: 400 })
+  }
 
   const c = client()
 
@@ -202,6 +186,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  const limited = await limitOr429(req, 'studio-orders-get', 40)
+  if (limited) return limited
   const collection = req.nextUrl.searchParams.get('collection') || ''
   const tokenId = req.nextUrl.searchParams.get('tokenId')
   if (!isAddress(collection)) {
@@ -227,6 +213,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const limited = await limitOr429(req, 'studio-orders-patch', 40)
+  if (limited) return limited
   const body = (await req.json().catch(() => null)) as {
     orderHash?: string
     action?: 'filled' | 'cancel'
@@ -239,45 +227,53 @@ export async function PATCH(req: NextRequest) {
   if (!orderHash || (action !== 'filled' && action !== 'cancel')) {
     return NextResponse.json({ ok: false, error: 'orderHash and action required' }, { status: 400 })
   }
+  if (!isTxHash(body?.txHash)) {
+    return NextResponse.json({ ok: false, error: 'txHash required' }, { status: 400 })
+  }
   const row = await getStoredOrder(orderHash)
   if (!row) return NextResponse.json({ ok: false, error: 'unknown order' }, { status: 404 })
 
-  let isCancelled = false
-  let filled = false
+  let receipt
   try {
-    const s = (await client().readContract({
-      address: SEAPORT_ADDRESS,
-      abi: SEAPORT_ABI,
-      functionName: 'getOrderStatus',
-      args: [row.orderHash],
-    })) as [boolean, boolean, bigint, bigint]
-    isCancelled = s[1]
-    filled = s[3] > 0n && s[2] >= s[3]
+    receipt = await client().getTransactionReceipt({ hash: body.txHash })
   } catch (e) {
     return NextResponse.json(
-      { ok: false, error: `could not reach Seaport: ${(e as Error).message.slice(0, 120)}` },
+      { ok: false, error: `could not read tx: ${(e as Error).message.slice(0, 120)}` },
       { status: 502 },
     )
   }
 
-  if (action === 'filled' && !filled) {
-    return NextResponse.json({ ok: false, error: 'order is not filled on-chain' }, { status: 400 })
+  if (action === 'filled') {
+    const fill = readFillFromReceipt(receipt, row.orderHash, row.kind)
+    if (!fill) {
+      return NextResponse.json({ ok: false, error: 'tx did not fill this order on Seaport' }, { status: 400 })
+    }
+    await recordActivity({
+      type: fillActivityType(row.kind),
+      collection: row.collection,
+      tokenId: fill.tokenId || row.tokenId,
+      priceAtomic: row.priceAtomic,
+      from: fill.from,
+      to: fill.to,
+      orderHash: row.orderHash,
+      txHash: body.txHash,
+      at: Date.now(),
+    })
+  } else {
+    if (!readCancelFromReceipt(receipt, row.orderHash, row.offerer)) {
+      return NextResponse.json({ ok: false, error: 'tx did not cancel this order on Seaport' }, { status: 400 })
+    }
+    await recordActivity({
+      type: 'cancel',
+      collection: row.collection,
+      tokenId: row.tokenId,
+      priceAtomic: row.priceAtomic,
+      from: row.offerer,
+      orderHash: row.orderHash,
+      txHash: body.txHash,
+      at: Date.now(),
+    })
   }
-  if (action === 'cancel' && !isCancelled && !filled) {
-    return NextResponse.json({ ok: false, error: 'order is still live on-chain' }, { status: 400 })
-  }
-
-  await recordActivity({
-    type: filled ? fillActivityType(row.kind) : 'cancel',
-    collection: row.collection,
-    tokenId: body?.tokenId || row.tokenId,
-    priceAtomic: row.priceAtomic,
-    from: row.offerer,
-    to: body?.buyer,
-    orderHash: row.orderHash,
-    txHash: body?.txHash,
-    at: Date.now(),
-  })
   await dropOrder(row.collection, row.orderHash)
   const { snapshot } = await syncCollection(row.collection)
   return NextResponse.json({ ok: true, ...snapshot })

@@ -5,8 +5,9 @@
  */
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAccount, useConnect, useSwitchChain, useWriteContract, usePublicClient } from 'wagmi'
-import { erc20Abi, parseEventLogs, isAddress, type Address } from 'viem'
+import { useAccount, useConnect, useSwitchChain, useWriteContract, usePublicClient, useSignMessage } from 'wagmi'
+import { erc20Abi, getAddress, parseEventLogs, isAddress, type Address } from 'viem'
+import { prepareTokenRegisterAuth } from '@/lib/arc-auth'
 import { Loader2, AlertCircle, CheckCircle, ImagePlus } from 'lucide-react'
 import {
   ARC,
@@ -72,6 +73,7 @@ export function ArcCreateForm() {
   const { connect, connectors, isPending: connecting } = useConnect()
   const { switchChain, isPending: switching } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
+  const { signMessageAsync } = useSignMessage()
   const publicClient = usePublicClient({ chainId: ARC_CHAIN_ID })
 
   const [launchType, setLaunchType] = useState<LaunchType>('instant')
@@ -229,22 +231,34 @@ export function ArcCreateForm() {
         )
 
       setStep('registering')
-      await fetch('/api/arc/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token,
+      try {
+        const registerPayload = {
+          token: getAddress(token),
           name: name.trim(),
           symbol: symbol.trim(),
-          description: description.trim() || undefined,
-          imageUrl: imageUrl || undefined,
-          twitter: twitter.trim() || undefined,
-          telegram: telegram.trim() || undefined,
-          website: website.trim() || undefined,
-          creator: address,
-          pool: pool || undefined,
-        }),
-      }).catch(() => {})
+          description: description.trim() || '',
+          imageUrl: imageUrl || '',
+          twitter: twitter.trim(),
+          telegram: telegram.trim(),
+          website: website.trim(),
+          streamUrl: '',
+          pool: pool || '',
+        }
+        const prepared = prepareTokenRegisterAuth(token, registerPayload)
+        const signature = await signMessageAsync({ message: prepared.message })
+        await fetch('/api/arc/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...registerPayload,
+            signature,
+            timestamp: prepared.timestamp,
+            nonce: prepared.nonce,
+          }),
+        })
+      } catch {
+        /* token exists on-chain; overlay can be retried */
+      }
 
       setStep('done')
       router.push(`/token/${token}`)

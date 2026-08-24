@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAddress, isAddress, type Address, type Hex } from 'viem'
 import { kv } from '@vercel/kv'
-import { isAddress, type Address, type Hex } from 'viem'
-import { collectionAllowlistEditMessage, verifyWalletAuth } from '@/lib/arc-auth'
+import { parseAuthFields } from '@/lib/arc-auth'
+import { verifyCollectionAuth, verifyOwnerRead } from '@/lib/arc-auth-server'
 import { allowlistProof, buildAllowlist, parseWallets } from '@/lib/port/merkle'
 import { readCollectionOwner } from '@/lib/port/owner'
+import { limitOr429 } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,6 +24,8 @@ async function load(collection: string): Promise<Store> {
 }
 
 export async function GET(req: NextRequest) {
+  const limited = await limitOr429(req, 'studio-allowlist-get', 60)
+  if (limited) return limited
   const collection = (req.nextUrl.searchParams.get('collection') || '').trim()
   const wallet = (req.nextUrl.searchParams.get('wallet') || '').trim()
   if (!isAddress(collection)) {
@@ -38,9 +42,29 @@ export async function GET(req: NextRequest) {
       count: store.wallets.length,
     })
   }
+
+  const owner = await readCollectionOwner(collection)
+  const canReadList =
+    !!owner &&
+    (await verifyOwnerRead({
+      owner,
+      collection,
+      action: 'read-allowlist',
+      searchParams: req.nextUrl.searchParams,
+    }))
+
+  if (canReadList) {
+    return NextResponse.json({
+      ok: true,
+      wallets: store.wallets,
+      root: store.root,
+      count: store.wallets.length,
+      updatedAt: store.updatedAt,
+    })
+  }
+
   return NextResponse.json({
     ok: true,
-    wallets: store.wallets,
     root: store.root,
     count: store.wallets.length,
     updatedAt: store.updatedAt,
@@ -48,11 +72,14 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const limited = await limitOr429(req, 'studio-allowlist-put', 20)
+  if (limited) return limited
   const body = (await req.json().catch(() => ({}))) as {
     collection?: string
     wallets?: string
     signature?: string
     timestamp?: number
+    nonce?: string
   }
   const collection = (body.collection || '').trim()
   if (!isAddress(collection)) {
@@ -61,16 +88,22 @@ export async function PUT(req: NextRequest) {
   const owner = await readCollectionOwner(collection)
   if (!owner) return NextResponse.json({ ok: false, error: 'not an ArcStudio collection' }, { status: 404 })
 
-  const timestamp = Number(body.timestamp)
-  const auth = await verifyWalletAuth({
-    address: owner,
-    message: collectionAllowlistEditMessage(collection, timestamp),
-    signature: body.signature || '',
-    timestamp,
+  const parsed = parseAuthFields(body)
+  if ('error' in parsed) return NextResponse.json({ ok: false, error: parsed.error }, { status: 400 })
+
+  const walletsText = String(body.wallets || '')
+  const auth = await verifyCollectionAuth({
+    owner,
+    collection,
+    action: 'update-allowlist',
+    payload: { collection: getAddress(collection), wallets: walletsText },
+    signature: parsed.signature,
+    timestamp: parsed.timestamp,
+    nonce: parsed.nonce,
   })
   if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: 401 })
 
-  const wallets = parseWallets(String(body.wallets || ''))
+  const wallets = parseWallets(walletsText)
   const { root, sorted } = buildAllowlist(wallets)
   const store: Store = { wallets: sorted, root, updatedAt: Date.now() }
   try {

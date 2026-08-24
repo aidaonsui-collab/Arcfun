@@ -17,7 +17,13 @@ export type PortCollectionMeta = {
 
 export async function setPortCollectionMeta(address: string, meta: PortCollectionMeta) {
   const prev = (await kv.get<PortCollectionMeta>(KEY(address))) ?? {}
-  await kv.set(KEY(address), { ...prev, ...meta })
+  const next: PortCollectionMeta = { ...prev }
+  for (const [k, v] of Object.entries(meta) as [keyof PortCollectionMeta, string | undefined][]) {
+    if (v === undefined) continue
+    if (v === '') delete next[k]
+    else next[k] = v
+  }
+  await kv.set(KEY(address), next)
 }
 
 export async function getPortCollectionMeta(address: string): Promise<PortCollectionMeta | null> {

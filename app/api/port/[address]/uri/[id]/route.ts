@@ -16,6 +16,19 @@ export async function GET(
   }
   const collection = await getCollection(address)
   if (!collection) return NextResponse.json({ error: 'not found' }, { status: 404 })
+
+  if (!collection.revealed) {
+    return NextResponse.json(
+      {
+        name: collection.name,
+        description: collection.description || '',
+        image: collection.image,
+        attributes: [],
+      },
+      { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } },
+    )
+  }
+
   const item = await getPortItem(address, id)
   const name = item?.name || `${collection.name} #${id}`
   const image = item?.imageUrl || collection.image

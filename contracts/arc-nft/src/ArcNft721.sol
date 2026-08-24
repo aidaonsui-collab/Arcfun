@@ -31,6 +31,12 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
     error ZeroAddr();
     error ScheduleLocked();
     error PublicStartRequired();
+    error PriceLocked();
+    error MetadataLocked();
+    error TxCap();
+
+    uint256 public constant MAX_MINT_PER_TX = 20;
+    uint256 public constant MAX_OWNER_MINT_PER_TX = 50;
 
     struct Init {
         string name;
@@ -132,6 +138,7 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
 
     function _mintTo(address to, uint256 n, bool allowlist, bytes32[] memory proof) internal {
         if (n == 0) revert BadN();
+        if (n > MAX_MINT_PER_TX) revert TxCap();
         if (totalMinted + n > maxSupply) revert SoldOut();
         if (mintedBy[to] + n > maxPerWallet) revert WalletCap();
         if (allowlist) {
@@ -180,20 +187,24 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
     }
 
     function setBaseURI(string calldata newBaseURI) external onlyOwner {
+        if (revealed) revert MetadataLocked();
         baseTokenURI = newBaseURI;
         emit BaseURISet(newBaseURI);
     }
 
     function setUnrevealedURI(string calldata uri) external onlyOwner {
+        if (revealed) revert MetadataLocked();
         unrevealedURI = uri;
     }
 
     function setAllowlistRoot(bytes32 root) external onlyOwner {
+        if (revealed) revert MetadataLocked();
         allowlistRoot = root;
         emit AllowlistRootSet(root);
     }
 
     function setPrice(uint256 newPrice) external onlyOwner {
+        if (revealed || _publicLive() || totalMinted > 0) revert PriceLocked();
         price = newPrice;
         emit PriceSet(newPrice);
     }
@@ -213,6 +224,7 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
     function ownerMint(address to, uint256 n) external onlyOwner nonReentrant {
         if (to == address(0)) revert ZeroAddr();
         if (n == 0) revert BadN();
+        if (n > MAX_OWNER_MINT_PER_TX) revert TxCap();
         if (totalMinted + n > maxSupply) revert SoldOut();
         uint256 firstId = totalMinted + 1;
         mintedBy[to] += n;

@@ -2,12 +2,13 @@
  * PUT /api/port/[address]/meta — collection owner updates off-chain banner (and optional image).
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { isAddress, type Address } from 'viem'
+import { getAddress, isAddress } from 'viem'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
-import { collectionBannerEditMessage, collectionMetaEditMessage, verifyWalletAuth } from '@/lib/arc-auth'
+import { parseAuthFields } from '@/lib/arc-auth'
+import { verifyCollectionAuth } from '@/lib/arc-auth-server'
 import { setPortCollectionMeta } from '@/lib/port/meta'
-import { PORT_FACTORY_ABI, PORT_NFT_ABI } from '@/lib/port/abi'
-import { ARC, arcPublicClient } from '@/lib/contracts-arc'
+import { readCollectionOwner } from '@/lib/port/owner'
+import { sanitizeHttpsUrl, sanitizeTelegram, sanitizeTwitter, sanitizeWebsite } from '@/lib/social-href'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,6 +25,7 @@ export async function PUT(
     address?: string
     signature?: string
     timestamp?: number
+    nonce?: string
     bannerUrl?: string
     description?: string
     twitter?: string
@@ -36,69 +38,55 @@ export async function PUT(
     return NextResponse.json({ ok: false, error: 'address mismatch' }, { status: 400 })
   }
 
-  const client = arcPublicClient()
-  let owner: Address
-  try {
-    const ok = await client.readContract({
-      address: ARC.NFT_FACTORY,
-      abi: PORT_FACTORY_ABI,
-      functionName: 'isCollection',
-      args: [collection as Address],
-    })
-    if (!ok) {
-      return NextResponse.json({ ok: false, error: 'not an ArcStudio collection' }, { status: 404 })
-    }
-    owner = (await client.readContract({
-      address: collection as Address,
-      abi: PORT_NFT_ABI,
-      functionName: 'owner',
-    })) as Address
-  } catch {
-    return NextResponse.json({ ok: false, error: 'could not read collection owner' }, { status: 502 })
-  }
+  const owner = await readCollectionOwner(collection)
+  if (!owner) return NextResponse.json({ ok: false, error: 'not an ArcStudio collection' }, { status: 404 })
 
-  const timestamp = Number(body.timestamp)
-  const bannerMsg = collectionBannerEditMessage(collection, timestamp)
-  const metaMsg = collectionMetaEditMessage(collection, timestamp)
-  const checkedBanner = await verifyWalletAuth({
-    address: owner,
-    message: bannerMsg,
-    signature: body.signature || '',
-    timestamp,
+  const parsed = parseAuthFields(body)
+  if ('error' in parsed) return NextResponse.json({ ok: false, error: parsed.error }, { status: 400 })
+
+  const payload = {
+    collection: getAddress(collection),
+    bannerUrl: typeof body.bannerUrl === 'string' ? body.bannerUrl : '',
+    description: typeof body.description === 'string' ? body.description : '',
+    twitter: typeof body.twitter === 'string' ? body.twitter : '',
+    telegram: typeof body.telegram === 'string' ? body.telegram : '',
+    website: typeof body.website === 'string' ? body.website : '',
+  }
+  const auth = await verifyCollectionAuth({
+    owner,
+    collection,
+    action: 'update-collection',
+    payload,
+    signature: parsed.signature,
+    timestamp: parsed.timestamp,
+    nonce: parsed.nonce,
   })
-  const checkedMeta = checkedBanner.ok
-    ? checkedBanner
-    : await verifyWalletAuth({
-        address: owner,
-        message: metaMsg,
-        signature: body.signature || '',
-        timestamp,
-      })
-  if (!checkedMeta.ok) {
-    return NextResponse.json({ ok: false, error: checkedMeta.error }, { status: 401 })
-  }
+  if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: 401 })
 
-  const bannerUrl = typeof body.bannerUrl === 'string' ? body.bannerUrl.trim() : undefined
-  if (bannerUrl && !/^https?:\/\//i.test(bannerUrl)) {
+  const bannerUrl = payload.bannerUrl ? sanitizeHttpsUrl(payload.bannerUrl) : ''
+  if (payload.bannerUrl && !bannerUrl) {
     return NextResponse.json({ ok: false, error: 'banner must be an https URL' }, { status: 400 })
   }
-  const clip = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : undefined)
+  const website = payload.website ? sanitizeWebsite(payload.website) : ''
+  if (payload.website && !website) {
+    return NextResponse.json({ ok: false, error: 'website must be https' }, { status: 400 })
+  }
 
   try {
     await setPortCollectionMeta(collection, {
-      ...(bannerUrl !== undefined ? { bannerUrl } : {}),
-      ...(body.description !== undefined ? { description: clip(body.description, 280) || '' } : {}),
-      ...(body.twitter !== undefined ? { twitter: clip(body.twitter, 80) || '' } : {}),
-      ...(body.telegram !== undefined ? { telegram: clip(body.telegram, 80) || '' } : {}),
-      ...(body.website !== undefined ? { website: clip(body.website, 120) || '' } : {}),
+      bannerUrl,
+      description: payload.description.trim().slice(0, 280),
+      twitter: payload.twitter ? sanitizeTwitter(payload.twitter) : '',
+      telegram: payload.telegram ? sanitizeTelegram(payload.telegram) : '',
+      website,
     })
     return NextResponse.json({
       ok: true,
-      bannerUrl: bannerUrl || '',
-      description: clip(body.description, 280) || '',
-      twitter: clip(body.twitter, 80) || '',
-      telegram: clip(body.telegram, 80) || '',
-      website: clip(body.website, 120) || '',
+      bannerUrl,
+      description: payload.description.trim().slice(0, 280),
+      twitter: payload.twitter ? sanitizeTwitter(payload.twitter) : '',
+      telegram: payload.telegram ? sanitizeTelegram(payload.telegram) : '',
+      website,
     })
   } catch (e) {
     return NextResponse.json(

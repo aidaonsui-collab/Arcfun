@@ -11,6 +11,7 @@ import {
   publicMintLive,
   CREATOR_SHARE,
   PLATFORM_FEE,
+  MAX_MINT_PER_TX,
   type Collection,
 } from '@/lib/port/types'
 import { formatUsdc } from '@/lib/port/format'
@@ -40,7 +41,10 @@ export function MintSheet({
   const status = collection ? collectionStatus(collection) : 'sold'
   const total = (collection?.mintPriceUsdc ?? 0) * qty
   const max = collection
-    ? Math.max(1, Math.min(collection.maxPerWallet, collection.maxSupply - collection.minted))
+    ? Math.max(
+        1,
+        Math.min(collection.maxPerWallet, collection.maxSupply - collection.minted, MAX_MINT_PER_TX),
+      )
     : 1
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
 

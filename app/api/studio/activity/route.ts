@@ -3,10 +3,13 @@ import { isAddress, parseEventLogs, type Address, type Hex } from 'viem'
 import { getActivity, getGlobalActivity, recordActivity } from '@/lib/port/market'
 import { PORT_FACTORY_ABI, PORT_NFT_ABI } from '@/lib/port/abi'
 import { ARC, arcPublicClient } from '@/lib/contracts-arc'
+import { limitOr429 } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  const limited = await limitOr429(req, 'studio-activity-get', 60)
+  if (limited) return limited
   const collection = req.nextUrl.searchParams.get('collection') || ''
   const tokenId = req.nextUrl.searchParams.get('tokenId')
   if (!collection) {
@@ -22,6 +25,8 @@ export async function GET(req: NextRequest) {
 
 /** Client reports a mint or send tx. We only write after receipt + Minted / Transfer logs. */
 export async function POST(req: NextRequest) {
+  const limited = await limitOr429(req, 'studio-activity-post', 20)
+  if (limited) return limited
   const body = (await req.json().catch(() => null)) as { collection?: string; txHash?: string } | null
   const collection = (body?.collection || '').trim()
   const txHash = (body?.txHash || '').trim() as Hex
@@ -61,10 +66,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'tx is not on this collection' }, { status: 400 })
   }
 
+  const colLogs = receipt.logs.filter((l) => l.address.toLowerCase() === collection.toLowerCase())
   const mintedLogs = parseEventLogs({
     abi: PORT_NFT_ABI,
     eventName: 'Minted',
-    logs: receipt.logs,
+    logs: colLogs,
   })
   const at = Date.now()
   let recorded = 0
@@ -96,7 +102,7 @@ export async function POST(req: NextRequest) {
   const xfers = parseEventLogs({
     abi: PORT_NFT_ABI,
     eventName: 'Transfer',
-    logs: receipt.logs,
+    logs: colLogs,
   })
   const zero = '0x0000000000000000000000000000000000000000'
   for (const log of xfers) {

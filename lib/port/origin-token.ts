@@ -34,12 +34,9 @@ export type OriginTokenInfo = {
   linkedCollection: Address | null
 }
 
-export async function lookupOriginToken(raw: string): Promise<OriginTokenInfo | null> {
-  if (!isPlausibleEvmAddress(raw)) return null
-  const token = raw as Address
+/** Instant / Reflection launch creator, or null if the token is not on the pad. */
+export async function readPadCreator(token: Address): Promise<Address | null> {
   const client = arcPublicClient()
-  let creator: Address = zeroAddress
-
   if (arcInstantEnabled()) {
     try {
       const p = await client.readContract({
@@ -49,14 +46,13 @@ export async function lookupOriginToken(raw: string): Promise<OriginTokenInfo | 
         args: [token],
       })
       if (p.creator && p.creator !== zeroAddress && p.uniPool && p.uniPool !== zeroAddress) {
-        creator = p.creator
+        return p.creator
       }
     } catch {
       /* not instant */
     }
   }
-
-  if (creator === zeroAddress && arcReflectionEnabled()) {
+  if (arcReflectionEnabled()) {
     try {
       const row = await client.readContract({
         address: ARC.REFLECTION_FACTORY,
@@ -66,11 +62,19 @@ export async function lookupOriginToken(raw: string): Promise<OriginTokenInfo | 
       })
       const c = row[0]
       const uniPool = row[3]
-      if (c && c !== zeroAddress && uniPool && uniPool !== zeroAddress) creator = c
+      if (c && c !== zeroAddress && uniPool && uniPool !== zeroAddress) return c
     } catch {
       /* not reflection */
     }
   }
+  return null
+}
+
+export async function lookupOriginToken(raw: string): Promise<OriginTokenInfo | null> {
+  if (!isPlausibleEvmAddress(raw)) return null
+  const token = raw as Address
+  const client = arcPublicClient()
+  const creator = (await readPadCreator(token)) || zeroAddress
 
   if (creator === zeroAddress) return null
 

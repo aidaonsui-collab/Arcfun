@@ -88,7 +88,7 @@ Nothing below is done yet; this is the runbook for whoever has domain/Vercel acc
    `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`, and once the domain is live, add it under that
    project's **Verified Domains**.
 5. **Set environment variables** in Vercel (Production) from `.env.example`. At minimum:
-   `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_ARC_RPC` (or `NEXT_PUBLIC_INFURA_API_KEY`),
+   `NEXT_PUBLIC_APP_URL`, `INFURA_API_KEY` (server) or public `NEXT_PUBLIC_ARC_RPC`,
    `KV_REST_API_URL` / `KV_REST_API_TOKEN`, `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`.
 6. **Add the domain** in Vercel → Settings → Domains → `arcfun.lol` (+ `www`, redirect to apex),
    then point DNS at Vercel per its dashboard instructions.

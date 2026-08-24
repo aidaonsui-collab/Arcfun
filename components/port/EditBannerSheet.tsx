@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useSignMessage } from 'wagmi'
-import { collectionMetaEditMessage } from '@/lib/arc-auth'
+import { getAddress } from 'viem'
+import { prepareCollectionAuth } from '@/lib/arc-auth'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
 import { ImageUpload } from '@/components/port/ImageUpload'
 import type { Collection } from '@/lib/port/types'
@@ -60,16 +61,24 @@ export function EditBannerSheet({
         bannerUrl = await uploadImageToCloudinary(file, 'port')
       }
       if (preview === '' && !file) bannerUrl = ''
-      const timestamp = Date.now()
-      const message = collectionMetaEditMessage(addr, timestamp)
-      const signature = await signMessageAsync({ message })
+      const payload = {
+        collection: getAddress(addr),
+        bannerUrl,
+        description,
+        twitter,
+        telegram,
+        website,
+      }
+      const prepared = prepareCollectionAuth(addr, 'update-collection', payload)
+      const signature = await signMessageAsync({ message: prepared.message })
       const res = await fetch(`/api/port/${addr}/meta`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           address: addr,
           signature,
-          timestamp,
+          timestamp: prepared.timestamp,
+          nonce: prepared.nonce,
           bannerUrl,
           description,
           twitter,

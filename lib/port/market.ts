@@ -77,8 +77,15 @@ export async function getStoredOrder(hash: string): Promise<StoredOrder | null> 
 export async function recordActivity(event: MarketActivity): Promise<void> {
   try {
     const seen = SEEN_KEY(event.orderHash, event.type)
-    if (await kv.get(seen)) return
-    await kv.set(seen, 1, { ex: 60 * 60 * 24 * 40 })
+    const prev = await kv.get<{ txHash?: string } | number>(seen)
+    const prevHash =
+      prev && typeof prev === 'object' && typeof prev.txHash === 'string' ? prev.txHash : ''
+    if (prev && (prevHash || !event.txHash)) return
+    await kv.set(seen, { txHash: event.txHash || '' }, { ex: 60 * 60 * 24 * 40 })
+    if (prev && event.txHash) {
+      await replaceActivity(event)
+      return
+    }
     const payload = JSON.stringify(event)
     await kv.lpush(ACTIVITY_KEY(event.collection), payload)
     await kv.ltrim(ACTIVITY_KEY(event.collection), 0, ACTIVITY_CAP - 1)
@@ -87,6 +94,23 @@ export async function recordActivity(event: MarketActivity): Promise<void> {
   } catch {
     /* kv optional */
   }
+}
+
+async function replaceActivity(event: MarketActivity): Promise<void> {
+  const rewrite = async (key: string, cap: number) => {
+    const raw = (await kv.lrange<string>(key, 0, cap - 1)) || []
+    const rows = parseActivity(raw)
+    const next = rows.map((r) =>
+      r.orderHash.toLowerCase() === event.orderHash.toLowerCase() && r.type === event.type ? event : r,
+    )
+    await kv.del(key)
+    if (next.length === 0) return
+    await kv.rpush(key, ...next.map((r) => JSON.stringify(r)))
+  }
+  await Promise.all([
+    rewrite(ACTIVITY_KEY(event.collection), ACTIVITY_CAP),
+    rewrite(GLOBAL_ACTIVITY_KEY, GLOBAL_ACTIVITY_CAP),
+  ])
 }
 
 function parseActivity(raw: unknown[]): MarketActivity[] {

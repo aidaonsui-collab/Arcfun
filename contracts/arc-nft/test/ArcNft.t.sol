@@ -370,6 +370,70 @@ contract ArcNftTest is Test {
         // origin already taken by col2
         assertEq(factory.collectionOfToken(eve), address(col2));
     }
+
+    function test_setPrice_locksAfterMintAndPublic() public {
+        ArcNftCollectionFactory.CreateParams memory p = _params();
+        p.publicMintStart = uint64(block.timestamp + 1 days);
+        vm.prank(creator);
+        ArcNft721 col = ArcNft721(factory.createCollection{value: CREATION_FEE}(p));
+
+        vm.prank(creator);
+        col.setPrice(1);
+        assertEq(col.price(), 1);
+
+        vm.prank(creator);
+        col.ownerMint(alice, 1);
+        vm.prank(creator);
+        vm.expectRevert(ArcNft721.PriceLocked.selector);
+        col.setPrice(2);
+
+        ArcNftCollectionFactory.CreateParams memory live = _params();
+        live.publicMintStart = uint64(block.timestamp);
+        vm.prank(creator);
+        ArcNft721 pub = ArcNft721(factory.createCollection{value: CREATION_FEE}(live));
+        vm.prank(creator);
+        vm.expectRevert(ArcNft721.PriceLocked.selector);
+        pub.setPrice(3);
+    }
+
+    function test_setBaseURI_andAllowlist_lockAfterReveal() public {
+        ArcNft721 col = _create(creator, CREATION_FEE);
+        vm.prank(creator);
+        col.setBaseURI("ipfs://prep/");
+        vm.prank(creator);
+        col.setAllowlistRoot(bytes32(uint256(1)));
+        vm.prank(creator);
+        col.reveal("ipfs://live/");
+        vm.prank(creator);
+        vm.expectRevert(ArcNft721.MetadataLocked.selector);
+        col.setBaseURI("ipfs://rug/");
+        vm.prank(creator);
+        vm.expectRevert(ArcNft721.MetadataLocked.selector);
+        col.setAllowlistRoot(bytes32(0));
+        vm.prank(creator);
+        vm.expectRevert(ArcNft721.MetadataLocked.selector);
+        col.setUnrevealedURI("ipfs://nope");
+    }
+
+    function test_mint_txCap() public {
+        ArcNftCollectionFactory.CreateParams memory p = _params();
+        p.publicMintStart = uint64(block.timestamp);
+        p.maxPerWallet = 100;
+        p.maxSupply = 100;
+        vm.prank(creator);
+        ArcNft721 col = ArcNft721(factory.createCollection{value: CREATION_FEE}(p));
+        vm.startPrank(alice);
+        usdc.approve(address(col), type(uint256).max);
+        vm.expectRevert(ArcNft721.TxCap.selector);
+        col.mint(21);
+        col.mint(20);
+        vm.stopPrank();
+        assertEq(col.balanceOf(alice), 20);
+
+        vm.prank(creator);
+        vm.expectRevert(ArcNft721.TxCap.selector);
+        col.ownerMint(bob, 51);
+    }
 }
 
 contract MockInstant {

@@ -6,17 +6,16 @@
  *
  * Native gas = USDC (18dp msg.value). ERC-20 USDC interface at 0x3600…000 (6dp).
  *
- * RPCs (mainnet): MetaMask Arc uses Infura (`arc-mainnet.infura.io`). Full URL needs a project
- * id with Arc enabled on the Infura dashboard:
+ * RPCs (mainnet): the browser uses public endpoints only. Infura stays server-side:
+ *   INFURA_API_KEY=...            # or ARC_INFURA_API_KEY — never NEXT_PUBLIC_
+ *   ARC_RPC=https://arc-mainnet.infura.io/v3/<PROJECT_ID>   # server override
+ *   NEXT_PUBLIC_ARC_RPC=          # public RPC only; Infura URLs here are stripped
  *   NEXT_PUBLIC_ARC_CHAIN_ID=5042
- *   NEXT_PUBLIC_ARC_RPC=https://arc-mainnet.infura.io/v3/<PROJECT_ID>
- *   # or set NEXT_PUBLIC_INFURA_API_KEY and we build the URL
  *   NEXT_PUBLIC_ARC_EXPLORER=https://arc-scan.org
  *   NEXT_PUBLIC_ARC_ENABLED=1
  *
  * 2026-08-03: Railway fortest RPC is DEAD. Public baracat rate-limits under burst (Cloudflare
- * 1015 / -32005). Prefer MetaMask Infura Arc via NEXT_PUBLIC_ARC_RPC or NEXT_PUBLIC_INFURA_API_KEY;
- * baracat remains the only working unauthenticated fallback.
+ * 1015 / -32005). Infura is a server fallback, not a browser secret.
  *
  * 2026-08-06: thirdweb (`https://5042.rpc.thirdweb.com`) is BANNED as an Arc endpoint — see the
  * block above ARC_RPC_URLS. It is not a weak fallback, it is a poisoned one.
@@ -51,26 +50,22 @@ export const ARC_IS_TESTNET = ARC_CHAIN_ID === ARC_TESTNET_CHAIN_ID
  * label, so off-testnet this stays empty until NEXT_PUBLIC_ARC_RPC is supplied and `arcEnabled()`
  * keeps the UI dark.
  *
- * Mainnet default: MetaMask’s Arc Infura host (UI label `arc-mainnet.infura.io`).
- * Infura JSON-RPC requires `/v3/<PROJECT_ID>` with Arc enabled on the project.
- * Override with NEXT_PUBLIC_ARC_RPC, or set NEXT_PUBLIC_INFURA_API_KEY to build the URL.
- * Public fallback: baracat only (rate-limits under burst, but its eth_call is sound).
- * thirdweb is filtered out unconditionally — see BANNED_ARC_RPC_HOSTS below.
+ * Mainnet browser default: public baracat (rate-limits under burst, but its eth_call is sound).
+ * Infura is built from INFURA_API_KEY on the server only — a NEXT_PUBLIC_ Infura key ships in
+ * the JS bundle and anyone can burn the quota. thirdweb is filtered out unconditionally.
  */
 /** MetaMask built-in Arc mainnet RPC host (Infura). */
 export const ARC_INFURA_HOST = 'https://arc-mainnet.infura.io'
 
-const ARC_INFURA_KEY =
-  process.env.NEXT_PUBLIC_INFURA_API_KEY ||
-  process.env.NEXT_PUBLIC_INFURA_KEY ||
-  process.env.NEXT_PUBLIC_ARC_INFURA_KEY ||
-  ''
+function isKeyedInfuraUrl(url: string): boolean {
+  return /infura\.io\/v3\//i.test(url)
+}
 
-/**
- * Full Infura Arc JSON-RPC URL — same host MetaMask shows for Arc (`arc-mainnet.infura.io`).
- * Requires `/v3/<PROJECT_ID>` with Arc enabled on the Infura project (bare host / empty id → 401).
- */
-const ARC_INFURA_RPC = ARC_INFURA_KEY ? `${ARC_INFURA_HOST}/v3/${ARC_INFURA_KEY}` : ''
+/** Server-only Infura Arc URL. Empty in the browser bundle (no NEXT_PUBLIC_ prefix). */
+function serverInfuraRpc(): string {
+  const key = (process.env.INFURA_API_KEY || process.env.ARC_INFURA_API_KEY || '').trim()
+  return key ? `${ARC_INFURA_HOST}/v3/${key}` : ''
+}
 
 /** Public unauthenticated fallbacks when Infura is unset / project lacks Arc / rate-limited. */
 const ARC_BARACAT_RPC = 'https://arc-mainnet-rpc.baracat.meme'
@@ -160,20 +155,12 @@ export const ARC_RPC_INFRA_HINT =
   'answers eth_call, then hard-refresh and retry.'
 
 /**
- * Primary mainnet default: baracat, not Infura, despite Infura being configured (keyed) in prod.
- *
- * 2026-08-10: measured directly against production — every RPC call succeeds through Infura, no
- * errors anywhere, just ~2s per call. Since nothing throws, isArcRpcInfraError/fallback() never
- * moves past it: Infura IS the "working" transport, it's just slow right now. A catalog build
- * needs several sequential round trips (enumerate token count → enumerate addresses → per-token
- * details), each eating that ~2s, which is exactly how arcfun.co ended up taking 6-9s to load a
- * 2-3 token catalog while a real indexer loads in ~1s. baracat measured well under 1s for the same
- * calls in the same investigation. Keeping Infura in the fallback list (see ARC_RPC_URLS below),
- * just not leading with it while it's the slow one — flip this back if that ever reverses.
+ * Primary mainnet default for the browser: baracat. Infura is appended only on the server
+ * (see ARC_SERVER_RPC_CANDIDATES). It used to lead the public list and leaked the project id.
  */
 const ARC_MAINNET_RPC_DEFAULT = ARC_BARACAT_RPC
 
-/** Ordered public/mainnet RPC candidates for wagmi fallback transports. */
+/** Ordered public RPC candidates for wagmi. Never includes a keyed Infura URL. */
 export const ARC_RPC_URLS: string[] = (() => {
   const primary =
     process.env.NEXT_PUBLIC_ARC_RPC ||
@@ -186,27 +173,21 @@ export const ARC_RPC_URLS: string[] = (() => {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  // baracat first (see ARC_MAINNET_RPC_DEFAULT above for why), Infura kept as a fallback, then
-  // the read-only-safe-calls-only theleak tail. ARC_SCAN_RPC goes LAST, not second: it's a public
-  // RPC with no burst capacity, and catalog reads (fetchArcReflectionPoolTokens etc.) fan out many
-  // concurrent eth_calls. With baracat down 2026-08-13, putting arc-scan.org second sent that whole
-  // burst there, it 429'd ("Request exceeds defined limit"/"temporarily out of capacity"), and the
-  // reflection-pool tokens silently vanished from the home grid (buildArcCatalog swallows a failed
-  // source with `.catch(() => [])`). Infura/theleak tolerate the burst; arc-scan.org doesn't, so it
-  // only gets used once everything else has failed.
   const defaults = ARC_IS_TESTNET
     ? [ARC_TESTNET_RPC]
-    : [ARC_BARACAT_RPC, ARC_INFURA_RPC, ARC_THELEAK_RPC, ARC_SCAN_RPC].filter(Boolean)
+    : [ARC_BARACAT_RPC, ARC_THELEAK_RPC, ARC_SCAN_RPC].filter(Boolean)
   const seen = new Set<string>()
   const out: string[] = []
   for (const u of [primary, ...extras, ...defaults]) {
-    // Drop banned endpoints from EVERY source, env included — a configured-but-dead primary is
-    // how this broke production, and silently honouring it would just reproduce that.
     if (u && isBannedArcRpc(u)) {
       console.warn(
         `[arc] ignoring unusable RPC ${u} — it answers eth_chainId but fails eth_call. ` +
-          `Set NEXT_PUBLIC_ARC_RPC to an Infura Arc URL (or leave unset to use baracat).`,
+          `Leave NEXT_PUBLIC_ARC_RPC unset to use public Arc fallbacks.`,
       )
+      continue
+    }
+    if (u && isKeyedInfuraUrl(u)) {
+      console.warn('[arc] ignoring Infura URL in NEXT_PUBLIC_* — set INFURA_API_KEY (server) instead')
       continue
     }
     if (u && !seen.has(u)) {
@@ -473,9 +454,10 @@ export function arcEnabled(): boolean {
  */
 const ARC_SERVER_RPC_CANDIDATES: string[] = (() => {
   const priv = process.env.ARC_RPC?.trim() || ''
+  const infura = serverInfuraRpc()
   const seen = new Set<string>()
   const out: string[] = []
-  for (const u of [priv, ...ARC_RPC_URLS]) {
+  for (const u of [priv, infura, ...ARC_RPC_URLS]) {
     if (u && !isBannedArcRpc(u) && !seen.has(u)) {
       seen.add(u)
       out.push(u)
@@ -483,6 +465,10 @@ const ARC_SERVER_RPC_CANDIDATES: string[] = (() => {
   }
   return out
 })()
+
+export function arcServerRpcUrls(): string[] {
+  return ARC_SERVER_RPC_CANDIDATES.length ? ARC_SERVER_RPC_CANDIDATES : [ARC_SERVER_RPC]
+}
 
 const _clients: ReturnType<typeof createPublicClient>[] = []
 export function arcPublicClient() {

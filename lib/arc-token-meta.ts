@@ -56,7 +56,13 @@ export async function setArcTokenMeta(token: string, meta: ArcTokenMeta): Promis
   // with `prev = {}` after a failed read would merge partial input over a blank base and wipe
   // whatever was already stored (imageUrl, socials) for this token.
   const prev = (await kv.get<ArcTokenMeta>(KEY(token))) ?? {}
-  const next = { ...prev, ...meta, instantLaunch: true }
+  const next: ArcTokenMeta = { ...prev }
+  for (const [k, v] of Object.entries(meta) as [keyof ArcTokenMeta, ArcTokenMeta[keyof ArcTokenMeta]][]) {
+    if (v === undefined) continue
+    if (v === '') delete next[k]
+    else (next as Record<string, unknown>)[k] = v
+  }
+  next.instantLaunch = true
   await kv.set(KEY(token), next)
   lastGood.set(token.toLowerCase(), next)
 }

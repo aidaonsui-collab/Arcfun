@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { collectionStatus, mintCta, publicMintLive, allowlistWindowLive, type Collection } from '@/lib/port/types'
 import { formatInt, formatUsdc, timeUntil } from '@/lib/port/format'
 import { studioPath } from '@/lib/port/path'
+import { telegramHref, twitterHref, websiteHref } from '@/lib/social-href'
 
 function stageState(start: number, end: number, fallbackLive: boolean) {
   const now = Date.now()
@@ -125,28 +126,33 @@ export function DropLanding({
         </div>
 
         <div className="mt-5 flex flex-wrap gap-3 text-[13px]">
-          {collection.twitter ? (
+          {twitterHref(collection.twitter || '') ? (
             <a
-              href={collection.twitter.startsWith('http') ? collection.twitter : `https://x.com/${collection.twitter.replace(/^@/, '')}`}
+              href={twitterHref(collection.twitter || '')}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="text-t3 hover:text-white"
             >
               X
             </a>
           ) : null}
-          {collection.telegram ? (
+          {telegramHref(collection.telegram || '') ? (
             <a
-              href={collection.telegram.startsWith('http') ? collection.telegram : `https://t.me/${collection.telegram.replace(/^@/, '')}`}
+              href={telegramHref(collection.telegram || '')}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="text-t3 hover:text-white"
             >
               Telegram
             </a>
           ) : null}
-          {collection.website ? (
-            <a href={collection.website} target="_blank" rel="noreferrer" className="text-t3 hover:text-white">
+          {websiteHref(collection.website || '') ? (
+            <a
+              href={websiteHref(collection.website || '')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-t3 hover:text-white"
+            >
               Website
             </a>
           ) : null}

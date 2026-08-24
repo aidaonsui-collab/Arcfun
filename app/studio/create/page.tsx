@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAccount, useConnect, usePublicClient, useSwitchChain, useWriteContract, useSignMessage } from 'wagmi'
-import { isAddress, parseEventLogs, parseUnits, zeroAddress, type Address } from 'viem'
+import { getAddress, isAddress, parseEventLogs, parseUnits, zeroAddress, type Address } from 'viem'
 import { ChevronLeft, Rocket } from 'lucide-react'
 import { CREATE_FEE_USDC } from '@/lib/port/types'
 import { formatUsdc } from '@/lib/port/format'
@@ -16,7 +16,7 @@ import { arcPortEnabled, arcPortFactory } from '@/lib/port/contracts'
 import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
 import { buildAllowlist, parseWallets } from '@/lib/port/merkle'
-import { collectionAllowlistEditMessage } from '@/lib/arc-auth'
+import { prepareCollectionAuth } from '@/lib/arc-auth'
 
 const inputClass =
   'h-12 w-full rounded-xl border border-hair bg-s2 px-3.5 text-[15px] tracking-tightish outline-none transition-[border-color] duration-150 focus:border-lime-line placeholder:text-white/25'
@@ -313,37 +313,49 @@ export default function PortCreatePage() {
       })
       const collection = created?.args?.collection as Address | undefined
       if (!collection) throw new Error('Collection created but the address was not in the receipt.')
-      await fetch('/api/port/register', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          address: collection,
+      try {
+        const registerPayload = {
+          collection: getAddress(collection),
           name: name.trim(),
           symbol: symbol.trim().toUpperCase(),
           description: description.trim(),
-          imageUrl,
-          bannerUrl: bannerUrl || undefined,
+          imageUrl: imageUrl || '',
+          bannerUrl: bannerUrl || '',
           twitter: twitter.trim(),
           telegram: telegram.trim(),
           website: website.trim(),
-          creator: address,
-          originToken: originInfo?.token,
-        }),
-      }).catch(() => null)
+        }
+        const prepared = prepareCollectionAuth(collection, 'register-collection', registerPayload)
+        const signature = await signMessageAsync({ message: prepared.message })
+        await fetch('/api/port/register', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            address: collection,
+            ...registerPayload,
+            signature,
+            timestamp: prepared.timestamp,
+            nonce: prepared.nonce,
+          }),
+        })
+      } catch {
+        /* on-chain collection exists; overlay can be set from collection settings */
+      }
       if (allowlist && wallets.length) {
         try {
-          const timestamp = Date.now()
-          const signature = await signMessageAsync({
-            message: collectionAllowlistEditMessage(collection, timestamp),
-          })
+          const walletsText = wallets.join('\n')
+          const payload = { collection: getAddress(collection), wallets: walletsText }
+          const prepared = prepareCollectionAuth(collection, 'update-allowlist', payload)
+          const signature = await signMessageAsync({ message: prepared.message })
           await fetch('/api/studio/allowlist', {
             method: 'PUT',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
               collection,
-              wallets: wallets.join('\n'),
+              wallets: walletsText,
               signature,
-              timestamp,
+              timestamp: prepared.timestamp,
+              nonce: prepared.nonce,
             }),
           })
         } catch {

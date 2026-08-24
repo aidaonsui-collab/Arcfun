@@ -18,6 +18,7 @@ import type { TraderMeta } from '@/lib/arc-trader-meta'
 import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
 import { priceChangeFromTrades } from '@/lib/candles'
+import { telegramHref, twitterHref, websiteHref } from '@/lib/social-href'
 
 const TradingViewChart = nextDynamic(() => import('@/components/TradingViewChart'), {
   ssr: false,
@@ -34,27 +35,7 @@ import {
 type Tab = 'Activity' | 'holders'
 type VolRange = '1H' | '6H' | '24H'
 
-function twitterHref(raw: string): string {
-  const t = raw.trim().replace(/^@/, '')
-  if (!t) return ''
-  if (/^https?:\/\//i.test(t)) return t
-  const handle = t.replace(/^(https?:\/\/)?(www\.)?(twitter|x)\.com\//i, '').split(/[/?#]/)[0]
-  return handle ? `https://x.com/${handle}` : ''
-}
 
-function telegramHref(raw: string): string {
-  const t = raw.trim()
-  if (!t) return ''
-  if (/^https?:\/\//i.test(t)) return t
-  const path = t.replace(/^(https?:\/\/)?(www\.)?(t\.me|telegram\.me)\//i, '').replace(/^@/, '')
-  return path ? `https://t.me/${path}` : ''
-}
-
-function websiteHref(raw: string): string {
-  const t = raw.trim()
-  if (!t) return ''
-  return /^https?:\/\//i.test(t) ? t : `https://${t}`
-}
 
 
 const BURN_ADDRESS = '0x000000000000000000000000000000000000dead'

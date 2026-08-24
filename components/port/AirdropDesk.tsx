@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useAccount, useConnect, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi'
-import { erc20Abi, formatUnits, isAddress, parseUnits, zeroAddress, type Address } from 'viem'
+import { useAccount, useConnect, usePublicClient, useSignMessage, useSwitchChain, useWriteContract } from 'wagmi'
+import { authQuery, prepareCollectionAuth } from '@/lib/arc-auth'
+import { erc20Abi, formatUnits, getAddress, isAddress, parseUnits, zeroAddress, type Address } from 'viem'
 import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { ARC_DISPERSE_ABI } from '@/lib/port/abi'
 import { aggregateAirdrop, type TokenHolder } from '@/lib/port/holders'
@@ -20,6 +21,7 @@ export function AirdropDesk({ collection }: { collection: Collection }) {
   const { connect, connectors, isPending } = useConnect()
   const { switchChain } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
+  const { signMessageAsync } = useSignMessage()
   const publicClient = usePublicClient({ chainId: ARC_CHAIN_ID })
   const mine = Boolean(address && collection.creator && address.toLowerCase() === collection.creator.toLowerCase())
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
@@ -48,16 +50,32 @@ export function AirdropDesk({ collection }: { collection: Collection }) {
   }, [tokenMode, customToken, collection.originToken])
 
   useEffect(() => {
+    if (!mine) return
+    let cancelled = false
     setLoading(true)
-    fetch(`/api/studio/holders?collection=${collection.address}`)
-      .then((r) => r.json())
-      .then((d) => {
+    ;(async () => {
+      try {
+        let url = `/api/studio/holders?collection=${collection.address}`
+        if (!collection.revealed) {
+          const payload = { collection: getAddress(collection.address) }
+          const prepared = prepareCollectionAuth(collection.address, 'read-holders', payload)
+          const signature = await signMessageAsync({ message: prepared.message })
+          url += `&${authQuery({ signature, timestamp: prepared.timestamp, nonce: prepared.nonce })}`
+        }
+        const d = await fetch(url).then((r) => r.json())
+        if (cancelled) return
         setHolders(d.holders || [])
         setMinted(d.minted || 0)
-      })
-      .catch(() => setErr('Could not load holders'))
-      .finally(() => setLoading(false))
-  }, [collection.address])
+      } catch {
+        if (!cancelled) setErr('Could not load holders')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [mine, collection.address, collection.revealed, signMessageAsync])
 
   useEffect(() => {
     if (!token || !publicClient) return

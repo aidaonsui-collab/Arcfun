@@ -50,6 +50,10 @@ export type NftItem = {
 export const CREATE_FEE_USDC = 0.1
 export const PLATFORM_FEE = 0.05
 export const CREATOR_SHARE = 0.95
+/** Must match ArcNft721.MAX_MINT_PER_TX. */
+export const MAX_MINT_PER_TX = 20
+/** Must match ArcNft721.MAX_OWNER_MINT_PER_TX. */
+export const MAX_OWNER_MINT_PER_TX = 50
 
 export function allowlistWindowLive(c: Collection): boolean {
   if (!c.allowlist) return false

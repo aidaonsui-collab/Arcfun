@@ -27,7 +27,7 @@ import {
   type Address,
   type Hex,
 } from 'viem'
-import { ARC, ARC_CHAIN_ID, ARC_RPC_URLS, arcChain, arcServerWalletClient } from '@/lib/contracts-arc'
+import { ARC, ARC_CHAIN_ID, arcChain, arcServerRpcUrls, arcServerWalletClient } from '@/lib/contracts-arc'
 
 export const X402_VERSION = 1
 /** Non-standard network id: no registered x402 name exists for Arc. Clients must match it verbatim. */
@@ -130,7 +130,7 @@ function x402KeeperKey(): Hex | null {
 function readClient() {
   return createPublicClient({
     chain: arcChain,
-    transport: http(ARC_RPC_URLS[0] || undefined, { retryCount: 1, timeout: 8_000 }),
+    transport: http(arcServerRpcUrls()[0] || undefined, { retryCount: 1, timeout: 8_000 }),
   })
 }
 

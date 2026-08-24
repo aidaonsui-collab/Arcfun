@@ -3,12 +3,12 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { usePublicClient, useSignMessage, useWriteContract } from 'wagmi'
-import { isAddress, parseUnits, type Address, type Hex } from 'viem'
-import { collectionAllowlistEditMessage } from '@/lib/arc-auth'
+import { getAddress, isAddress, parseUnits, type Address, type Hex } from 'viem'
+import { authQuery, prepareCollectionAuth } from '@/lib/arc-auth'
 import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { PORT_NFT_ABI } from '@/lib/port/abi'
 import { parseWallets } from '@/lib/port/merkle'
-import type { Collection } from '@/lib/port/types'
+import { MAX_OWNER_MINT_PER_TX, type Collection } from '@/lib/port/types'
 import { PortSheet } from './PortSheet'
 
 function localDatetimeValue(ms: number) {
@@ -57,12 +57,7 @@ export function DropSettingsSheet({
     setTeamTo(collection.creator)
     setErr('')
     setNote('')
-    fetch(`/api/studio/allowlist?collection=${collection.address}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (Array.isArray(d?.wallets)) setWallets(d.wallets.join('\n'))
-      })
-      .catch(() => null)
+    setWallets('')
   }, [open, collection])
 
   async function savePrice() {
@@ -89,14 +84,31 @@ export function DropSettingsSheet({
     await publicClient?.waitForTransactionReceipt({ hash, timeout: 120_000 })
   }
 
+  async function loadAllowlist() {
+    const payload = { collection: getAddress(collection.address) }
+    const prepared = prepareCollectionAuth(collection.address, 'read-allowlist', payload)
+    const signature = await signMessageAsync({ message: prepared.message })
+    const q = authQuery({ signature, timestamp: prepared.timestamp, nonce: prepared.nonce })
+    const res = await fetch(`/api/studio/allowlist?collection=${collection.address}&${q}`)
+    const d = (await res.json()) as { wallets?: string[] }
+    if (Array.isArray(d?.wallets)) setWallets(d.wallets.join('\n'))
+  }
+
   async function saveAllowlist() {
-    const timestamp = Date.now()
-    const message = collectionAllowlistEditMessage(collection.address, timestamp)
-    const signature = await signMessageAsync({ message })
+    if (collection.revealed) throw new Error('Allowlist is locked after reveal.')
+    const payload = { collection: getAddress(collection.address), wallets }
+    const prepared = prepareCollectionAuth(collection.address, 'update-allowlist', payload)
+    const signature = await signMessageAsync({ message: prepared.message })
     const res = await fetch('/api/studio/allowlist', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ collection: collection.address, wallets, signature, timestamp }),
+      body: JSON.stringify({
+        collection: collection.address,
+        wallets,
+        signature,
+        timestamp: prepared.timestamp,
+        nonce: prepared.nonce,
+      }),
     })
     const data = (await res.json()) as { ok?: boolean; root?: Hex; count?: number; error?: string }
     if (!res.ok || !data.ok || !data.root) throw new Error(data.error || 'Allowlist save failed')
@@ -114,6 +126,7 @@ export function DropSettingsSheet({
   async function teamMint() {
     const n = Math.floor(Number(teamN))
     if (!isAddress(teamTo) || n < 1) throw new Error('Team mint needs a wallet and a count')
+    if (n > MAX_OWNER_MINT_PER_TX) throw new Error(`Team mint is ${MAX_OWNER_MINT_PER_TX} per transaction`)
     const hash = await writeContractAsync({
       address: collection.address as Address,
       abi: PORT_NFT_ABI,
@@ -129,7 +142,7 @@ export function DropSettingsSheet({
     }).catch(() => null)
   }
 
-  async function run(kind: 'price' | 'schedule' | 'allowlist' | 'team') {
+  async function run(kind: 'price' | 'schedule' | 'allowlist' | 'load-allowlist' | 'team') {
     setErr('')
     setNote('')
     setBusy(kind)
@@ -148,6 +161,10 @@ export function DropSettingsSheet({
           }
           throw e
         }
+      }
+      if (kind === 'load-allowlist') {
+        await loadAllowlist()
+        setNote('Loaded the current allowlist.')
       }
       if (kind === 'allowlist') {
         const n = await saveAllowlist()
@@ -182,6 +199,9 @@ export function DropSettingsSheet({
       <div className="max-h-[70vh] space-y-8 overflow-y-auto pb-2">
         <section>
           <h3 className="text-[15px] font-semibold">Mint price</h3>
+          <p className="mt-1 text-[13px] text-t3">
+            Can change until the first mint or public start. Locked after that.
+          </p>
           <div className="relative mt-2">
             <input
               inputMode="decimal"
@@ -249,14 +269,24 @@ export function DropSettingsSheet({
             className="mt-2 h-36 w-full rounded-xl border border-hair bg-s2 px-3.5 py-3 font-mono text-[13px] outline-none"
           />
           <p className="mt-1 text-[13px] text-t3">{parsed} unique wallets</p>
-          <button
-            type="button"
-            disabled={!!busy}
-            onClick={() => void run('allowlist')}
-            className="mt-3 inline-flex h-11 items-center rounded-xl bg-lime px-4 text-[14px] font-semibold text-white disabled:opacity-50"
-          >
-            {busy === 'allowlist' ? 'Saving…' : 'Set allowlist'}
-          </button>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!!busy}
+              onClick={() => void run('load-allowlist')}
+              className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[14px] font-semibold text-white disabled:opacity-50"
+            >
+              {busy === 'load-allowlist' ? 'Loading…' : 'Load current list'}
+            </button>
+            <button
+              type="button"
+              disabled={!!busy}
+              onClick={() => void run('allowlist')}
+              className="inline-flex h-11 items-center rounded-xl bg-lime px-4 text-[14px] font-semibold text-white disabled:opacity-50"
+            >
+              {busy === 'allowlist' ? 'Saving…' : 'Set allowlist'}
+            </button>
+          </div>
         </section>
 
         <section>

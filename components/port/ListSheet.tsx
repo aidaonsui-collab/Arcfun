@@ -21,6 +21,7 @@ import {
   STUDIO_FEE_BPS,
   buildListing,
   seaportDomain,
+  studioTreasury,
 } from '@/lib/port/seaport'
 import { reviveOrder, type Listing } from '@/lib/port/listings'
 import type { Collection, NftItem } from '@/lib/port/types'
@@ -175,8 +176,7 @@ export function ListSheet({
         seller: address,
         royaltyReceiver,
         royaltyAmount,
-        platformTreasury: (process.env.NEXT_PUBLIC_ARC_PLATFORM_TREASURY ||
-          '0x26bD491560b5175ee8bD1DA4998Fe260FfC413c9') as Address,
+        platformTreasury: studioTreasury(),
         counter,
         startTime: now - 60n, // small backdate absorbs clock skew between wallet and node
         endTime: now + BigInt(DURATION_SEC),

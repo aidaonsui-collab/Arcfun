@@ -17,17 +17,16 @@ import {
   withRarity,
 } from '@/lib/port/item-meta'
 import { PortSheet } from '@/components/port/PortSheet'
-import { collectionItemsEditMessage } from '@/lib/arc-auth'
+import { getAddress, type Address } from 'viem'
+import { authQuery, prepareCollectionAuth } from '@/lib/arc-auth'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
 import { PORT_NFT_ABI } from '@/lib/port/abi'
 import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { cn } from '@/lib/cn'
-import type { Address } from 'viem'
 
 const PAGE = 48
-const CHUNK = 25
 const POOL = 4
-const AUTH_MS = 8 * 60 * 1000
+
 
 export function ItemDesk({ collection }: { collection: Collection }) {
   const { address, isConnected } = useAccount()
@@ -53,7 +52,6 @@ export function ItemDesk({ collection }: { collection: Collection }) {
 
   const itemsRef = useRef(items)
   itemsRef.current = items
-  const authRef = useRef<{ signature: string; timestamp: number } | null>(null)
 
   const filled = Object.keys(items).length
   const left = Math.max(0, collection.maxSupply - filled)
@@ -65,56 +63,44 @@ export function ItemDesk({ collection }: { collection: Collection }) {
   )
 
   useEffect(() => {
-    fetch(`/api/port/${collection.address}/items`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d?.items) setItems(d.items)
-      })
-      .catch(() => null)
-  }, [collection.address])
-
-  async function ensureAuth() {
-    const now = Date.now()
-    if (authRef.current && now - authRef.current.timestamp < AUTH_MS) return authRef.current
-    if (!address) throw new Error('Connect first')
-    const timestamp = Date.now()
-    const message = collectionItemsEditMessage(collection.address, timestamp)
-    const signature = await signMessageAsync({ message })
-    authRef.current = { signature, timestamp }
-    return authRef.current
-  }
+    if (!mine) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        let url = `/api/port/${collection.address}/items`
+        if (!collection.revealed) {
+          const payload = { collection: getAddress(collection.address) }
+          const prepared = prepareCollectionAuth(collection.address, 'read-items', payload)
+          const signature = await signMessageAsync({ message: prepared.message })
+          url += `?${authQuery({ signature, timestamp: prepared.timestamp, nonce: prepared.nonce })}`
+        }
+        const d = await fetch(url).then((r) => r.json())
+        if (!cancelled && d?.items) setItems(d.items)
+      } catch {
+        /* keep empty */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [mine, collection.address, collection.revealed, signMessageAsync])
 
   async function save(patch: Record<string, PortItemMeta | null>) {
-    const auth = await ensureAuth()
+    const payload = { collection: getAddress(collection.address), items: patch }
+    const prepared = prepareCollectionAuth(collection.address, 'update-items', payload)
+    const signature = await signMessageAsync({ message: prepared.message })
     const res = await fetch(`/api/port/${collection.address}/items`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         address: collection.address,
-        signature: auth.signature,
-        timestamp: auth.timestamp,
+        signature,
+        timestamp: prepared.timestamp,
+        nonce: prepared.nonce,
         items: patch,
       }),
     })
     const data = await res.json()
-    if (res.status === 401) {
-      authRef.current = null
-      const retry = await ensureAuth()
-      const res2 = await fetch(`/api/port/${collection.address}/items`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          address: collection.address,
-          signature: retry.signature,
-          timestamp: retry.timestamp,
-          items: patch,
-        }),
-      })
-      const data2 = await res2.json()
-      if (!res2.ok || !data2.ok) throw new Error(data2.error || 'Save failed')
-      setItems(data2.items || {})
-      return
-    }
     if (!res.ok || !data.ok) throw new Error(data.error || 'Save failed')
     setItems(data.items || {})
   }
@@ -141,12 +127,9 @@ export function ItemDesk({ collection }: { collection: Collection }) {
           return { id, meta }
         })
         setProgress((p) => ({ ...p, phase: 'save' }))
-        for (let i = 0; i < uploaded.length; i += CHUNK) {
-          const slice = uploaded.slice(i, i + CHUNK)
-          const patch: Record<string, PortItemMeta> = {}
-          for (const row of slice) patch[String(row.id)] = row.meta
-          await save(patch)
-        }
+        const patch: Record<string, PortItemMeta> = {}
+        for (const row of uploaded) patch[String(row.id)] = row.meta
+        await save(patch)
         const first = Math.min(...uploaded.map((r) => r.id))
         setPage(Math.floor((first - 1) / PAGE))
       }
