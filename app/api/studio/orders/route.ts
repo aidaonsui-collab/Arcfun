@@ -21,56 +21,24 @@ import {
   seaportDomain,
   type OrderComponents,
 } from '@/lib/port/seaport'
+import { reviveOrder } from '@/lib/port/listings'
+import {
+  COLLECTION_SET,
+  ORDER_KEY,
+  dropOrder,
+  getStoredOrder,
+  recordActivity,
+  syncCollection,
+  type StoredOrder,
+} from '@/lib/port/market'
 
 export const dynamic = 'force-dynamic'
 
-const ORDER_KEY = (h: string) => `arcfun:studio:order:${h.toLowerCase()}`
-const COLLECTION_SET = (c: string) => `arcfun:studio:orders:${c.toLowerCase()}`
 /** Orders self-expire; endTime is authoritative on-chain, this just stops KV growing forever. */
 const MAX_TTL_SEC = 60 * 60 * 24 * 30
 
-type StoredOrder = {
-  orderHash: Hex
-  order: Record<string, unknown>
-  signature: Hex
-  collection: Address
-  tokenId: string
-  priceAtomic: string
-  offerer: Address
-  endTime: string
-  createdAt: number
-}
-
 function client() {
   return arcPublicClient()
-}
-
-/** JSON gives us decimal strings; Seaport needs bigints. */
-function reviveOrder(o: Record<string, unknown>): OrderComponents {
-  const big = (v: unknown) => BigInt(String(v))
-  const item = (i: Record<string, unknown>) => ({
-    itemType: Number(i.itemType),
-    token: i.token as Address,
-    identifierOrCriteria: big(i.identifierOrCriteria),
-    startAmount: big(i.startAmount),
-    endAmount: big(i.endAmount),
-  })
-  return {
-    offerer: o.offerer as Address,
-    zone: o.zone as Address,
-    offer: (o.offer as Record<string, unknown>[]).map(item),
-    consideration: (o.consideration as Record<string, unknown>[]).map((i) => ({
-      ...item(i),
-      recipient: i.recipient as Address,
-    })),
-    orderType: Number(o.orderType),
-    startTime: big(o.startTime),
-    endTime: big(o.endTime),
-    zoneHash: o.zoneHash as Hex,
-    salt: big(o.salt),
-    conduitKey: o.conduitKey as Hex,
-    counter: big(o.counter),
-  }
 }
 
 export async function POST(req: NextRequest) {
@@ -164,7 +132,30 @@ export async function POST(req: NextRequest) {
   await kv.set(ORDER_KEY(orderHash), row, { ex: MAX_TTL_SEC })
   await kv.sadd(COLLECTION_SET(offer.token), orderHash)
 
-  return NextResponse.json({ ok: true, orderHash, priceAtomic: row.priceAtomic })
+  // One live listing per token in the book. Older signatures stay fillable until the seller
+  // cancels them on-chain; the UI cancels before replacing.
+  try {
+    const hashes = ((await kv.smembers(COLLECTION_SET(offer.token))) as string[]) || []
+    const others = (
+      await Promise.all(hashes.filter((h) => h.toLowerCase() !== orderHash.toLowerCase()).map((h) => kv.get<StoredOrder>(ORDER_KEY(h))))
+    ).filter((r): r is StoredOrder => !!r && r.tokenId === row.tokenId)
+    await Promise.all(others.map((r) => kv.srem(COLLECTION_SET(offer.token), r.orderHash)))
+  } catch {
+    /* kv optional */
+  }
+
+  await recordActivity({
+    type: 'list',
+    collection: row.collection,
+    tokenId: row.tokenId,
+    priceAtomic: row.priceAtomic,
+    from: row.offerer,
+    orderHash,
+    at: Date.now(),
+  })
+  const { snapshot } = await syncCollection(offer.token)
+
+  return NextResponse.json({ ok: true, orderHash, priceAtomic: row.priceAtomic, ...snapshot })
 }
 
 export async function GET(req: NextRequest) {
@@ -174,59 +165,67 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'collection required' }, { status: 400 })
   }
 
-  let hashes: string[] = []
   try {
-    hashes = ((await kv.smembers(COLLECTION_SET(collection))) as string[]) || []
+    const { listings, snapshot } = await syncCollection(collection)
+    const rows = tokenId ? listings.filter((l) => l.tokenId === tokenId) : listings
+    return NextResponse.json({ ok: true, listings: rows, ...snapshot })
   } catch {
     return NextResponse.json({ ok: false, error: 'order store unavailable', listings: [] }, { status: 503 })
   }
-  if (hashes.length === 0) return NextResponse.json({ ok: true, listings: [] })
+}
 
-  const rows = (await Promise.all(hashes.map((h) => kv.get<StoredOrder>(ORDER_KEY(h))))).filter(
-    (r): r is StoredOrder => !!r,
-  )
-  const now = Math.floor(Date.now() / 1000)
-  const live = rows.filter(
-    (r) => Number(r.endTime) > now && (!tokenId || r.tokenId === tokenId),
-  )
-  if (live.length === 0) return NextResponse.json({ ok: true, listings: [] })
+export async function PATCH(req: NextRequest) {
+  const body = (await req.json().catch(() => null)) as {
+    orderHash?: string
+    action?: 'filled' | 'cancel'
+    txHash?: string
+    buyer?: string
+  } | null
+  const orderHash = (body?.orderHash || '').trim()
+  const action = body?.action
+  if (!orderHash || (action !== 'filled' && action !== 'cancel')) {
+    return NextResponse.json({ ok: false, error: 'orderHash and action required' }, { status: 400 })
+  }
+  const row = await getStoredOrder(orderHash)
+  if (!row) return NextResponse.json({ ok: false, error: 'unknown order' }, { status: 404 })
 
-  // Re-check on-chain: a seller can cancel or fill without telling us, and serving a dead order
-  // would send buyers into a guaranteed revert.
-  const c = client()
-  const statuses = await c
-    .multicall({
-      contracts: live.map((r) => ({
-        address: SEAPORT_ADDRESS,
-        abi: SEAPORT_ABI,
-        functionName: 'getOrderStatus' as const,
-        args: [r.orderHash] as const,
-      })),
-      allowFailure: true,
-    })
-    .catch(() => null)
+  let isCancelled = false
+  let filled = false
+  try {
+    const s = (await client().readContract({
+      address: SEAPORT_ADDRESS,
+      abi: SEAPORT_ABI,
+      functionName: 'getOrderStatus',
+      args: [row.orderHash],
+    })) as [boolean, boolean, bigint, bigint]
+    isCancelled = s[1]
+    filled = s[3] > 0n && s[2] >= s[3]
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: `could not reach Seaport: ${(e as Error).message.slice(0, 120)}` },
+      { status: 502 },
+    )
+  }
 
-  const listings = live
-    .map((r, i) => {
-      const s = statuses?.[i]
-      if (s && s.status === 'success') {
-        const [, isCancelled, totalFilled, totalSize] = s.result as [boolean, boolean, bigint, bigint]
-        if (isCancelled) return null
-        if (totalSize > 0n && totalFilled >= totalSize) return null
-      }
-      return {
-        orderHash: r.orderHash,
-        order: r.order,
-        signature: r.signature,
-        collection: r.collection,
-        tokenId: r.tokenId,
-        priceAtomic: r.priceAtomic,
-        offerer: r.offerer,
-        endTime: r.endTime,
-      }
-    })
-    .filter(Boolean)
-    .sort((a, b) => Number(BigInt((a as { priceAtomic: string }).priceAtomic) - BigInt((b as { priceAtomic: string }).priceAtomic)))
+  if (action === 'filled' && !filled) {
+    return NextResponse.json({ ok: false, error: 'order is not filled on-chain' }, { status: 400 })
+  }
+  if (action === 'cancel' && !isCancelled && !filled) {
+    return NextResponse.json({ ok: false, error: 'order is still live on-chain' }, { status: 400 })
+  }
 
-  return NextResponse.json({ ok: true, listings })
+  await recordActivity({
+    type: filled ? 'sale' : 'cancel',
+    collection: row.collection,
+    tokenId: row.tokenId,
+    priceAtomic: row.priceAtomic,
+    from: row.offerer,
+    to: body?.buyer,
+    orderHash: row.orderHash,
+    txHash: body?.txHash,
+    at: Date.now(),
+  })
+  await dropOrder(row.collection, row.orderHash)
+  const { snapshot } = await syncCollection(row.collection)
+  return NextResponse.json({ ok: true, ...snapshot })
 }

@@ -5,6 +5,7 @@ import { PORT_FACTORY_ABI, PORT_NFT_ABI } from './abi'
 import { arcPortEnabled } from './contracts'
 import { getPortCollectionMeta, getPortCollectionMetas } from './meta'
 import { getPortItem, getPortItems } from './item-meta'
+import { getSnapshot } from './market'
 import type { Collection, NftItem } from './types'
 
 const ZERO_ROOT = '0x0000000000000000000000000000000000000000000000000000000000000000'
@@ -96,6 +97,11 @@ async function loadOne(
       royalty: Number.isFinite(royaltyAmt) ? Math.round(royaltyAmt) / 100 : 5,
       minted: Number.isFinite(mintedN) ? mintedN : 0,
       owners: 0,
+      ...((snap) => ({
+        floorUsdc: snap.floorUsdc,
+        listed: snap.listed,
+        volume24hUsdc: snap.volume24hUsdc,
+      }))(await getSnapshot(address)),
       twitter: overlay?.twitter,
       telegram: overlay?.telegram,
       website: overlay?.website,

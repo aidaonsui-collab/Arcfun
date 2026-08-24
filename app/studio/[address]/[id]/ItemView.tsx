@@ -7,26 +7,47 @@ import { CreatorChip } from '@/components/port/CreatorChip'
 import { OfficialBadge } from '@/components/port/OfficialBadge'
 import { Price } from '@/components/port/Price'
 import { RoyaltyLine } from '@/components/port/RoyaltyLine'
-import { StickyMintBar } from '@/components/port/StickyMintBar'
+import { StickyItemBar } from '@/components/port/StickyMintBar'
 import { MintSheet } from '@/components/port/MintSheet'
 import { ListSheet } from '@/components/port/ListSheet'
 import { BuySheet } from '@/components/port/BuySheet'
-import { fetchListings, type Listing } from '@/lib/port/listings'
+import { MarketActivityList } from '@/components/port/MarketActivityList'
+import { fetchActivity, fetchListings, type Listing } from '@/lib/port/listings'
+import type { MarketActivity } from '@/lib/port/market'
 import { collectionStatus, type Collection, type NftItem } from '@/lib/port/types'
 import { shortAddr, timeUntil } from '@/lib/port/format'
 
-export function ItemView({ collection, item }: { collection: Collection; item: NftItem }) {
+export function ItemView({
+  collection,
+  item,
+  listing: listingProp = null,
+  activity: activityProp = [],
+}: {
+  collection: Collection
+  item: NftItem
+  listing?: Listing | null
+  activity?: MarketActivity[]
+}) {
   const { address: wallet } = useAccount()
   const [open, setOpen] = useState(false)
   const [listOpen, setListOpen] = useState(false)
   const [buyOpen, setBuyOpen] = useState(false)
-  const [listing, setListing] = useState<Listing | null>(null)
+  const [listing, setListing] = useState<Listing | null>(listingProp)
+  const [activity, setActivity] = useState<MarketActivity[]>(activityProp)
   const you = Boolean(wallet && item.owner.toLowerCase() === wallet.toLowerCase())
 
   const loadListing = useCallback(async () => {
-    const rows = await fetchListings(collection.address, item.id)
+    const [rows, tape] = await Promise.all([
+      fetchListings(collection.address, item.id),
+      fetchActivity(collection.address, item.id),
+    ])
     setListing(rows[0] ?? null)
+    setActivity(tape)
   }, [collection.address, item.id])
+
+  useEffect(() => {
+    setListing(listingProp)
+  }, [listingProp])
 
   useEffect(() => {
     loadListing()
@@ -84,13 +105,24 @@ export function ItemView({ collection, item }: { collection: Collection; item: N
             </div>
             <div className="mt-8 hidden gap-3 lg:flex">
               {item.minted && you ? (
-                <button
-                  type="button"
-                  onClick={() => setListOpen(true)}
-                  className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime px-8 text-[16px] font-bold text-white"
-                >
-                  {listing ? 'Update listing' : 'List for sale'}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setListOpen(true)}
+                    className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime px-8 text-[16px] font-bold text-white"
+                  >
+                    {listing ? 'Update listing' : 'List for sale'}
+                  </button>
+                  {listing ? (
+                    <button
+                      type="button"
+                      onClick={() => setListOpen(true)}
+                      className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
+                </>
               ) : listing ? (
                 <button
                   type="button"
@@ -98,6 +130,14 @@ export function ItemView({ collection, item }: { collection: Collection; item: N
                   className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime px-8 text-[16px] font-bold text-white"
                 >
                   Buy for {listedPrice} USDC
+                </button>
+              ) : item.minted ? (
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl border border-hair text-[16px] font-semibold text-t3"
+                >
+                  Not listed
                 </button>
               ) : (
                 <button
@@ -133,17 +173,46 @@ export function ItemView({ collection, item }: { collection: Collection; item: N
             </p>
 
             <h2 className="mt-10 text-[13px] font-medium text-t3">Activity</h2>
-            <div className="mt-3 rounded-[24px] border border-hair bg-s1 px-4 py-10 text-center text-[15px] text-t3">
-              No activity yet
+            <div className="mt-3">
+              <MarketActivityList events={activity} />
             </div>
           </div>
         </div>
       </div>
-      <StickyMintBar collection={collection} onMint={() => setOpen(true)} />
+      <StickyItemBar
+        priceUsdc={listing ? Number(listing.priceAtomic) / 1e6 : collection.mintPriceUsdc}
+        priceLabel={listing ? 'Listed for' : item.minted ? (you ? 'You own this' : 'Unlisted') : 'Mint'}
+        cta={
+          item.minted && you
+            ? listing
+              ? 'Update listing'
+              : 'List for sale'
+            : listing
+              ? `Buy for ${listedPrice} USDC`
+              : item.minted
+                ? 'Not listed'
+                : mintLabel
+        }
+        disabled={
+          item.minted && you
+            ? false
+            : listing
+              ? false
+              : item.minted
+                ? true
+                : status !== 'live'
+        }
+        onClick={() => {
+          if (item.minted && you) setListOpen(true)
+          else if (listing) setBuyOpen(true)
+          else if (!item.minted) setOpen(true)
+        }}
+      />
       <MintSheet collection={collection} open={open} onClose={() => setOpen(false)} />
       <ListSheet
         collection={collection}
         item={item}
+        listing={listing}
         open={listOpen}
         onClose={() => {
           setListOpen(false)

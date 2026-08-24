@@ -21,13 +21,14 @@ export function CollectionItems({
   isCreator: boolean
 }) {
   const [query, setQuery] = useState('')
-  const [status, setStatus] = useState<'all' | 'minted'>('all')
+  const [status, setStatus] = useState<'all' | 'minted' | 'listed'>('all')
   const [picked, setPicked] = useState<Record<string, string[]>>({})
-  const [sort, setSort] = useState<'id-asc' | 'id-desc'>('id-asc')
+  const [sort, setSort] = useState<'id-asc' | 'id-desc' | 'price-asc' | 'price-desc'>('id-asc')
   const [page, setPage] = useState(1)
   const [filtersOpen, setFiltersOpen] = useState(false)
 
-  const hasUnminted = items.some((i) => i.minted === false)
+  const listedN = items.filter((i) => i.listPriceUsdc != null).length
+  const mintedN = items.filter((i) => i.minted !== false).length
   const traitGroups = useMemo(() => {
     const groups = new Map<string, Map<string, number>>()
     for (const item of items) {
@@ -50,6 +51,7 @@ export function CollectionItems({
     const q = query.trim().toLowerCase()
     const rows = items.filter((item) => {
       if (status === 'minted' && item.minted === false) return false
+      if (status === 'listed' && item.listPriceUsdc == null) return false
       if (q) {
         const hay = `${item.name} #${item.id}`.toLowerCase()
         if (!hay.includes(q) && !String(item.id).includes(q)) return false
@@ -61,7 +63,18 @@ export function CollectionItems({
       }
       return true
     })
-    rows.sort((a, b) => (sort === 'id-desc' ? b.id - a.id : a.id - b.id))
+    rows.sort((a, b) => {
+      if (sort === 'id-desc') return b.id - a.id
+      if (sort === 'price-asc' || sort === 'price-desc') {
+        const ap = a.listPriceUsdc
+        const bp = b.listPriceUsdc
+        if (ap == null && bp == null) return a.id - b.id
+        if (ap == null) return 1
+        if (bp == null) return -1
+        return sort === 'price-asc' ? ap - bp : bp - ap
+      }
+      return a.id - b.id
+    })
     return rows
   }, [items, query, status, picked, sort])
 
@@ -96,14 +109,15 @@ export function CollectionItems({
         />
       </label>
 
-      {hasUnminted ? (
+      {items.some((i) => i.minted !== false) ? (
         <div>
           <div className="text-[13px] font-medium text-t3">Status</div>
           <div className="mt-2 space-y-1">
             {(
               [
                 ['all', 'All', items.length],
-                ['minted', 'Minted', items.filter((i) => i.minted !== false).length],
+                ['listed', 'Listed', listedN],
+                ['minted', 'Minted', mintedN],
               ] as const
             ).map(([key, label, n]) => (
               <button
@@ -191,13 +205,15 @@ export function CollectionItems({
           <select
             value={sort}
             onChange={(e) => {
-              setSort(e.target.value as 'id-asc' | 'id-desc')
+              setSort(e.target.value as 'id-asc' | 'id-desc' | 'price-asc' | 'price-desc')
               setPage(1)
             }}
             className="hidden h-11 rounded-xl border border-hair bg-s2 px-3 text-[13px] font-semibold text-white outline-none sm:block"
           >
             <option value="id-asc">ID low to high</option>
             <option value="id-desc">ID high to low</option>
+            <option value="price-asc">Price low to high</option>
+            <option value="price-desc">Price high to low</option>
           </select>
           <button
             type="button"
@@ -232,13 +248,15 @@ export function CollectionItems({
             <select
               value={sort}
               onChange={(e) => {
-                setSort(e.target.value as 'id-asc' | 'id-desc')
+                setSort(e.target.value as 'id-asc' | 'id-desc' | 'price-asc' | 'price-desc')
                 setPage(1)
               }}
               className="h-11 rounded-xl border border-hair bg-s2 px-3 text-[13px] font-semibold"
             >
               <option value="id-asc">ID low to high</option>
               <option value="id-desc">ID high to low</option>
+              <option value="price-asc">Price low to high</option>
+              <option value="price-desc">Price high to low</option>
             </select>
             <span className="text-[13px] tabular-nums text-t3">{formatInt(filtered.length)} items</span>
           </div>

@@ -82,6 +82,16 @@ export function BuySheet({
         chainId: ARC_CHAIN_ID,
       })
       await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 })
+      await fetch('/api/studio/orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderHash: listing.orderHash,
+          action: 'filled',
+          txHash: hash,
+          buyer: address,
+        }),
+      }).catch(() => null)
       onClose()
       router.refresh()
     } catch (err: unknown) {

@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import { getCollection, getItems } from '@/lib/port/catalog'
+import { withListPrices } from '@/lib/port/listings'
+import { getActivity, syncCollection } from '@/lib/port/market'
 import { CollectionView } from './CollectionView'
 
 export const dynamic = 'force-dynamic'
@@ -35,9 +37,21 @@ export default async function CollectionPage({
       </main>
     )
   }
+  const [items, market, activity] = await Promise.all([
+    getItems(address),
+    syncCollection(collection.address),
+    getActivity(collection.address),
+  ])
+  const priced = withListPrices(items, market.listings)
+  const col = {
+    ...collection,
+    floorUsdc: market.snapshot.floorUsdc,
+    listed: market.snapshot.listed,
+    volume24hUsdc: market.snapshot.volume24hUsdc,
+  }
   return (
     <main className="min-h-screen pt-16 text-white">
-      <CollectionView collection={collection} items={await getItems(address)} />
+      <CollectionView collection={col} items={priced} activity={activity} />
     </main>
   )
 }

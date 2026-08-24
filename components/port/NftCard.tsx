@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import type { NftItem } from '@/lib/port/types'
+import { formatUsdc } from '@/lib/port/format'
 
 export function NftCard({ item, address }: { item: NftItem; address: string }) {
   const minted = item.minted !== false
@@ -14,7 +15,11 @@ export function NftCard({ item, address }: { item: NftItem; address: string }) {
         />
       </div>
       <div className="mt-2 truncate text-[13px] font-medium tracking-tightish text-t2">{item.name}</div>
-      {minted ? null : <div className="text-[11px] text-t3">Not minted</div>}
+      {item.listPriceUsdc != null ? (
+        <div className="text-[13px] font-semibold tabular-nums">{formatUsdc(item.listPriceUsdc)} USDC</div>
+      ) : minted ? null : (
+        <div className="text-[11px] text-t3">Not minted</div>
+      )}
     </>
   )
   if (!minted) {

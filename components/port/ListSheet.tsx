@@ -22,6 +22,7 @@ import {
   buildListing,
   seaportDomain,
 } from '@/lib/port/seaport'
+import { reviveOrder, type Listing } from '@/lib/port/listings'
 import type { Collection, NftItem } from '@/lib/port/types'
 
 const DURATION_SEC = 60 * 60 * 24 * 30 // 30 days
@@ -33,11 +34,13 @@ const DURATION_SEC = 60 * 60 * 24 * 30 // 30 days
 export function ListSheet({
   collection,
   item,
+  listing = null,
   open,
   onClose,
 }: {
   collection: Collection
   item: NftItem
+  listing?: Listing | null
   open: boolean
   onClose: () => void
 }) {
@@ -63,6 +66,51 @@ export function ListSheet({
   const royaltyPreview = (priceAtomic * BigInt(Math.round(collection.royalty * 100))) / 10_000n
   const sellerPreview = priceAtomic - feePreview - royaltyPreview
 
+  async function cancelOnChain() {
+    if (!listing || !address || !publicClient) return
+    setStep('Cancel listing…')
+    const h = await writeContractAsync({
+      address: SEAPORT_ADDRESS,
+      abi: SEAPORT_ABI,
+      functionName: 'cancel',
+      args: [[reviveOrder(listing.order)]],
+      chainId: ARC_CHAIN_ID,
+    })
+    await publicClient.waitForTransactionReceipt({ hash: h, timeout: 120_000 })
+    await fetch('/api/studio/orders', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderHash: listing.orderHash, action: 'cancel', txHash: h }),
+    })
+  }
+
+  async function cancelOnly() {
+    setError('')
+    if (!isConnected) {
+      const c = connectors[0]
+      if (c) connect({ connector: c })
+      return
+    }
+    if (wrongChain) {
+      switchChain({ chainId: ARC_CHAIN_ID })
+      return
+    }
+    if (!listing || !address || !publicClient) return
+    setBusy(true)
+    try {
+      await cancelOnChain()
+      onClose()
+      router.refresh()
+    } catch (err: unknown) {
+      const ax = err as { shortMessage?: string; message?: string }
+      const msg = ax?.shortMessage || ax?.message || String(err)
+      setError(msg.length > 220 ? msg.slice(0, 220) + '…' : msg)
+    } finally {
+      setBusy(false)
+      setStep('')
+    }
+  }
+
   async function confirm() {
     setError('')
     if (!isConnected) {
@@ -77,6 +125,7 @@ export function ListSheet({
     if (!valid || !address || !publicClient) return
     setBusy(true)
     try {
+      if (listing) await cancelOnChain()
       const nft = collection.address as Address
       const tokenId = BigInt(item.id)
 
@@ -192,6 +241,7 @@ export function ListSheet({
 
         <p className="mt-3 text-[13px] text-t3">
           Listing is free — you sign, the buyer pays gas. Expires in 30 days.
+          {listing ? ' Updating cancels the current listing first (one on-chain tx).' : ''}
         </p>
 
         {error ? <p className="mt-3 text-[13px] text-coral">{error}</p> : null}
@@ -208,8 +258,20 @@ export function ListSheet({
               ? 'Switch to Arc'
               : busy
                 ? step || 'Working…'
-                : 'List for sale'}
+                : listing
+                  ? 'Update listing'
+                  : 'List for sale'}
         </button>
+        {listing && isConnected && !wrongChain ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void cancelOnly()}
+            className="mt-3 inline-flex h-12 w-full items-center justify-center rounded-xl border border-hair text-[14px] font-semibold text-white hover:border-lime-line disabled:opacity-50"
+          >
+            Cancel listing
+          </button>
+        ) : null}
       </div>
     </PortSheet>
   )

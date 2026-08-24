@@ -14,6 +14,17 @@ export function formatInt(value: number) {
   return value.toLocaleString('en-US')
 }
 
+export function timeAgo(ms: number) {
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 48) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  return `${d}d ago`
+}
+
 export function timeUntil(ts: number) {
   const s = Math.max(0, Math.floor((ts - Date.now()) / 1000))
   const d = Math.floor(s / 86400)

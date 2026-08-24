@@ -11,15 +11,19 @@ import { StickyMintBar } from '@/components/port/StickyMintBar'
 import { MintSheet } from '@/components/port/MintSheet'
 import { EditBannerSheet } from '@/components/port/EditBannerSheet'
 import { CollectionItems } from '@/components/port/CollectionItems'
+import { MarketActivityList } from '@/components/port/MarketActivityList'
 import { collectionStatus, type Collection, type NftItem } from '@/lib/port/types'
+import type { MarketActivity } from '@/lib/port/market'
 import { formatInt, formatUsdc, timeUntil } from '@/lib/port/format'
 
 export function CollectionView({
   collection,
   items,
+  activity = [],
 }: {
   collection: Collection
   items: NftItem[]
+  activity?: MarketActivity[]
 }) {
   const { address } = useAccount()
   const [mintOpen, setMintOpen] = useState(false)
@@ -88,10 +92,18 @@ export function CollectionView({
           </div>
           <div className="-mx-4 overflow-x-auto scrollbar-none px-4 lg:mx-0 lg:overflow-visible lg:px-0">
             <div className="flex min-w-max items-end lg:justify-end">
-              <HeroStat label="Price" value={formatUsdc(collection.mintPriceUsdc)} suffix="USDC" />
+              <HeroStat
+                label="Floor"
+                value={collection.floorUsdc != null ? formatUsdc(collection.floorUsdc) : '—'}
+                suffix={collection.floorUsdc != null ? 'USDC' : undefined}
+              />
+              <HeroStat label="Listed" value={formatInt(collection.listed ?? 0)} />
+              <HeroStat
+                label="24h vol"
+                value={formatUsdc(collection.volume24hUsdc ?? 0)}
+                suffix="USDC"
+              />
               <HeroStat label="Minted" value={formatInt(collection.minted)} />
-              <HeroStat label="Items" value={formatInt(collection.maxSupply)} />
-              <HeroStat label="Owners" value={formatInt(collection.owners)} />
             </div>
           </div>
         </div>
@@ -133,6 +145,13 @@ export function CollectionView({
         ) : null}
 
         <CollectionItems collection={collection} items={items} isCreator={isCreator} />
+
+        <div className="mt-10">
+          <h2 className="text-[17px] font-semibold tracking-tightish">Activity</h2>
+          <div className="mt-4">
+            <MarketActivityList events={activity} collection={collection.address} />
+          </div>
+        </div>
       </div>
       <StickyMintBar collection={collection} onMint={() => setMintOpen(true)} />
       <MintSheet collection={collection} open={mintOpen} onClose={() => setMintOpen(false)} />

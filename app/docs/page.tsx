@@ -354,8 +354,9 @@ export default function DocsPage() {
             <article className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
               <h3 className="m-0 text-[17px] font-semibold tracking-tightish">Marketplace</h3>
               <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
-                Browse collections, mint from the sticky bar on phone. Secondary list / buy is
-                Seaport 1.6 (Phase 2) after live primary supply. Phase 1 is create + mint in USDC.
+                Browse collections, mint from the sticky bar on phone. Secondary list, buy, and
+                cancel run on Seaport 1.6. Floor, listed count, and 24h volume come from live
+                listings — not invented stats.
               </p>
             </article>
             <article className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">

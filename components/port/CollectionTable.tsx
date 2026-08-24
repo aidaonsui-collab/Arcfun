@@ -7,10 +7,10 @@ import { cn } from '@/lib/cn'
 
 const COLS = [
   { key: 'collection', label: 'Collection', align: 'left' },
-  { key: 'price', label: 'Price', align: 'right' },
+  { key: 'floor', label: 'Floor', align: 'right' },
+  { key: 'listed', label: 'Listed', align: 'right' },
+  { key: 'vol', label: '24h vol', align: 'right' },
   { key: 'minted', label: 'Minted', align: 'right' },
-  { key: 'items', label: 'Items', align: 'right' },
-  { key: 'owners', label: 'Owners', align: 'right' },
 ] as const
 
 export function CollectionTable({ collections }: { collections: Collection[] }) {
@@ -61,18 +61,20 @@ export function CollectionTable({ collections }: { collections: Collection[] }) 
                 <td className="px-4 py-3 text-right sm:px-5">
                   {status === 'sold' ? (
                     <span className="text-[13px] text-t3">Sold out</span>
+                  ) : c.floorUsdc != null ? (
+                    <Price value={c.floorUsdc} />
                   ) : (
-                    <Price value={c.mintPriceUsdc} />
+                    <span className="text-[13px] text-t3">—</span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-right text-[13px] tabular-nums text-t2 sm:px-5">
+                  {formatInt(c.listed ?? 0)}
+                </td>
+                <td className="px-4 py-3 text-right text-[13px] tabular-nums text-t2 sm:px-5">
+                  <Price value={c.volume24hUsdc ?? 0} />
+                </td>
+                <td className="px-4 py-3 text-right text-[13px] tabular-nums text-t2 sm:px-5">
                   {formatInt(c.minted)}
-                </td>
-                <td className="px-4 py-3 text-right text-[13px] tabular-nums text-t2 sm:px-5">
-                  {formatInt(c.maxSupply)}
-                </td>
-                <td className="px-4 py-3 text-right text-[13px] tabular-nums text-t2 sm:px-5">
-                  {formatInt(c.owners)}
                 </td>
               </tr>
             )

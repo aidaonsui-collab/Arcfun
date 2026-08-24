@@ -33,8 +33,11 @@ export function FeaturedCollectionCard({ collection }: { collection: Collection 
             <span>Sold out</span>
           ) : (
             <>
-              <span className="text-white/55">Price</span>
-              <Price value={collection.mintPriceUsdc} className="text-white" />
+              <span className="text-white/55">{collection.floorUsdc != null ? 'Floor' : 'Mint'}</span>
+              <Price
+                value={collection.floorUsdc != null ? collection.floorUsdc : collection.mintPriceUsdc}
+                className="text-white"
+              />
             </>
           )}
           <span className="text-white/40">·</span>

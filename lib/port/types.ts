@@ -19,6 +19,10 @@ export type Collection = {
   royalty: number
   minted: number
   owners: number
+  /** Lowest live listing in USDC. Null when nothing is listed. */
+  floorUsdc?: number | null
+  listed?: number
+  volume24hUsdc?: number
   twitter?: string
   telegram?: string
   website?: string
@@ -34,6 +38,7 @@ export type NftItem = {
   owner: string
   traits: Trait[]
   minted?: boolean
+  listPriceUsdc?: number
 }
 
 export const CREATE_FEE_USDC = 0.1

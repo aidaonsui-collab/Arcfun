@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { getCollection, getItem } from '@/lib/port/catalog'
+import { getActivity, syncCollection } from '@/lib/port/market'
 import { ItemView } from './ItemView'
 
 export const dynamic = 'force-dynamic'
@@ -42,9 +43,14 @@ export default async function ItemPage({
     )
   }
 
+  const [market, activity] = await Promise.all([
+    syncCollection(collection.address),
+    getActivity(collection.address, String(tokenId)),
+  ])
+  const listing = market.listings.find((l) => l.tokenId === String(tokenId)) ?? null
   return (
     <main className="min-h-screen pt-16 text-white">
-      <ItemView collection={collection} item={item} />
+      <ItemView collection={collection} item={item} listing={listing} activity={activity} />
     </main>
   )
 }
