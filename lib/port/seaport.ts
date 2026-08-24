@@ -132,8 +132,20 @@ const ORDER_COMPONENTS = [
   { name: 'counter', type: 'uint256' },
 ] as const
 
+/** Same as ORDER_COMPONENTS but with counter replaced by totalOriginalConsiderationItems.
+ *  Spelled out rather than sliced from ORDER_COMPONENTS — .slice() widens the literal tuple type
+ *  and viem then still demands `counter`, which fulfillOrder does not take. */
 const ORDER_PARAMETERS = [
-  ...ORDER_COMPONENTS.slice(0, 10),
+  { name: 'offerer', type: 'address' },
+  { name: 'zone', type: 'address' },
+  { name: 'offer', type: 'tuple[]', components: OFFER_ITEM },
+  { name: 'consideration', type: 'tuple[]', components: CONSIDERATION_ITEM },
+  { name: 'orderType', type: 'uint8' },
+  { name: 'startTime', type: 'uint256' },
+  { name: 'endTime', type: 'uint256' },
+  { name: 'zoneHash', type: 'bytes32' },
+  { name: 'salt', type: 'uint256' },
+  { name: 'conduitKey', type: 'bytes32' },
   { name: 'totalOriginalConsiderationItems', type: 'uint256' },
 ] as const
 
