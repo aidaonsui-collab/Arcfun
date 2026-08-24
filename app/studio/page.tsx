@@ -1,7 +1,10 @@
 import { CollectionTable } from '@/components/port/CollectionTable'
 import { FeaturedCollectionCard } from '@/components/port/FeaturedCollectionCard'
+import { FeaturedRail } from '@/components/port/FeaturedRail'
+import { MarketActivityList } from '@/components/port/MarketActivityList'
 import { PortHow, PortStudio } from '@/components/port/PortStudio'
 import { listCollections } from '@/lib/port/catalog'
+import { getActivity, getGlobalActivity, type MarketActivity } from '@/lib/port/market'
 
 export const metadata = { title: 'ArcStudio — Arcfun' }
 export const dynamic = 'force-dynamic'
@@ -13,7 +16,13 @@ export default async function PortHome({
 }) {
   const sp = await Promise.resolve(searchParams)
   const q = sp.q?.trim().toLowerCase()
-  const collections = await listCollections()
+  const [collections, global] = await Promise.all([listCollections(), getGlobalActivity(40)])
+  let activity = global
+  if (activity.length === 0 && collections.length > 0) {
+    const tapes = await Promise.all(collections.slice(0, 12).map((c) => getActivity(c.address)))
+    const merged: MarketActivity[] = tapes.flat().sort((a, b) => b.at - a.at).slice(0, 40)
+    activity = merged
+  }
   const list = q
     ? collections.filter(
         (c) =>
@@ -64,11 +73,11 @@ export default async function PortHome({
         ) : (
           <>
             {!searching ? (
-              <div className="rail-scroll -mx-4 flex gap-3 overflow-x-auto px-4 pb-1 sm:-mx-0 sm:px-0 sm:gap-4">
+              <FeaturedRail>
                 {list.slice(0, 8).map((c) => (
                   <FeaturedCollectionCard key={c.address} collection={c} />
                 ))}
-              </div>
+              </FeaturedRail>
             ) : null}
             <div className={searching ? 'mt-2' : 'mt-10'}>
               {!searching ? (
@@ -76,6 +85,15 @@ export default async function PortHome({
               ) : null}
               <CollectionTable collections={list} />
             </div>
+            {!searching && activity.length > 0 ? (
+              <div className="mt-10">
+                <h2 className="mb-4 text-[21px] font-semibold tracking-tightish">Activity</h2>
+                <MarketActivityList
+                  events={activity}
+                  names={Object.fromEntries(list.map((c) => [c.address.toLowerCase(), c.name]))}
+                />
+              </div>
+            ) : null}
           </>
         )}
       </div>

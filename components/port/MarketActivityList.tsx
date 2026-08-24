@@ -13,10 +13,12 @@ const LABEL: Record<MarketActivity['type'], string> = {
 export function MarketActivityList({
   events,
   collection,
+  names,
   empty = 'No activity yet',
 }: {
   events: MarketActivity[]
   collection?: string
+  names?: Record<string, string>
   empty?: string
 }) {
   if (events.length === 0) {
@@ -29,12 +31,20 @@ export function MarketActivityList({
   return (
     <div className="divide-y divide-hair2 overflow-hidden rounded-[24px] border border-hair bg-s1">
       {events.map((e) => {
-        const href = collection && e.tokenId !== '0' ? `/studio/${collection}/${e.tokenId}` : undefined
+        const col = collection || e.collection
+        const href =
+          col && e.tokenId !== '0'
+            ? `/studio/${col}/${e.tokenId}`
+            : col
+              ? `/studio/${col}`
+              : undefined
+        const name = names?.[e.collection.toLowerCase()]
         const row = (
           <div className="flex items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
               <div className="text-[14px] font-medium">{LABEL[e.type]}</div>
-              <div className="mt-0.5 text-[13px] text-t3">
+              <div className="mt-0.5 truncate text-[13px] text-t3">
+                {name ? `${name} · ` : ''}
                 {e.tokenId === '0' ? 'Collection' : `#${e.tokenId}`}
                 <span className="text-white/20"> · </span>
                 {timeAgo(e.at)}

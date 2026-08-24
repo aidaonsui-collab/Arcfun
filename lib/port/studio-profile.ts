@@ -7,6 +7,7 @@ import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { getCreatorMeta, type CreatorMeta } from '@/lib/arc-creator-meta'
 import { PORT_NFT_ABI } from './abi'
 import { listCollections } from './catalog'
+import { getPortItems } from './item-meta'
 import { CREATOR_SHARE, type Collection, type NftItem } from './types'
 
 const MAX_OWNER_SCAN = 400
@@ -21,6 +22,7 @@ export type StudioProfile = {
   meta: CreatorMeta
   launched: StudioLaunched[]
   held: NftItem[]
+  heldCollections: Collection[]
   primaryEarnedUsdc: number
 }
 
@@ -35,7 +37,9 @@ export async function getStudioProfile(raw: string): Promise<StudioProfile | nul
   }))
   const primaryEarnedUsdc = launched.reduce((s, r) => s + r.primaryEarnedUsdc, 0)
   const held = await listHeldItems(address, all)
-  return { address, meta, launched, held, primaryEarnedUsdc }
+  const heldSet = new Set(held.map((i) => i.collection.toLowerCase()))
+  const heldCollections = all.filter((c) => heldSet.has(c.address.toLowerCase()))
+  return { address, meta, launched, held, heldCollections, primaryEarnedUsdc }
 }
 
 async function listHeldItems(owner: string, collections: Collection[]): Promise<NftItem[]> {
@@ -58,6 +62,7 @@ async function listHeldItems(owner: string, collections: Collection[]): Promise<
       bal = 0
     }
     if (!Number.isFinite(bal) || bal <= 0) continue
+    const store = await getPortItems(c.address)
     const n = Math.min(c.minted, MAX_OWNER_SCAN)
     const reads = await client.multicall({
       allowFailure: true,
@@ -73,14 +78,15 @@ async function listHeldItems(owner: string, collections: Collection[]): Promise<
       const who = String(row.result).toLowerCase()
       if (who !== owner) return
       const id = i + 1
+      const meta = store.items[String(id)]
       out.push({
         collection: c.address,
         id,
-        name: `${c.name} #${id}`,
-        image: c.image,
+        name: meta?.name || `${c.name} #${id}`,
+        image: meta?.imageUrl || c.image,
         owner,
         minted: true,
-        traits: [],
+        traits: meta?.traits?.filter((t) => t.type && t.value) ?? [],
       })
     })
   }

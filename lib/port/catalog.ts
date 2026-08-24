@@ -202,6 +202,30 @@ export async function getItems(address: string): Promise<NftItem[]> {
     .map((id) => nftFrom(collection, id, store.items[String(id)]))
 }
 
+/** Unique owners among minted tokens. Caps at 400 reads. 0 means none or the scan failed. */
+export async function countOwners(address: string, minted: number): Promise<number> {
+  if (!isPlausibleEvmAddress(address) || minted <= 0) return 0
+  const n = Math.min(minted, MAX_LIST)
+  try {
+    const reads = await arcPublicClient().multicall({
+      allowFailure: true,
+      contracts: Array.from({ length: n }, (_, i) => ({
+        address: address as Address,
+        abi: PORT_NFT_ABI,
+        functionName: 'ownerOf' as const,
+        args: [BigInt(i + 1)] as const,
+      })),
+    })
+    const set = new Set<string>()
+    for (const row of reads) {
+      if (row.status === 'success') set.add(String(row.result).toLowerCase())
+    }
+    return set.size
+  } catch {
+    return 0
+  }
+}
+
 export async function getItem(address: string, id: number): Promise<NftItem | undefined> {
   const collection = await getCollection(address)
   if (!collection || !Number.isInteger(id) || id < 1 || id > collection.minted) return undefined

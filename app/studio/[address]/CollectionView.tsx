@@ -20,19 +20,24 @@ import { OfferSheet } from '@/components/port/OfferSheet'
 import { AcceptOfferSheet } from '@/components/port/AcceptOfferSheet'
 import { BatchListSheet } from '@/components/port/BatchListSheet'
 import { CancelOrderButton } from '@/components/port/CancelOrderButton'
-import { fetchListings, sortByPriceDesc, type Listing } from '@/lib/port/listings'
+import { SweepSheet } from '@/components/port/SweepSheet'
+import { fetchListings, isListing, sortByPriceDesc, type Listing } from '@/lib/port/listings'
 import { atomicToUsdc, type MarketActivity } from '@/lib/port/market'
 import { collectionStatus, type Collection, type NftItem } from '@/lib/port/types'
 import { formatInt, formatUsdc, shortAddr, timeUntil } from '@/lib/port/format'
+
+const EMPTY_LISTINGS: Listing[] = []
 
 export function CollectionView({
   collection,
   items,
   activity = [],
+  listings: listingsProp = EMPTY_LISTINGS,
 }: {
   collection: Collection
   items: NftItem[]
   activity?: MarketActivity[]
+  listings?: Listing[]
 }) {
   const router = useRouter()
   const { address } = useAccount()
@@ -44,7 +49,9 @@ export function CollectionView({
   const [batchItems, setBatchItems] = useState<NftItem[] | null>(null)
   const [ownedIds, setOwnedIds] = useState<number[]>([])
   const [colOffers, setColOffers] = useState<Listing[]>([])
+  const [listings, setListings] = useState<Listing[]>(listingsProp)
   const [accept, setAccept] = useState<Listing | null>(null)
+  const [sweepOpen, setSweepOpen] = useState(false)
   const isCreator = Boolean(
     address && collection.creator && address.toLowerCase() === collection.creator.toLowerCase(),
   )
@@ -54,6 +61,10 @@ export function CollectionView({
       setColOffers(sortByPriceDesc(rows)),
     )
   }, [collection.address])
+
+  useEffect(() => {
+    setListings(listingsProp)
+  }, [listingsProp])
 
   useEffect(() => {
     const minted = items.filter((i) => i.minted !== false).slice(0, 200)
@@ -155,6 +166,16 @@ export function CollectionView({
               />
               <HeroStat label="Listed" value={formatInt(collection.listed ?? 0)} />
               <HeroStat
+                label="Owners"
+                value={
+                  collection.owners > 0
+                    ? formatInt(collection.owners)
+                    : collection.minted > 0
+                      ? '—'
+                      : '0'
+                }
+              />
+              <HeroStat
                 label="24h vol"
                 value={formatUsdc(collection.volume24hUsdc ?? 0)}
                 suffix="USDC"
@@ -185,6 +206,15 @@ export function CollectionView({
           >
             Collection offer
           </button>
+          {listings.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setSweepOpen(true)}
+              className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
+            >
+              Sweep
+            </button>
+          ) : null}
           {isCreator ? (
             <Link
               href={`/studio/${collection.address}/items`}
@@ -203,6 +233,15 @@ export function CollectionView({
           >
             Collection offer
           </button>
+          {listings.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setSweepOpen(true)}
+              className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[13px] font-semibold"
+            >
+              Sweep
+            </button>
+          ) : null}
           {isCreator ? (
             <Link
               href={`/studio/${collection.address}/items`}
@@ -266,6 +305,16 @@ export function CollectionView({
       </div>
       <StickyMintBar collection={collection} onMint={() => setMintOpen(true)} />
       <MintSheet collection={collection} open={mintOpen} onClose={() => setMintOpen(false)} />
+      <SweepSheet
+        listings={listings}
+        open={sweepOpen}
+        onClose={() => {
+          setSweepOpen(false)
+          void fetchListings(collection.address, undefined, 'listing').then((rows) =>
+            setListings(rows.filter(isListing)),
+          )
+        }}
+      />
       <OfferSheet
         collection={collection}
         open={offerOpen}

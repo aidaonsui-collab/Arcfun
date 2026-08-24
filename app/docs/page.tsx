@@ -355,8 +355,9 @@ export default function DocsPage() {
               <h3 className="m-0 text-[17px] font-semibold tracking-tightish">Marketplace</h3>
               <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
                 Browse collections, mint from the sticky bar on phone. Secondary list, buy,
-                item and collection offers, batch list, and cancel run on Seaport 1.6. Floor,
-                top offer, listed count, and 24h volume come from live orders. No invented stats.
+                item and collection offers, sweep, batch list, send, and cancel run on Seaport
+                1.6. Floor, top offer, listed count, owners, and 24h volume come from live
+                orders. No invented stats.
               </p>
             </article>
             <article className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">

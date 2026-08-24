@@ -13,6 +13,7 @@ import { ListSheet } from '@/components/port/ListSheet'
 import { BuySheet } from '@/components/port/BuySheet'
 import { OfferSheet } from '@/components/port/OfferSheet'
 import { AcceptOfferSheet } from '@/components/port/AcceptOfferSheet'
+import { TransferSheet } from '@/components/port/TransferSheet'
 import { MarketActivityList } from '@/components/port/MarketActivityList'
 import { CancelOrderButton } from '@/components/port/CancelOrderButton'
 import { fetchActivity, fetchListings, sortByPriceDesc, type Listing } from '@/lib/port/listings'
@@ -39,6 +40,7 @@ export function ItemView({
   const [listing, setListing] = useState<Listing | null>(listingProp)
   const [offers, setOffers] = useState<Listing[]>([])
   const [offerOpen, setOfferOpen] = useState(false)
+  const [sendOpen, setSendOpen] = useState(false)
   const [accept, setAccept] = useState<Listing | null>(null)
   const [activity, setActivity] = useState<MarketActivity[]>(activityProp)
   const you = Boolean(wallet && item.owner.toLowerCase() === wallet.toLowerCase())
@@ -149,6 +151,13 @@ export function ItemView({
                       Cancel
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setSendOpen(true)}
+                    className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
+                  >
+                    Send
+                  </button>
                 </>
               ) : listing ? (
                 <>
@@ -204,9 +213,20 @@ export function ItemView({
             )}
 
             <h2 className="mt-10 text-[13px] font-medium text-t3">Owner</h2>
-            <p className="mt-2 text-[15px] tracking-tightish">
-              {you ? 'You' : shortAddr(item.owner)}
-            </p>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <p className="text-[15px] tracking-tightish">
+                {you ? 'You' : shortAddr(item.owner)}
+              </p>
+              {you ? (
+                <button
+                  type="button"
+                  onClick={() => setSendOpen(true)}
+                  className="inline-flex h-10 items-center rounded-xl border border-hair px-3 text-[13px] font-semibold lg:hidden"
+                >
+                  Send
+                </button>
+              ) : null}
+            </div>
 
             {offers.length > 0 ? (
               <>
@@ -311,6 +331,15 @@ export function ItemView({
         open={buyOpen}
         onClose={() => {
           setBuyOpen(false)
+          loadListing()
+        }}
+      />
+      <TransferSheet
+        item={item}
+        listing={listing}
+        open={sendOpen}
+        onClose={() => {
+          setSendOpen(false)
           loadListing()
         }}
       />

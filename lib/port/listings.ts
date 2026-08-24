@@ -71,6 +71,10 @@ export function sortByPriceDesc(rows: Listing[]): Listing[] {
   return [...rows].sort((a, b) => Number(BigInt(b.priceAtomic) - BigInt(a.priceAtomic)))
 }
 
+export function sortByPriceAsc(rows: Listing[]): Listing[] {
+  return [...rows].sort((a, b) => Number(BigInt(a.priceAtomic) - BigInt(b.priceAtomic)))
+}
+
 export function withListPrices(items: NftItem[], listings: Listing[]): NftItem[] {
   const map = new Map(
     listings.filter(isListing).map((l) => [l.tokenId, atomicToUsdc(l.priceAtomic)]),

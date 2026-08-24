@@ -1,14 +1,20 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAccount, useConnect } from 'wagmi'
 import { Loader2 } from 'lucide-react'
 import type { StudioProfile } from '@/lib/port/studio-profile'
 import { formatInt, formatUsdc, shortAddr } from '@/lib/port/format'
+import { fetchListings, isListing, sortByPriceDesc, type Listing } from '@/lib/port/listings'
 import { OfficialBadge } from './OfficialBadge'
 import { NftCard } from './NftCard'
 import { Price } from './Price'
+import { ListSheet } from './ListSheet'
+import { BatchListSheet } from './BatchListSheet'
+import { TransferSheet } from './TransferSheet'
+import { AcceptOfferSheet } from './AcceptOfferSheet'
+import type { Collection, NftItem } from '@/lib/port/types'
 
 export function StudioProfileView({ address }: { address?: string }) {
   const { address: connected } = useAccount()
@@ -19,6 +25,13 @@ export function StudioProfileView({ address }: { address?: string }) {
   const [profile, setProfile] = useState<StudioProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [book, setBook] = useState<Listing[]>([])
+  const [listItem, setListItem] = useState<{ collection: Collection; item: NftItem } | null>(null)
+  const [sendItem, setSendItem] = useState<NftItem | null>(null)
+  const [accept, setAccept] = useState<{ offer: Listing; tokenId: number } | null>(null)
+  const [batch, setBatch] = useState<{ collection: Collection; items: NftItem[] } | null>(null)
+  const [selecting, setSelecting] = useState<string | null>(null)
+  const [pickedIds, setPickedIds] = useState<number[]>([])
 
   useEffect(() => {
     if (!target) {
@@ -50,6 +63,60 @@ export function StudioProfileView({ address }: { address?: string }) {
       cancelled = true
     }
   }, [target])
+
+  useEffect(() => {
+    const cols = profile?.heldCollections || []
+    if (cols.length === 0) {
+      setBook([])
+      return
+    }
+    let cancelled = false
+    void Promise.all(cols.map((c) => fetchListings(c.address))).then((rows) => {
+      if (!cancelled) setBook(rows.flat())
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [profile])
+
+  const groups = useMemo(() => {
+    if (!profile) return []
+    const by = new Map<string, { collection: Collection; items: NftItem[] }>()
+    for (const col of profile.heldCollections || []) {
+      by.set(col.address.toLowerCase(), { collection: col, items: [] })
+    }
+    for (const item of profile.held) {
+      const g = by.get(item.collection.toLowerCase())
+      if (g) g.items.push(item)
+    }
+    return [...by.values()].filter((g) => g.items.length > 0)
+  }, [profile])
+
+  function listingFor(item: NftItem) {
+    return (
+      book.find(
+        (l) =>
+          isListing(l) &&
+          l.collection.toLowerCase() === item.collection.toLowerCase() &&
+          l.tokenId === String(item.id),
+      ) ?? null
+    )
+  }
+
+  function bestOfferFor(item: NftItem) {
+    const rows = book.filter(
+      (l) =>
+        l.collection.toLowerCase() === item.collection.toLowerCase() &&
+        (l.kind === 'offer' || l.kind === 'collection-offer') &&
+        (l.kind === 'collection-offer' || l.tokenId === String(item.id)),
+    )
+    return sortByPriceDesc(rows)[0] ?? null
+  }
+
+  function reloadBook() {
+    const cols = profile?.heldCollections || []
+    void Promise.all(cols.map((c) => fetchListings(c.address))).then((rows) => setBook(rows.flat()))
+  }
 
   if (!target) {
     return (
@@ -118,8 +185,8 @@ export function StudioProfileView({ address }: { address?: string }) {
         <Stat label="Primary earned" value={`${formatUsdc(profile.primaryEarnedUsdc)} USDC`} />
       </div>
       <p className="mt-3 max-w-xl text-[13px] leading-relaxed text-t3">
-        Primary mint pays 95% to the creator as items mint. Secondary royalties (the % on each
-        collection) settle when items resell — that market is not live yet.
+        Primary mint pays 95% to the creator as items mint. List, accept offers, or send from Held.
+        Secondary royalties settle on Seaport when an item resells.
       </p>
 
       <section className="mt-10">
@@ -198,13 +265,164 @@ export function StudioProfileView({ address }: { address?: string }) {
         {profile.held.length === 0 ? (
           <p className="mt-3 text-[15px] text-t3">No ArcStudio items in this wallet.</p>
         ) : (
-          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {profile.held.map((item) => (
-              <NftCard key={`${item.collection}-${item.id}`} item={item} address={item.collection} />
-            ))}
+          <div className="mt-6 space-y-10">
+            {groups.map((group) => {
+              const colKey = group.collection.address.toLowerCase()
+              const selectingHere = selecting === colKey
+              return (
+                <div key={group.collection.address}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <Link
+                      href={`/studio/${group.collection.address}`}
+                      className="text-[15px] font-semibold text-white hover:text-white"
+                    >
+                      {group.collection.name}
+                    </Link>
+                    {mine ? (
+                      <div className="flex items-center gap-2">
+                        {selectingHere ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPickedIds(group.items.map((i) => i.id))
+                            }
+                            className="inline-flex h-10 items-center rounded-xl border border-hair px-3 text-[13px] font-semibold"
+                          >
+                            Select all
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelecting(selectingHere ? null : colKey)
+                            setPickedIds([])
+                          }}
+                          className="inline-flex h-10 items-center rounded-xl border border-hair px-3 text-[13px] font-semibold"
+                        >
+                          {selectingHere ? 'Cancel' : 'Select'}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                    {group.items.map((item) => {
+                      const listed = listingFor(item)
+                      const offer = mine ? bestOfferFor(item) : null
+                      const priced = listed
+                        ? { ...item, listPriceUsdc: Number(listed.priceAtomic) / 1e6 }
+                        : item
+                      const on = pickedIds.includes(item.id)
+                      return (
+                        <div key={`${item.collection}-${item.id}`}>
+                          <NftCard
+                            item={priced}
+                            address={item.collection}
+                            onClick={
+                              selectingHere
+                                ? () =>
+                                    setPickedIds((ids) =>
+                                      on ? ids.filter((x) => x !== item.id) : [...ids, item.id],
+                                    )
+                                : undefined
+                            }
+                          />
+                          {mine && !selectingHere ? (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setListItem({ collection: group.collection, item })}
+                                className="h-9 rounded-lg border border-hair px-2.5 text-[12px] font-semibold"
+                              >
+                                {listed ? 'Listed' : 'List'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSendItem(item)}
+                                className="h-9 rounded-lg border border-hair px-2.5 text-[12px] font-semibold"
+                              >
+                                Send
+                              </button>
+                              {offer ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setAccept({ offer, tokenId: item.id })}
+                                  className="h-9 rounded-lg bg-lime px-2.5 text-[12px] font-semibold text-white"
+                                >
+                                  Accept
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {mine && selectingHere && pickedIds.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBatch({
+                          collection: group.collection,
+                          items: group.items.filter((i) => pickedIds.includes(i.id)),
+                        })
+                        setSelecting(null)
+                        setPickedIds([])
+                      }}
+                      className="mt-4 w-full rounded-xl bg-lime py-3 text-[14px] font-semibold text-white"
+                    >
+                      List {pickedIds.length} item{pickedIds.length === 1 ? '' : 's'}
+                    </button>
+                  ) : null}
+                </div>
+              )
+            })}
           </div>
         )}
       </section>
+
+      {listItem ? (
+        <ListSheet
+          collection={listItem.collection}
+          item={listItem.item}
+          listing={listingFor(listItem.item)}
+          open
+          onClose={() => {
+            setListItem(null)
+            reloadBook()
+          }}
+        />
+      ) : null}
+      {sendItem ? (
+        <TransferSheet
+          item={sendItem}
+          listing={listingFor(sendItem)}
+          open
+          onClose={() => {
+            setSendItem(null)
+            reloadBook()
+          }}
+        />
+      ) : null}
+      <AcceptOfferSheet
+        offer={accept?.offer ?? null}
+        tokenId={accept?.tokenId || 1}
+        open={!!accept}
+        onClose={() => {
+          setAccept(null)
+          reloadBook()
+        }}
+      />
+      {batch ? (
+        <BatchListSheet
+          collection={batch.collection}
+          items={batch.items}
+          open
+          onClose={() => {
+            setBatch(null)
+            reloadBook()
+          }}
+        />
+      ) : null}
     </div>
   )
 }

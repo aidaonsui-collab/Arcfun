@@ -7,10 +7,12 @@ import type { Listing } from './listings'
 const ORDER_KEY = (h: string) => `arcfun:studio:order:${h.toLowerCase()}`
 const COLLECTION_SET = (c: string) => `arcfun:studio:orders:${c.toLowerCase()}`
 const ACTIVITY_KEY = (c: string) => `arcfun:studio:activity:${c.toLowerCase()}`
+const GLOBAL_ACTIVITY_KEY = 'arcfun:studio:activity:all'
 const SNAP_KEY = (c: string) => `arcfun:studio:market:${c.toLowerCase()}`
 const SEEN_KEY = (hash: string, type: string) => `arcfun:studio:actseen:${hash.toLowerCase()}:${type}`
 
 const ACTIVITY_CAP = 100
+const GLOBAL_ACTIVITY_CAP = 80
 const DAY_MS = 86_400_000
 
 export type OrderKind = 'listing' | 'offer' | 'collection-offer'
@@ -73,27 +75,44 @@ export async function recordActivity(event: MarketActivity): Promise<void> {
     const seen = SEEN_KEY(event.orderHash, event.type)
     if (await kv.get(seen)) return
     await kv.set(seen, 1, { ex: 60 * 60 * 24 * 40 })
-    await kv.lpush(ACTIVITY_KEY(event.collection), JSON.stringify(event))
+    const payload = JSON.stringify(event)
+    await kv.lpush(ACTIVITY_KEY(event.collection), payload)
     await kv.ltrim(ACTIVITY_KEY(event.collection), 0, ACTIVITY_CAP - 1)
+    await kv.lpush(GLOBAL_ACTIVITY_KEY, payload)
+    await kv.ltrim(GLOBAL_ACTIVITY_KEY, 0, GLOBAL_ACTIVITY_CAP - 1)
   } catch {
     /* kv optional */
   }
 }
 
+function parseActivity(raw: unknown[]): MarketActivity[] {
+  return raw
+    .map((row) => {
+      try {
+        return (typeof row === 'string' ? JSON.parse(row) : row) as MarketActivity
+      } catch {
+        return null
+      }
+    })
+    .filter((e): e is MarketActivity => !!e && !!e.type)
+}
+
 export async function getActivity(collection: string, tokenId?: string): Promise<MarketActivity[]> {
   try {
     const raw = (await kv.lrange<string>(ACTIVITY_KEY(collection), 0, ACTIVITY_CAP - 1)) || []
-    const rows = raw
-      .map((row) => {
-        try {
-          return (typeof row === 'string' ? JSON.parse(row) : row) as MarketActivity
-        } catch {
-          return null
-        }
-      })
-      .filter((e): e is MarketActivity => !!e && !!e.type)
+    const rows = parseActivity(raw)
     if (!tokenId) return rows
     return rows.filter((e) => e.tokenId === String(tokenId))
+  } catch {
+    return []
+  }
+}
+
+export async function getGlobalActivity(limit = 40): Promise<MarketActivity[]> {
+  try {
+    const n = Math.min(Math.max(1, limit), GLOBAL_ACTIVITY_CAP)
+    const raw = (await kv.lrange<string>(GLOBAL_ACTIVITY_KEY, 0, n - 1)) || []
+    return parseActivity(raw)
   } catch {
     return []
   }

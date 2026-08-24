@@ -10,6 +10,7 @@ export function FeaturedCollectionCard({ collection }: { collection: Collection 
   return (
     <Link
       href={`/studio/${collection.address}`}
+      data-featured-card
       className="group relative block h-[220px] w-[min(100%,320px)] shrink-0 overflow-hidden rounded-[24px] text-white hover:text-white sm:h-[240px] sm:w-[360px]"
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}

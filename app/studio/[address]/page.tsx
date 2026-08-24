@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { getCollection, getItems } from '@/lib/port/catalog'
+import { countOwners, getCollection, getItems } from '@/lib/port/catalog'
 import { isListing, withListPrices } from '@/lib/port/listings'
 import { getActivity, syncCollection } from '@/lib/port/market'
 import { CollectionView } from './CollectionView'
@@ -37,14 +37,16 @@ export default async function CollectionPage({
       </main>
     )
   }
-  const [items, market, activity] = await Promise.all([
+  const [items, market, activity, owners] = await Promise.all([
     getItems(address),
     syncCollection(collection.address),
     getActivity(collection.address),
+    countOwners(collection.address, collection.minted),
   ])
   const priced = withListPrices(items, market.listings.filter(isListing))
   const col = {
     ...collection,
+    owners,
     floorUsdc: market.snapshot.floorUsdc,
     listed: market.snapshot.listed,
     volume24hUsdc: market.snapshot.volume24hUsdc,
@@ -52,7 +54,12 @@ export default async function CollectionPage({
   }
   return (
     <main className="min-h-screen pt-16 text-white">
-      <CollectionView collection={col} items={priced} activity={activity} />
+      <CollectionView
+        collection={col}
+        items={priced}
+        activity={activity}
+        listings={market.listings.filter(isListing)}
+      />
     </main>
   )
 }
