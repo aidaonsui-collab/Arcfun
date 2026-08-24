@@ -263,7 +263,12 @@ export function ItemView({
 
             <h2 className="mt-10 text-[13px] font-medium text-t3">Activity</h2>
             <div className="mt-3">
-              <MarketActivityList events={activity} collection={collection.slug || collection.address} />
+              <MarketActivityList
+                events={activity}
+                collection={collection.slug || collection.address}
+                pollCollection={collection.address}
+                pollTokenId={item.id}
+              />
             </div>
           </div>
         </div>

@@ -300,7 +300,11 @@ export function CollectionView({
         <div className="mt-10">
           <h2 className="text-[17px] font-semibold tracking-tightish">Activity</h2>
           <div className="mt-4">
-            <MarketActivityList events={activity} collection={collection.slug || collection.address} />
+            <MarketActivityList
+              events={activity}
+              collection={collection.slug || collection.address}
+              pollCollection={collection.address}
+            />
           </div>
         </div>
       </div>

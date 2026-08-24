@@ -92,7 +92,7 @@ export default async function PortHome({
               ) : null}
               <CollectionTable collections={list} />
             </div>
-            {!searching && activity.length > 0 ? (
+            {!searching ? (
               <div className="mt-10">
                 <h2 className="mb-4 text-[21px] font-semibold tracking-tightish">Activity</h2>
                 <MarketActivityList

@@ -85,11 +85,17 @@ export function withListPrices(items: NftItem[], listings: Listing[]): NftItem[]
   })
 }
 
-export async function fetchActivity(collection: string, tokenId?: number) {
+export async function fetchActivity(
+  collection?: string,
+  tokenId?: number | string,
+  signal?: AbortSignal,
+) {
   try {
-    const q = new URLSearchParams({ collection })
-    if (tokenId != null) q.set('tokenId', String(tokenId))
-    const res = await fetch(`/api/studio/activity?${q}`, { cache: 'no-store' })
+    const q = new URLSearchParams()
+    if (collection) q.set('collection', collection)
+    if (tokenId != null && tokenId !== '') q.set('tokenId', String(tokenId))
+    const path = q.size ? `/api/studio/activity?${q}` : '/api/studio/activity'
+    const res = await fetch(path, { cache: 'no-store', signal })
     if (!res.ok) return []
     const j = (await res.json()) as { activity?: import('./market').MarketActivity[] }
     return j.activity ?? []
