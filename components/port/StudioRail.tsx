@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { FileText, LayoutGrid, Plus, Rocket, User } from 'lucide-react'
@@ -18,22 +19,47 @@ const MORE = [
 
 export function StudioRail() {
   const pathname = usePathname()
+  // After a click the link stays focused (layout does not remount) and the cursor is still over
+  // the flyout, so CSS :hover / :focus-within would keep it open. Lock collapsed until the
+  // pointer leaves, then hover can expand it again.
+  const [locked, setLocked] = useState(false)
 
   return (
     <aside
-      className="group/rail fixed bottom-5 left-3 top-20 z-30 hidden w-16 flex-col overflow-hidden rounded-[28px] border border-hair bg-[rgba(12,16,24,0.92)] shadow-[0_16px_48px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-[width] duration-200 ease-out hover:w-[200px] focus-within:w-[200px] lg:flex"
+      onPointerLeave={() => setLocked(false)}
+      className={cn(
+        'group/rail fixed bottom-5 left-3 top-20 z-30 hidden w-16 flex-col overflow-hidden rounded-[28px] border border-hair bg-[rgba(12,16,24,0.92)] shadow-[0_16px_48px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-[width] duration-200 ease-out has-[:focus-visible]:w-[200px] lg:flex',
+        !locked && 'hover:w-[200px]',
+      )}
       aria-label="ArcStudio"
     >
       <nav className="flex min-h-0 flex-1 flex-col gap-1 p-2">
         {PRIMARY.map((item) => (
-          <RailLink key={item.href} {...item} active={item.match(pathname)} />
+          <RailLink
+            key={item.href}
+            {...item}
+            active={item.match(pathname)}
+            locked={locked}
+            onPick={() => setLocked(true)}
+          />
         ))}
         <div className="mx-2 my-2 h-px bg-hair" />
         {MORE.map((item) => (
-          <RailLink key={item.href} {...item} active={item.match(pathname)} />
+          <RailLink
+            key={item.href}
+            {...item}
+            active={item.match(pathname)}
+            locked={locked}
+            onPick={() => setLocked(true)}
+          />
         ))}
       </nav>
-      <p className="mb-3 truncate px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-t3 opacity-0 transition-opacity duration-200 group-hover/rail:opacity-100 group-focus-within/rail:opacity-100">
+      <p
+        className={cn(
+          'mb-3 truncate px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-t3 opacity-0 transition-opacity duration-200 group-has-[:focus-visible]/rail:opacity-100',
+          !locked && 'group-hover/rail:opacity-100',
+        )}
+      >
         ArcStudio
       </p>
     </aside>
@@ -46,17 +72,27 @@ function RailLink({
   icon: Icon,
   active,
   accent,
+  locked,
+  onPick,
 }: {
   href: string
   label: string
   icon: typeof LayoutGrid
   active: boolean
   accent?: boolean
+  locked: boolean
+  onPick: () => void
 }) {
   return (
     <Link
       href={href}
       title={label}
+      onClick={() => {
+        onPick()
+        requestAnimationFrame(() => {
+          ;(document.activeElement as HTMLElement | null)?.blur()
+        })
+      }}
       className={cn(
         'flex h-12 shrink-0 items-center gap-3 rounded-2xl px-[13px] text-[13px] font-semibold tracking-tightish transition-colors',
         accent && !active
@@ -67,7 +103,12 @@ function RailLink({
       )}
     >
       <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.8} />
-      <span className="min-w-0 truncate opacity-0 transition-opacity duration-150 group-hover/rail:opacity-100 group-focus-within/rail:opacity-100">
+      <span
+        className={cn(
+          'min-w-0 truncate opacity-0 transition-opacity duration-150 group-has-[:focus-visible]/rail:opacity-100',
+          !locked && 'group-hover/rail:opacity-100',
+        )}
+      >
         {label}
       </span>
     </Link>
