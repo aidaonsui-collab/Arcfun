@@ -3,7 +3,6 @@ import type { Collection, NftItem } from './types'
 import { formatInt, formatUsdc } from './format'
 import { studioPath } from './path'
 
-const SITE = 'Arcfun'
 const STUDIO = 'ArcStudio'
 
 export function absoluteAsset(src: string | undefined | null): string | null {
@@ -22,7 +21,7 @@ export function collectionShareTitle(c: Collection): string {
     c.floorUsdc != null && Number.isFinite(c.floorUsdc)
       ? ` ${formatUsdc(c.floorUsdc)} USDC`
       : ''
-  return `${c.name}${floor} - Collection | ${SITE}`
+  return `${c.name}${floor} - Collection | ${STUDIO}`
 }
 
 export function collectionShareDescription(c: Collection): string {
@@ -33,7 +32,7 @@ export function collectionShareDescription(c: Collection): string {
 }
 
 export function itemShareTitle(c: Collection, item: NftItem): string {
-  return `${item.name} | ${c.name} | ${SITE}`
+  return `${item.name} | ${c.name} | ${STUDIO}`
 }
 
 export function itemShareDescription(c: Collection, item: NftItem): string {
@@ -52,7 +51,7 @@ export function collectionMetadata(c: Collection): Metadata {
       title,
       description,
       url: path,
-      siteName: SITE,
+      siteName: STUDIO,
       locale: 'en_US',
       type: 'website',
     },
@@ -76,7 +75,7 @@ export function itemMetadata(c: Collection, item: NftItem): Metadata {
       title,
       description,
       url: path,
-      siteName: SITE,
+      siteName: STUDIO,
       locale: 'en_US',
       type: 'website',
     },
@@ -92,7 +91,7 @@ export function missingStudioMetadata(kind: 'collection' | 'item'): Metadata {
   const title = kind === 'item' ? `Item not found | ${STUDIO}` : `Collection not found | ${STUDIO}`
   return {
     title,
-    openGraph: { title, siteName: SITE, type: 'website' },
+    openGraph: { title, siteName: STUDIO, type: 'website' },
     twitter: { card: 'summary', title },
   }
 }
