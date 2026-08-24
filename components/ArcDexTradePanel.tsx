@@ -29,7 +29,6 @@ import {
   withRecipient,
 } from '@/lib/arc-swap'
 import { formatToken, parseToken } from '@/lib/token-format'
-import { ArcBridgeCta } from '@/components/ArcBridgeCta'
 import { tileGradient } from '@/lib/ui-format'
 
 const SLIPPAGE_BPS = 500 // 5% — thin Instant single-sided ranges
@@ -439,12 +438,6 @@ export function ArcDexTradePanel({
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
               {statusMsg}
             </p>
-          )}
-
-          {mode === 'buy' && payBal < parseUsdc('1') && (
-            <div className="mt-3 px-1">
-              <ArcBridgeCta reason="Low USDC balance on Arc" />
-            </div>
           )}
 
           <button

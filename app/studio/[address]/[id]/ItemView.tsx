@@ -38,7 +38,7 @@ export function ItemView({ collection, item }: { collection: Collection; item: N
           </div>
           <div className="rise-in-2">
             <Link
-              href={`/port/${collection.address}`}
+              href={`/studio/${collection.address}`}
               className="inline-flex items-center gap-1.5 text-[13px] font-medium text-t3 hover:text-t2"
             >
               {collection.name}

@@ -27,7 +27,7 @@ export default async function CollectionPage({
         <h1 className="text-[32px] font-semibold tracking-display">Collection not found</h1>
         <p className="mt-2 text-t3">This address isn’t on ArcStudio.</p>
         <Link
-          href="/port"
+          href="/studio"
           className="mt-6 inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime text-[16px] font-bold text-white hover:text-white"
         >
           Back to ArcStudio

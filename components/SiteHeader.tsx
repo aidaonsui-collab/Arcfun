@@ -1,8 +1,8 @@
 'use client'
 
 /**
- * Sticky nav — brand mark, search, ArcStudio, OTC, wallet chip.
- * Mobile: Home, ArcStudio, Create collection, Portfolio, Profile, Arc OTC, Docs.
+ * Sticky nav — brand mark, search, ArcStudio, wallet chip.
+ * Mobile: Home, ArcStudio, Create collection, Portfolio, Profile, Docs.
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -13,13 +13,7 @@ import { Menu, X } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
 import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
 
-/** Chains used by Arc launchpad + Arc OTC payment spokes. */
-const SUPPORTED_CHAIN_IDS = new Set([
-  ARC_CHAIN_ID,
-  1, // Ethereum (OTC, when live)
-  8453, // Base
-  42161, // Arbitrum
-])
+const SUPPORTED_CHAIN_IDS = new Set([ARC_CHAIN_ID])
 
 function short(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
@@ -65,15 +59,15 @@ export function SiteHeader() {
     }
   }, [menuOpen])
 
-  const onPort = pathname.startsWith('/port')
+  const onStudio = pathname.startsWith('/studio')
 
   const onSearch = (e: FormEvent) => {
     e.preventDefault()
     const v = q.trim()
     if (!v) return
     setMenuOpen(false)
-    if (onPort) {
-      router.push(`/port?q=${encodeURIComponent(v)}`)
+    if (onStudio) {
+      router.push(`/studio?q=${encodeURIComponent(v)}`)
       return
     }
     if (/^0x[a-fA-F0-9]{40}$/.test(v)) {
@@ -120,21 +114,14 @@ export function SiteHeader() {
         <div className="flex-1" />
 
         <Link
-          href="/port"
+          href="/studio"
           className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
-            onPort
+            onStudio
               ? 'border-lime-line bg-s2 text-white'
               : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
           }`}
         >
-          ArcStudio
-        </Link>
-
-        <Link
-          href="/otc"
-          className="hidden sm:inline-flex h-9 items-center px-3 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
-        >
-          Arc OTC
+          Studio
         </Link>
 
         {isConnected && address ? (
@@ -236,8 +223,8 @@ export function SiteHeader() {
             </form>
 
             {navLink('/', 'Home')}
-            {navLink('/port', 'ArcStudio')}
-            {navLink('/port/create', 'Create collection')}
+            {navLink('/studio', 'Studio')}
+            {navLink('/studio/create', 'Create collection')}
             {navLink('/portfolio', 'Portfolio')}
             {isConnected && address ? (
               navLink(`/creator/${address}`, 'Profile')
@@ -256,7 +243,6 @@ export function SiteHeader() {
                 Profile
               </button>
             )}
-            {navLink('/otc', 'Arc OTC')}
             {navLink('/docs', 'Docs')}
           </div>
         </div>

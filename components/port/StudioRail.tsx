@@ -2,18 +2,17 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ArrowLeftRight, FileText, LayoutGrid, Plus, Rocket } from 'lucide-react'
+import { FileText, LayoutGrid, Plus, Rocket } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 const PRIMARY = [
-  { href: '/port', label: 'Collections', icon: LayoutGrid, match: (p: string) => p === '/port' || /^\/port\/0x/i.test(p) },
-  { href: '/port/create', label: 'Create', icon: Plus, match: (p: string) => p.startsWith('/port/create'), accent: true },
+  { href: '/studio', label: 'Collections', icon: LayoutGrid, match: (p: string) => p === '/studio' || /^\/studio\/0x/i.test(p) },
+  { href: '/studio/create', label: 'Create', icon: Plus, match: (p: string) => p.startsWith('/studio/create'), accent: true },
 ] as const
 
 const MORE = [
   { href: '/', label: 'Launches', icon: Rocket, match: (p: string) => p === '/' },
-  { href: '/otc', label: 'Arc OTC', icon: ArrowLeftRight, match: (p: string) => p.startsWith('/otc') },
-  { href: '/docs#port', label: 'Docs', icon: FileText, match: (p: string) => p.startsWith('/docs') },
+  { href: '/docs#studio', label: 'Docs', icon: FileText, match: (p: string) => p.startsWith('/docs') },
 ] as const
 
 export function StudioRail() {

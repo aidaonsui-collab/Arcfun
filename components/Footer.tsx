@@ -12,11 +12,8 @@ export function Footer() {
           <Link href="/docs#agents" className="hover:text-white">
             Agents
           </Link>
-          <Link href="/port" className="hover:text-white">
-            ArcStudio
-          </Link>
-          <Link href="/otc" className="hover:text-white">
-            Arc OTC
+          <Link href="/studio" className="hover:text-white">
+            Studio
           </Link>
           <Link href="/create" className="hover:text-white">
             Launch

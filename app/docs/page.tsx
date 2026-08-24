@@ -4,7 +4,7 @@ import Link from 'next/link'
 export const metadata: Metadata = {
   title: 'Docs — Arcfun',
   description:
-    'Arcfun pair types, LP fee splits, ArcStudio NFT launchpad, Portfolio reflection claims, Instant OTC, and how Instant launches work on Arc.',
+    'Arcfun pair types, LP fee splits, ArcStudio NFT launchpad, Portfolio reflection claims, and how Instant launches work on Arc.',
 }
 
 const TOC = [
@@ -12,8 +12,7 @@ const TOC = [
   { href: '#launches', label: 'Launch types' },
   { href: '#fees', label: 'LP fees' },
   { href: '#portfolio', label: 'Portfolio' },
-  { href: '#port', label: 'ArcStudio' },
-  { href: '#otc', label: 'Arc OTC' },
+  { href: '#studio', label: 'ArcStudio' },
   { href: '#agents', label: 'Agents' },
 ] as const
 
@@ -29,8 +28,7 @@ export default function DocsPage() {
         </h1>
         <p className="mt-3 mb-0 max-w-2xl text-[16px] text-t2 leading-relaxed">
           Instant token launches on Arc. Full supply onto Uniswap V3 from block one, always quoted
-          in USDC, LP locked. Two live launch types — Meme and Reflection — plus an Instant
-          OTC desk to get USDC onto the chain.
+          in USDC, LP locked. Two live launch types — Meme and Reflection.
         </p>
 
         <nav
@@ -334,11 +332,11 @@ export default function DocsPage() {
         </section>
 
         {/* Port */}
-        <section id="port" className="scroll-mt-24 mt-14">
+        <section id="studio" className="scroll-mt-24 mt-14">
           <h2 className="m-0 text-[24px] font-semibold tracking-tightish">ArcStudio</h2>
           <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
             NFT launchpad and marketplace on the same site as token launches.{' '}
-            <Link href="/port" className="text-lime-t font-semibold hover:text-white">
+            <Link href="/studio" className="text-lime-t font-semibold hover:text-white">
               ArcStudio
             </Link>{' '}
             is the marketplace. Create collection is the launchpad. You do not need to launch a
@@ -360,42 +358,6 @@ export default function DocsPage() {
                 Seaport 1.6 (Phase 2) after live primary supply. Phase 1 is create + mint in USDC.
               </p>
             </article>
-          </div>
-        </section>
-
-        {/* OTC */}
-        <section id="otc" className="scroll-mt-24 mt-14">
-          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">Arc OTC</h2>
-          <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
-            Instant desk for moving USDC onto Arc from Base or Arbitrum. Escrowed, not Circle
-            CCTP, and not a 1:1 bridge — makers set the premium.
-          </p>
-
-          <div className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
-            <dl className="m-0 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-[14px]">
-              <div>
-                <dt className="text-t3 font-medium">Route</dt>
-                <dd className="m-0 mt-0.5 font-semibold">Base / ARB USDC → Arc USDC</dd>
-              </div>
-              <div>
-                <dt className="text-t3 font-medium">Price</dt>
-                <dd className="m-0 mt-0.5 font-semibold">Maker premium + 2% platform fee</dd>
-              </div>
-              <div>
-                <dt className="text-t3 font-medium">If it doesn&apos;t settle</dt>
-                <dd className="m-0 mt-0.5 font-semibold">30-minute self-refund</dd>
-              </div>
-              <div>
-                <dt className="text-t3 font-medium">Orders</dt>
-                <dd className="m-0 mt-0.5 font-semibold">Purchases and maker sales on-chain</dd>
-              </div>
-            </dl>
-            <Link
-              href="/otc"
-              className="inline-flex mt-5 h-10 items-center px-4 rounded-xl bg-lime text-white text-sm font-semibold hover:bg-lime-2"
-            >
-              Open Arc OTC
-            </Link>
           </div>
         </section>
 

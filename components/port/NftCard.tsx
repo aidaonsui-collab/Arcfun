@@ -4,7 +4,7 @@ import type { NftItem } from '@/lib/port/types'
 export function NftCard({ item, address }: { item: NftItem; address: string }) {
   return (
     <Link
-      href={`/port/${address}/${item.id}`}
+      href={`/studio/${address}/${item.id}`}
       className="group block min-w-0 text-white hover:text-white"
     >
       <div className="aspect-square overflow-hidden rounded-[24px] bg-s1 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">

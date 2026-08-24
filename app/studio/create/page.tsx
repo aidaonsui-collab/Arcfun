@@ -311,7 +311,7 @@ export default function PortCreatePage() {
           originToken: originInfo?.token,
         }),
       }).catch(() => null)
-      router.push(`/port/${collection}`)
+      router.push(`/studio/${collection}`)
     } catch (err: unknown) {
       const ax = err as { shortMessage?: string; message?: string }
       const msg = ax?.shortMessage || ax?.message || String(err)
@@ -344,7 +344,7 @@ export default function PortCreatePage() {
     <main className="min-h-screen pt-16 text-white">
       <div className="flex h-12 items-center gap-3 border-b border-hair2 px-4 sm:px-6">
         <Link
-          href={step === 1 ? '/port' : '#'}
+          href={step === 1 ? '/studio' : '#'}
           onClick={(e) => {
             if (step === 2) {
               e.preventDefault()
@@ -647,7 +647,7 @@ export default function PortCreatePage() {
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-hair bg-[rgba(10,15,24,0.92)] backdrop-blur-xl lg:left-[88px]">
           <div className="mx-auto flex max-w-[1280px] items-center justify-end gap-3 px-4 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] sm:px-8">
             <Link
-              href="/port"
+              href="/studio"
               className="inline-flex h-11 items-center rounded-full border border-hair px-5 text-[14px] font-semibold text-t2 hover:text-white"
             >
               Cancel

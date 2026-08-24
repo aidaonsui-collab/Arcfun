@@ -8,7 +8,7 @@ export function CollectionCard({ collection }: { collection: Collection }) {
   const status = collectionStatus(collection)
   return (
     <Link
-      href={`/port/${collection.address}`}
+      href={`/studio/${collection.address}`}
       className="group block min-w-0 text-white hover:text-white"
     >
       <div className="aspect-square overflow-hidden rounded-[24px] bg-s1 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">

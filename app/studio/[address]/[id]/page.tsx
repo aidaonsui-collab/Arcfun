@@ -33,7 +33,7 @@ export default async function ItemPage({
         <h1 className="text-[32px] font-semibold tracking-display">Item not found</h1>
         <p className="mt-2 text-t3">It hasn’t been minted, or the id is wrong.</p>
         <Link
-          href={`/port/${address}`}
+          href={`/studio/${address}`}
           className="mt-6 inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime text-[16px] font-bold text-white hover:text-white"
         >
           Back to collection

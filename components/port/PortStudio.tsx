@@ -45,7 +45,7 @@ export function PortStudio() {
             </div>
           ))}
           <Link
-            href="/port/create"
+            href="/studio/create"
             className="grid aspect-square place-items-center rounded-2xl border border-dashed border-hair bg-s2 text-t3 transition-colors hover:border-lime-line hover:text-white"
             aria-label="Create collection"
           >
@@ -55,7 +55,7 @@ export function PortStudio() {
 
         <h2 className="mt-5 text-[28px] font-semibold tracking-display">Collection</h2>
         <Link
-          href="/port/create"
+          href="/studio/create"
           className="mt-4 flex h-12 w-full items-center justify-center rounded-full border border-hair bg-transparent text-[15px] font-semibold text-white hover:border-lime-line hover:bg-s2 hover:text-white"
         >
           Create collection
