@@ -140,6 +140,16 @@ export const PORT_NFT_ABI = [
   { type: 'function', name: 'maxPerWallet', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
   { type: 'function', name: 'price', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
   { type: 'function', name: 'totalMinted', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  {
+    type: 'event',
+    name: 'Minted',
+    inputs: [
+      { name: 'to', type: 'address', indexed: true },
+      { name: 'firstId', type: 'uint256', indexed: false },
+      { name: 'n', type: 'uint256', indexed: false },
+      { name: 'paid', type: 'uint256', indexed: false },
+    ],
+  },
   { type: 'function', name: 'publicMintStart', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint64' }] },
   { type: 'function', name: 'allowlistRoot', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
   { type: 'function', name: 'creatorPayout', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },

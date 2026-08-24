@@ -17,11 +17,18 @@ export default async function PortHome({
   const sp = await Promise.resolve(searchParams)
   const q = sp.q?.trim().toLowerCase()
   const [collections, global] = await Promise.all([listCollections(), getGlobalActivity(40)])
-  let activity = global
-  if (activity.length === 0 && collections.length > 0) {
-    const tapes = await Promise.all(collections.slice(0, 12).map((c) => getActivity(c.address)))
-    const merged: MarketActivity[] = tapes.flat().sort((a, b) => b.at - a.at).slice(0, 40)
-    activity = merged
+  const tapes =
+    collections.length > 0
+      ? await Promise.all(collections.slice(0, 12).map((c) => getActivity(c.address)))
+      : []
+  const seen = new Set<string>()
+  const activity: MarketActivity[] = []
+  for (const e of [...global, ...tapes.flat()].sort((a, b) => b.at - a.at)) {
+    const k = `${e.orderHash}:${e.type}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    activity.push(e)
+    if (activity.length >= 40) break
   }
   const list = q
     ? collections.filter(

@@ -31,7 +31,7 @@ export type StoredOrder = {
 }
 
 export type MarketActivity = {
-  type: 'list' | 'sale' | 'cancel' | 'offer'
+  type: 'list' | 'sale' | 'cancel' | 'offer' | 'mint'
   collection: string
   tokenId: string
   priceAtomic: string

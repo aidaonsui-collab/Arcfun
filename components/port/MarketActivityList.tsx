@@ -8,6 +8,7 @@ const LABEL: Record<MarketActivity['type'], string> = {
   sale: 'Sold',
   cancel: 'Cancelled',
   offer: 'Offer',
+  mint: 'Minted',
 }
 
 export function MarketActivityList({

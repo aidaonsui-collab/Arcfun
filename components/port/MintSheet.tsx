@@ -72,6 +72,11 @@ export function MintSheet({
       if (publicClient) {
         await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 })
       }
+      await fetch('/api/studio/activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection: collection.address, txHash: hash }),
+      }).catch(() => null)
       setQty(1)
       onClose()
       router.refresh()
