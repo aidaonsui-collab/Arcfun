@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAccount } from 'wagmi'
 import { CreatorChip } from '@/components/port/CreatorChip'
@@ -9,13 +9,32 @@ import { Price } from '@/components/port/Price'
 import { RoyaltyLine } from '@/components/port/RoyaltyLine'
 import { StickyMintBar } from '@/components/port/StickyMintBar'
 import { MintSheet } from '@/components/port/MintSheet'
+import { ListSheet } from '@/components/port/ListSheet'
+import { BuySheet } from '@/components/port/BuySheet'
+import { fetchListings, type Listing } from '@/lib/port/listings'
 import { collectionStatus, type Collection, type NftItem } from '@/lib/port/types'
 import { shortAddr, timeUntil } from '@/lib/port/format'
 
 export function ItemView({ collection, item }: { collection: Collection; item: NftItem }) {
   const { address: wallet } = useAccount()
   const [open, setOpen] = useState(false)
+  const [listOpen, setListOpen] = useState(false)
+  const [buyOpen, setBuyOpen] = useState(false)
+  const [listing, setListing] = useState<Listing | null>(null)
   const you = Boolean(wallet && item.owner.toLowerCase() === wallet.toLowerCase())
+
+  const loadListing = useCallback(async () => {
+    const rows = await fetchListings(collection.address, item.id)
+    setListing(rows[0] ?? null)
+  }, [collection.address, item.id])
+
+  useEffect(() => {
+    loadListing()
+  }, [loadListing])
+
+  const listedPrice = listing
+    ? (Number(listing.priceAtomic) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 4 })
+    : null
   const status = collectionStatus(collection)
   const mintLabel =
     status === 'sold'
@@ -60,18 +79,36 @@ export function ItemView({ collection, item }: { collection: Collection; item: N
               ) : null}
             </div>
             <div className="mt-6">
-              <div className="text-[13px] text-t3">Mint price</div>
-              <Price value={collection.mintPriceUsdc} size="lg" />
+              <div className="text-[13px] text-t3">{listing ? 'Listed for' : 'Mint price'}</div>
+              <Price value={listing ? Number(listing.priceAtomic) / 1e6 : collection.mintPriceUsdc} size="lg" />
             </div>
-            <div className="mt-8 hidden lg:block">
-              <button
-                type="button"
-                disabled={status !== 'live'}
-                onClick={() => setOpen(true)}
-                className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime px-8 text-[16px] font-bold text-white disabled:opacity-50"
-              >
-                {mintLabel}
-              </button>
+            <div className="mt-8 hidden gap-3 lg:flex">
+              {item.minted && you ? (
+                <button
+                  type="button"
+                  onClick={() => setListOpen(true)}
+                  className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime px-8 text-[16px] font-bold text-white"
+                >
+                  {listing ? 'Update listing' : 'List for sale'}
+                </button>
+              ) : listing ? (
+                <button
+                  type="button"
+                  onClick={() => setBuyOpen(true)}
+                  className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime px-8 text-[16px] font-bold text-white"
+                >
+                  Buy for {listedPrice} USDC
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={status !== 'live'}
+                  onClick={() => setOpen(true)}
+                  className="inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime px-8 text-[16px] font-bold text-white disabled:opacity-50"
+                >
+                  {mintLabel}
+                </button>
+              )}
             </div>
 
             <h2 className="mt-10 text-[13px] font-medium text-t3">Traits</h2>
@@ -104,6 +141,23 @@ export function ItemView({ collection, item }: { collection: Collection; item: N
       </div>
       <StickyMintBar collection={collection} onMint={() => setOpen(true)} />
       <MintSheet collection={collection} open={open} onClose={() => setOpen(false)} />
+      <ListSheet
+        collection={collection}
+        item={item}
+        open={listOpen}
+        onClose={() => {
+          setListOpen(false)
+          loadListing()
+        }}
+      />
+      <BuySheet
+        listing={listing}
+        open={buyOpen}
+        onClose={() => {
+          setBuyOpen(false)
+          loadListing()
+        }}
+      />
     </>
   )
 }

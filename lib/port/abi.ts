@@ -164,4 +164,25 @@ export const PORT_NFT_ABI = [
     inputs: [{ name: 'n', type: 'uint256' }],
     outputs: [],
   },
+  // Operator approval — Seaport must be approved before it can move a listed token.
+  {
+    type: 'function',
+    name: 'isApprovedForAll',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'operator', type: 'address' },
+    ],
+    outputs: [{ type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'setApprovalForAll',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'operator', type: 'address' },
+      { name: 'approved', type: 'bool' },
+    ],
+    outputs: [],
+  },
 ] as const
