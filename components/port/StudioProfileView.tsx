@@ -14,6 +14,7 @@ import { ListSheet } from './ListSheet'
 import { BatchListSheet } from './BatchListSheet'
 import { TransferSheet } from './TransferSheet'
 import { AcceptOfferSheet } from './AcceptOfferSheet'
+import { studioPath } from '@/lib/port/path'
 import type { Collection, NftItem } from '@/lib/port/types'
 
 export function StudioProfileView({ address }: { address?: string }) {
@@ -216,7 +217,7 @@ export function StudioProfileView({ address }: { address?: string }) {
                   <tr key={row.collection.address} className="border-b border-hair2 last:border-0">
                     <td className="px-4 py-3 sm:px-5">
                       <Link
-                        href={`/studio/${row.collection.address}`}
+                        href={studioPath(row.collection)}
                         className="flex items-center gap-3 text-white hover:text-white"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -244,7 +245,7 @@ export function StudioProfileView({ address }: { address?: string }) {
                         <Price value={row.primaryEarnedUsdc} />
                         {mine ? (
                           <Link
-                            href={`/studio/${row.collection.address}/items`}
+                            href={studioPath(row.collection, 'items')}
                             className="text-[13px] font-semibold text-lime-t hover:text-white"
                           >
                             Items
@@ -273,7 +274,7 @@ export function StudioProfileView({ address }: { address?: string }) {
                 <div key={group.collection.address}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <Link
-                      href={`/studio/${group.collection.address}`}
+                      href={studioPath(group.collection)}
                       className="text-[15px] font-semibold text-white hover:text-white"
                     >
                       {group.collection.name}
@@ -316,7 +317,7 @@ export function StudioProfileView({ address }: { address?: string }) {
                         <div key={`${item.collection}-${item.id}`}>
                           <NftCard
                             item={priced}
-                            address={item.collection}
+                            address={group.collection.slug || group.collection.address}
                             onClick={
                               selectingHere
                                 ? () =>

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Search, SlidersHorizontal } from 'lucide-react'
 import { NftCard } from '@/components/port/NftCard'
 import { PortSheet } from '@/components/port/PortSheet'
+import { studioPath } from '@/lib/port/path'
 import type { Collection, NftItem } from '@/lib/port/types'
 import { formatInt } from '@/lib/port/format'
 import { cn } from '@/lib/cn'
@@ -192,7 +193,7 @@ export function CollectionItems({
           </p>
           {isCreator ? (
             <Link
-              href={`/studio/${collection.address}/items`}
+              href={studioPath(collection, 'items')}
               className="mt-6 inline-flex h-12 items-center rounded-xl bg-lime px-5 text-[14px] font-semibold text-white hover:bg-lime-2"
             >
               Upload items
@@ -342,7 +343,7 @@ export function CollectionItems({
                       ) : null}
                       <NftCard
                         item={item}
-                        address={collection.address}
+                        address={collection.slug || collection.address}
                         onClick={
                           selecting && mine
                             ? () =>

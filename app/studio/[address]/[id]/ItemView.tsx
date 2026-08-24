@@ -19,6 +19,7 @@ import { CancelOrderButton } from '@/components/port/CancelOrderButton'
 import { fetchActivity, fetchListings, sortByPriceDesc, type Listing } from '@/lib/port/listings'
 import { atomicToUsdc } from '@/lib/port/market'
 import type { MarketActivity } from '@/lib/port/market'
+import { studioPath } from '@/lib/port/path'
 import { collectionStatus, type Collection, type NftItem } from '@/lib/port/types'
 import { formatUsdc, shortAddr, timeUntil } from '@/lib/port/format'
 
@@ -89,7 +90,7 @@ export function ItemView({
           </div>
           <div className="rise-in-2">
             <Link
-              href={`/studio/${collection.address}`}
+              href={studioPath(collection)}
               className="inline-flex items-center gap-1.5 text-[13px] font-medium text-t3 hover:text-t2"
             >
               {collection.name}
@@ -262,7 +263,7 @@ export function ItemView({
 
             <h2 className="mt-10 text-[13px] font-medium text-t3">Activity</h2>
             <div className="mt-3">
-              <MarketActivityList events={activity} />
+              <MarketActivityList events={activity} collection={collection.slug || collection.address} />
             </div>
           </div>
         </div>

@@ -14,11 +14,13 @@ export function MarketActivityList({
   events,
   collection,
   names,
+  slugs,
   empty = 'No activity yet',
 }: {
   events: MarketActivity[]
   collection?: string
   names?: Record<string, string>
+  slugs?: Record<string, string>
   empty?: string
 }) {
   if (events.length === 0) {
@@ -31,7 +33,7 @@ export function MarketActivityList({
   return (
     <div className="divide-y divide-hair2 overflow-hidden rounded-[24px] border border-hair bg-s1">
       {events.map((e) => {
-        const col = collection || e.collection
+        const col = collection || slugs?.[e.collection.toLowerCase()] || e.collection
         const href =
           col && e.tokenId !== '0'
             ? `/studio/${col}/${e.tokenId}`

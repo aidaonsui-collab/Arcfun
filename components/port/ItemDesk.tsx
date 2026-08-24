@@ -6,6 +6,7 @@ import { useAccount, useConnect, useWriteContract, useWaitForTransactionReceipt 
 import { useSignMessage } from 'wagmi'
 import { FolderUp, Loader2, Upload } from 'lucide-react'
 import type { Collection } from '@/lib/port/types'
+import { studioPath } from '@/lib/port/path'
 import type { PortItemMeta } from '@/lib/port/item-meta'
 import { cleanTraits, studioItemBaseUri } from '@/lib/port/item-meta'
 import { collectionItemsEditMessage } from '@/lib/arc-auth'
@@ -261,7 +262,7 @@ export function ItemDesk({ collection }: { collection: Collection }) {
 
   return (
     <div className="mx-auto w-full max-w-desk px-4 pb-24 pt-8 sm:px-10">
-      <Link href={`/studio/${collection.address}`} className="text-[13px] font-semibold text-t3 hover:text-white">
+      <Link href={studioPath(collection)} className="text-[13px] font-semibold text-t3 hover:text-white">
         ← {collection.name}
       </Link>
       <h1 className="mt-3 text-[28px] font-semibold tracking-display sm:text-[32px]">Items</h1>

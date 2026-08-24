@@ -6,6 +6,7 @@ import { arcPortEnabled } from './contracts'
 import { getPortCollectionMeta, getPortCollectionMetas } from './meta'
 import { getPortItem, getPortItems } from './item-meta'
 import { getSnapshot } from './market'
+import { collectionSlug, withPublicSlugs } from './path'
 import type { Collection, NftItem } from './types'
 
 const ZERO_ROOT = '0x0000000000000000000000000000000000000000000000000000000000000000'
@@ -78,10 +79,15 @@ async function loadOne(
       }
     }
 
+    const displayName = overlay?.name || name.result
     return {
       address,
-      slug: (symbol.status === 'success' ? String(symbol.result) : address.slice(2, 8)).toLowerCase(),
-      name: overlay?.name || name.result,
+      slug: collectionSlug({
+        address,
+        name: displayName,
+        symbol: overlay?.symbol || (symbol.status === 'success' ? String(symbol.result) : ''),
+      }),
+      name: displayName,
       symbol: overlay?.symbol || (symbol.status === 'success' ? String(symbol.result) : ''),
       description: overlay?.description || '',
       image,
@@ -143,27 +149,35 @@ export async function listCollections(): Promise<Collection[]> {
       .reverse()
     const metas = await getPortCollectionMetas(addresses)
     const rows = await Promise.all(addresses.map((a) => loadOne(a, metas.get(a.toLowerCase()))))
-    return rows.filter((c): c is Collection => !!c)
+    return withPublicSlugs(rows.filter((c): c is Collection => !!c))
   } catch {
     return []
   }
 }
 
-export async function getCollection(address: string): Promise<Collection | undefined> {
-  if (!isPlausibleEvmAddress(address) || !arcPortEnabled()) return undefined
-  const client = arcPublicClient()
-  try {
-    const ok = await client.readContract({
-      address: ARC.NFT_FACTORY,
-      abi: PORT_FACTORY_ABI,
-      functionName: 'isCollection',
-      args: [address as Address],
-    })
-    if (!ok) return undefined
-    return (await loadOne(address as Address)) ?? undefined
-  } catch {
-    return undefined
+export async function getCollection(id: string): Promise<Collection | undefined> {
+  if (!arcPortEnabled()) return undefined
+  if (isPlausibleEvmAddress(id)) {
+    const client = arcPublicClient()
+    try {
+      const ok = await client.readContract({
+        address: ARC.NFT_FACTORY,
+        abi: PORT_FACTORY_ABI,
+        functionName: 'isCollection',
+        args: [id as Address],
+      })
+      if (!ok) return undefined
+      const row = await loadOne(id as Address)
+      if (!row) return undefined
+      const listed = await listCollections()
+      return listed.find((c) => c.address.toLowerCase() === id.toLowerCase()) ?? row
+    } catch {
+      return undefined
+    }
   }
+  const key = id.toLowerCase()
+  const listed = await listCollections()
+  return listed.find((c) => c.slug.toLowerCase() === key)
 }
 
 function nftFrom(
@@ -187,10 +201,10 @@ export function itemsFor(collection: Collection): NftItem[] {
   return Array.from({ length: collection.minted }, (_, i) => nftFrom(collection, i + 1))
 }
 
-export async function getItems(address: string): Promise<NftItem[]> {
-  const collection = await getCollection(address)
+export async function getItems(id: string): Promise<NftItem[]> {
+  const collection = await getCollection(id)
   if (!collection) return []
-  const store = await getPortItems(address)
+  const store = await getPortItems(collection.address)
   const ids = new Set<number>()
   for (let i = 1; i <= collection.minted; i++) ids.add(i)
   for (const key of Object.keys(store.items)) {
@@ -226,20 +240,20 @@ export async function countOwners(address: string, minted: number): Promise<numb
   }
 }
 
-export async function getItem(address: string, id: number): Promise<NftItem | undefined> {
-  const collection = await getCollection(address)
-  if (!collection || !Number.isInteger(id) || id < 1 || id > collection.minted) return undefined
-  const meta = await getPortItem(address, id)
+export async function getItem(id: string, tokenId: number): Promise<NftItem | undefined> {
+  const collection = await getCollection(id)
+  if (!collection || !Number.isInteger(tokenId) || tokenId < 1 || tokenId > collection.minted) return undefined
+  const meta = await getPortItem(collection.address, tokenId)
   let owner = ''
   try {
     owner = (await arcPublicClient().readContract({
-      address: address as Address,
+      address: collection.address as Address,
       abi: PORT_NFT_ABI,
       functionName: 'ownerOf',
-      args: [BigInt(id)],
+      args: [BigInt(tokenId)],
     })) as string
   } catch {
     owner = ''
   }
-  return nftFrom(collection, id, meta, owner)
+  return nftFrom(collection, tokenId, meta, owner)
 }

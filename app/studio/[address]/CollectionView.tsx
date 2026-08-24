@@ -23,6 +23,7 @@ import { CancelOrderButton } from '@/components/port/CancelOrderButton'
 import { SweepSheet } from '@/components/port/SweepSheet'
 import { fetchListings, isListing, sortByPriceDesc, type Listing } from '@/lib/port/listings'
 import { atomicToUsdc, type MarketActivity } from '@/lib/port/market'
+import { studioPath } from '@/lib/port/path'
 import { collectionStatus, type Collection, type NftItem } from '@/lib/port/types'
 import { formatInt, formatUsdc, shortAddr, timeUntil } from '@/lib/port/format'
 
@@ -217,7 +218,7 @@ export function CollectionView({
           ) : null}
           {isCreator ? (
             <Link
-              href={`/studio/${collection.address}/items`}
+              href={studioPath(collection, 'items')}
               className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
             >
               Upload items
@@ -244,7 +245,7 @@ export function CollectionView({
           ) : null}
           {isCreator ? (
             <Link
-              href={`/studio/${collection.address}/items`}
+              href={studioPath(collection, 'items')}
               className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[13px] font-semibold"
             >
               Upload items
@@ -299,7 +300,7 @@ export function CollectionView({
         <div className="mt-10">
           <h2 className="text-[17px] font-semibold tracking-tightish">Activity</h2>
           <div className="mt-4">
-            <MarketActivityList events={activity} collection={collection.address} />
+            <MarketActivityList events={activity} collection={collection.slug || collection.address} />
           </div>
         </div>
       </div>

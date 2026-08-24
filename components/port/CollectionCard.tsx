@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { studioPath } from '@/lib/port/path'
 import { collectionStatus, type Collection } from '@/lib/port/types'
 import { formatInt } from '@/lib/port/format'
 import { Price } from './Price'
@@ -8,7 +9,7 @@ export function CollectionCard({ collection }: { collection: Collection }) {
   const status = collectionStatus(collection)
   return (
     <Link
-      href={`/studio/${collection.address}`}
+      href={studioPath(collection)}
       className="group block min-w-0 text-white hover:text-white"
     >
       <div className="aspect-square overflow-hidden rounded-[24px] bg-s1 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">

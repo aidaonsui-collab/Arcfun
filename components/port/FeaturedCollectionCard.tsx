@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { studioPath } from '@/lib/port/path'
 import { collectionStatus, type Collection } from '@/lib/port/types'
 import { formatInt } from '@/lib/port/format'
 import { OfficialBadge } from './OfficialBadge'
@@ -9,7 +10,7 @@ export function FeaturedCollectionCard({ collection }: { collection: Collection 
   const art = collection.banner || collection.image
   return (
     <Link
-      href={`/studio/${collection.address}`}
+      href={studioPath(collection)}
       data-featured-card
       className="group relative block h-[220px] w-[min(100%,320px)] shrink-0 overflow-hidden rounded-[24px] text-white hover:text-white sm:h-[240px] sm:w-[360px]"
     >

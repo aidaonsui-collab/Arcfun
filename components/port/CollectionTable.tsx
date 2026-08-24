@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { studioPath } from '@/lib/port/path'
 import { collectionStatus, type Collection } from '@/lib/port/types'
 import { formatInt } from '@/lib/port/format'
 import { OfficialBadge } from './OfficialBadge'
@@ -40,7 +41,7 @@ export function CollectionTable({ collections }: { collections: Collection[] }) 
               <tr key={c.address} className="border-b border-hair2 last:border-0 hover:bg-s2/60">
                 <td className="px-4 py-3 sm:px-5">
                   <Link
-                    href={`/studio/${c.address}`}
+                    href={studioPath(c)}
                     className="flex min-w-0 items-center gap-3 text-white hover:text-white"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}

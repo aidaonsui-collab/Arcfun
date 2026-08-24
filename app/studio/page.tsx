@@ -90,7 +90,10 @@ export default async function PortHome({
                 <h2 className="mb-4 text-[21px] font-semibold tracking-tightish">Activity</h2>
                 <MarketActivityList
                   events={activity}
-                  names={Object.fromEntries(list.map((c) => [c.address.toLowerCase(), c.name]))}
+                  names={Object.fromEntries(collections.map((c) => [c.address.toLowerCase(), c.name]))}
+                  slugs={Object.fromEntries(
+                    collections.map((c) => [c.address.toLowerCase(), c.slug || c.address]),
+                  )}
                 />
               </div>
             ) : null}

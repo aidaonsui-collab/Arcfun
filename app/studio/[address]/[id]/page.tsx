@@ -1,5 +1,8 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { getCollection, getItem } from '@/lib/port/catalog'
+import { studioPath } from '@/lib/port/path'
+import { itemMetadata, missingStudioMetadata } from '@/lib/port/seo'
 import { isListing } from '@/lib/port/listings'
 import { getActivity, syncCollection } from '@/lib/port/market'
 import { ItemView } from './ItemView'
@@ -14,9 +17,8 @@ export async function generateMetadata({
   const { address, id } = await Promise.resolve(params)
   const collection = await getCollection(address)
   const item = await getItem(address, Number(id))
-  return {
-    title: item && collection ? `${item.name} — ArcStudio` : 'ArcStudio — Arcfun',
-  }
+  if (!collection || !item) return missingStudioMetadata('item')
+  return itemMetadata(collection, item)
 }
 
 export default async function ItemPage({
@@ -28,6 +30,10 @@ export default async function ItemPage({
   const tokenId = Number(id)
   const collection = await getCollection(address)
   const item = await getItem(address, tokenId)
+  if (collection) {
+    const pretty = studioPath(collection, tokenId)
+    if (pretty !== `/studio/${address}/${tokenId}`) redirect(pretty)
+  }
 
   if (!collection || !item) {
     return (
@@ -35,7 +41,7 @@ export default async function ItemPage({
         <h1 className="text-[32px] font-semibold tracking-display">Item not found</h1>
         <p className="mt-2 text-t3">It hasn’t been minted, or the id is wrong.</p>
         <Link
-          href={`/studio/${address}`}
+          href={collection ? studioPath(collection) : '/studio'}
           className="mt-6 inline-flex h-14 w-full max-w-xs items-center justify-center rounded-xl bg-lime text-[16px] font-bold text-white hover:text-white"
         >
           Back to collection

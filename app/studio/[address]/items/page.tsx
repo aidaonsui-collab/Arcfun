@@ -1,5 +1,7 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { getCollection } from '@/lib/port/catalog'
+import { studioPath } from '@/lib/port/path'
 import { ItemDesk } from '@/components/port/ItemDesk'
 
 export const dynamic = 'force-dynamic'
@@ -11,6 +13,10 @@ export default async function CollectionItemsPage({
 }) {
   const { address } = await Promise.resolve(params)
   const collection = await getCollection(address)
+  if (collection) {
+    const pretty = studioPath(collection, 'items')
+    if (pretty !== `/studio/${address}/items`) redirect(pretty)
+  }
   if (!collection) {
     return (
       <main className="min-h-screen pt-32 text-center text-white">

@@ -1,5 +1,8 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { countOwners, getCollection, getItems } from '@/lib/port/catalog'
+import { studioPath } from '@/lib/port/path'
+import { collectionMetadata, missingStudioMetadata } from '@/lib/port/seo'
 import { isListing, withListPrices } from '@/lib/port/listings'
 import { getActivity, syncCollection } from '@/lib/port/market'
 import { CollectionView } from './CollectionView'
@@ -13,7 +16,8 @@ export async function generateMetadata({
 }) {
   const { address } = await Promise.resolve(params)
   const collection = await getCollection(address)
-  return { title: collection ? `${collection.name} — ArcStudio` : 'ArcStudio — Arcfun' }
+  if (!collection) return missingStudioMetadata('collection')
+  return collectionMetadata(collection)
 }
 
 export default async function CollectionPage({
@@ -23,6 +27,10 @@ export default async function CollectionPage({
 }) {
   const { address } = await Promise.resolve(params)
   const collection = await getCollection(address)
+  if (collection) {
+    const pretty = studioPath(collection)
+    if (pretty !== `/studio/${address}`) redirect(pretty)
+  }
   if (!collection) {
     return (
       <main className="min-h-screen pt-32 pb-20 text-center text-white">
