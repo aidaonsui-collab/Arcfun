@@ -2,12 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { FileText, LayoutGrid, Plus, Rocket } from 'lucide-react'
+import { FileText, LayoutGrid, Plus, Rocket, User } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 const PRIMARY = [
   { href: '/studio', label: 'Collections', icon: LayoutGrid, match: (p: string) => p === '/studio' || /^\/studio\/0x/i.test(p) },
   { href: '/studio/create', label: 'Create', icon: Plus, match: (p: string) => p.startsWith('/studio/create'), accent: true },
+  { href: '/studio/me', label: 'You', icon: User, match: (p: string) => p.startsWith('/studio/me') || p.startsWith('/studio/u/') },
 ] as const
 
 const MORE = [

@@ -135,7 +135,7 @@ export function SiteHeader() {
                   Portfolio
                 </Link>
                 <Link
-                  href={`/creator/${address}`}
+                  href={onStudio ? '/studio/me' : `/creator/${address}`}
                   className="hidden sm:inline-flex h-9 items-center px-3 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
                 >
                   Profile
@@ -227,7 +227,7 @@ export function SiteHeader() {
             {navLink('/studio/create', 'Create collection')}
             {navLink('/portfolio', 'Portfolio')}
             {isConnected && address ? (
-              navLink(`/creator/${address}`, 'Profile')
+              navLink(onStudio ? '/studio/me' : `/creator/${address}`, 'Profile')
             ) : (
               // No address yet to link /creator/[address] to — prompt connect instead of
               // hiding the entry outright, so Profile stays in its place in the menu order.

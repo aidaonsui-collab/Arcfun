@@ -342,7 +342,7 @@ export default function DocsPage() {
             is the marketplace. Create collection is the launchpad. You do not need to launch a
             collection to run the pad.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <article className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
               <h3 className="m-0 text-[17px] font-semibold tracking-tightish">Launchpad</h3>
               <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
@@ -356,6 +356,14 @@ export default function DocsPage() {
               <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
                 Browse collections, mint from the sticky bar on phone. Secondary list / buy is
                 Seaport 1.6 (Phase 2) after live primary supply. Phase 1 is create + mint in USDC.
+              </p>
+            </article>
+            <article className="border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
+              <h3 className="m-0 text-[17px] font-semibold tracking-tightish">Your studio</h3>
+              <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
+                On Studio, Profile (or the You icon in the dock) opens collections you launched,
+                primary mint earnings (95%), royalty %, and ArcStudio items in that wallet. Token
+                Profile stays on Instant for coins you launched.
               </p>
             </article>
           </div>
