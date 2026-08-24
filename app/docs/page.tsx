@@ -362,8 +362,9 @@ export default function DocsPage() {
               <h3 className="m-0 text-[17px] font-semibold tracking-tightish">Your studio</h3>
               <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
                 On Studio, Profile (or the You icon in the dock) opens collections you launched,
-                primary mint earnings (95%), royalty %, and ArcStudio items in that wallet. Token
-                Profile stays on Instant for coins you launched.
+                primary mint earnings (95%), royalty %, and ArcStudio items in that wallet. Upload
+                item art from the collection page (Upload items) or You → Items, then reveal
+                on-chain. Token Profile stays on Instant for coins you launched.
               </p>
             </article>
           </div>

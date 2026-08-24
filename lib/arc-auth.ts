@@ -23,6 +23,15 @@ export function collectionBannerEditMessage(collection: string, timestamp: numbe
   ].join('\n')
 }
 
+export function collectionItemsEditMessage(collection: string, timestamp: number): string {
+  return [
+    'ArcStudio collection edit',
+    `Collection: ${getAddress(collection)}`,
+    'Action: update-items',
+    `Timestamp: ${timestamp}`,
+  ].join('\n')
+}
+
 export function followMessage(
   follower: string,
   target: string,

@@ -4,6 +4,7 @@ import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { PORT_FACTORY_ABI, PORT_NFT_ABI } from './abi'
 import { arcPortEnabled } from './contracts'
 import { getPortCollectionMeta, getPortCollectionMetas } from './meta'
+import { getPortItem, getPortItems } from './item-meta'
 import type { Collection, NftItem } from './types'
 
 const ZERO_ROOT = '0x0000000000000000000000000000000000000000000000000000000000000000'
@@ -175,12 +176,18 @@ export function itemsFor(collection: Collection): NftItem[] {
 export async function getItems(address: string): Promise<NftItem[]> {
   const collection = await getCollection(address)
   if (!collection) return []
-  return itemsFor(collection)
+  const store = await getPortItems(address)
+  return itemsFor(collection).map((item) => {
+    const meta = store.items[String(item.id)]
+    if (!meta?.imageUrl) return item
+    return { ...item, image: meta.imageUrl, name: meta.name || item.name }
+  })
 }
 
 export async function getItem(address: string, id: number): Promise<NftItem | undefined> {
   const collection = await getCollection(address)
   if (!collection || !Number.isInteger(id) || id < 1 || id > collection.minted) return undefined
+  const meta = await getPortItem(address, id)
   let owner = ''
   try {
     owner = (await arcPublicClient().readContract({
@@ -195,8 +202,8 @@ export async function getItem(address: string, id: number): Promise<NftItem | un
   return {
     collection: collection.address,
     id,
-    name: `${collection.name} #${id}`,
-    image: collection.image,
+    name: meta?.name || `${collection.name} #${id}`,
+    image: meta?.imageUrl || collection.image,
     owner,
     traits: [],
   }

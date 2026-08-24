@@ -173,7 +173,17 @@ export function StudioProfileView({ address }: { address?: string }) {
                       {formatInt(row.collection.minted)}/{formatInt(row.collection.maxSupply)}
                     </td>
                     <td className="px-4 py-3 text-right sm:px-5">
-                      <Price value={row.primaryEarnedUsdc} />
+                      <div className="flex items-center justify-end gap-3">
+                        <Price value={row.primaryEarnedUsdc} />
+                        {mine ? (
+                          <Link
+                            href={`/studio/${row.collection.address}/items`}
+                            className="text-[13px] font-semibold text-lime-t hover:text-white"
+                          >
+                            Items
+                          </Link>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
