@@ -107,8 +107,24 @@ export function CollectionView({
   const mintLabel = mintCta(collection)
   const page = { ...collection, description, twitter, telegram, website, banner }
 
+  const drop = !collection.revealed
+
   return (
     <>
+      {drop ? (
+        <div className="mx-auto flex w-full max-w-desk items-center justify-end px-4 pt-6 sm:px-10">
+          {isCreator ? (
+            <button
+              type="button"
+              onClick={() => setBannerEdit(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-hair bg-s1 px-3 text-[13px] font-semibold text-white hover:border-lime-line"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit page
+            </button>
+          ) : null}
+        </div>
+      ) : (
       <div className="relative">
         <div className="relative h-[200px] w-full overflow-hidden bg-s1 sm:mx-auto sm:mt-6 sm:h-[260px] sm:max-w-desk sm:rounded-[28px] lg:h-[300px]">
           {banner ? (
@@ -129,7 +145,9 @@ export function CollectionView({
           ) : null}
         </div>
       </div>
-      <div className="mx-auto w-full max-w-desk px-4 pb-28 sm:px-10 lg:pb-16">
+      )}
+      <div className={`mx-auto w-full max-w-desk px-4 pb-28 sm:px-10 lg:pb-16 ${drop ? 'pt-2' : ''}`}>
+        {!drop ? (
         <div className="relative z-10 -mt-10 flex flex-col gap-5 sm:-mt-12 lg:flex-row lg:items-end lg:justify-between lg:gap-8">
           <div className="flex min-w-0 items-end gap-3 sm:gap-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -187,6 +205,7 @@ export function CollectionView({
             </div>
           </div>
         </div>
+        ) : null}
         {description ? (
           <p className="mt-5 max-w-xl text-[15px] text-t2">{description}</p>
         ) : null}

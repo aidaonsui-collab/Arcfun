@@ -30,12 +30,12 @@ export function DropLanding({
   const pubLive = publicMintLive(collection)
 
   return (
-    <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-start">
-      <div className="overflow-hidden rounded-[28px] border border-hair bg-s1">
+    <div className="mt-6 flex flex-col gap-6 sm:mt-8 sm:flex-row sm:items-start sm:gap-8">
+      <div className="w-[220px] shrink-0 overflow-hidden rounded-[22px] border border-hair bg-s1 sm:w-[260px]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={collection.image} alt="" className="aspect-square w-full object-cover" />
       </div>
-      <div>
+      <div className="min-w-0 flex-1">
         <p className="text-[13px] font-medium text-t3">Unrevealed drop</p>
         <h2 className="mt-1 text-[28px] font-semibold tracking-display sm:text-[32px]">Mint {collection.name}</h2>
         <p className="mt-2 text-[15px] text-t2">
