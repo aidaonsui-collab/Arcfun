@@ -15,6 +15,8 @@ const LABEL: Record<MarketActivity['type'], string> = {
   cancel: 'Cancelled',
   offer: 'Offer',
   mint: 'Minted',
+  accept: 'Offer accepted',
+  transfer: 'Transferred',
 }
 
 function activityKey(e: MarketActivity) {
@@ -129,9 +131,11 @@ export function MarketActivityList({
                 {timeAgo(e.at)}
               </div>
             </div>
-            <div className="shrink-0 text-[14px] font-semibold tabular-nums">
-              {formatUsdc(atomicToUsdc(e.priceAtomic))} USDC
-            </div>
+            {e.type !== 'transfer' ? (
+              <div className="shrink-0 text-[14px] font-semibold tabular-nums">
+                {formatUsdc(atomicToUsdc(e.priceAtomic))} USDC
+              </div>
+            ) : null}
           </div>
         )
         return href ? (

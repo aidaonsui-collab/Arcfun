@@ -24,8 +24,10 @@ import { SweepSheet } from '@/components/port/SweepSheet'
 import { fetchListings, isListing, sortByPriceDesc, type Listing } from '@/lib/port/listings'
 import { atomicToUsdc, type MarketActivity } from '@/lib/port/market'
 import { studioPath } from '@/lib/port/path'
-import { collectionStatus, type Collection, type NftItem } from '@/lib/port/types'
-import { formatInt, formatUsdc, shortAddr, timeUntil } from '@/lib/port/format'
+import { collectionStatus, mintCta, type Collection, type NftItem } from '@/lib/port/types'
+import { formatInt, formatUsdc, shortAddr } from '@/lib/port/format'
+import { DropLanding } from '@/components/port/DropLanding'
+import { DropSettingsSheet } from '@/components/port/DropSettingsSheet'
 
 const EMPTY_LISTINGS: Listing[] = []
 
@@ -53,6 +55,11 @@ export function CollectionView({
   const [listings, setListings] = useState<Listing[]>(listingsProp)
   const [accept, setAccept] = useState<Listing | null>(null)
   const [sweepOpen, setSweepOpen] = useState(false)
+  const [dropSettings, setDropSettings] = useState(false)
+  const [description, setDescription] = useState(collection.description)
+  const [twitter, setTwitter] = useState(collection.twitter || '')
+  const [telegram, setTelegram] = useState(collection.telegram || '')
+  const [website, setWebsite] = useState(collection.website || '')
   const isCreator = Boolean(
     address && collection.creator && address.toLowerCase() === collection.creator.toLowerCase(),
   )
@@ -97,12 +104,8 @@ export function CollectionView({
   }, [address, items, collection.address, publicClient])
 
   const status = collectionStatus(collection)
-  const mintLabel =
-    status === 'sold'
-      ? 'Sold out'
-      : status === 'soon'
-        ? `Starts in ${timeUntil(collection.publicStart)}`
-        : 'Mint'
+  const mintLabel = mintCta(collection)
+  const page = { ...collection, description, twitter, telegram, website, banner }
 
   return (
     <>
@@ -121,7 +124,7 @@ export function CollectionView({
               className="absolute right-3 top-3 z-20 inline-flex h-9 items-center gap-1.5 rounded-full border border-hair bg-[rgba(10,15,24,0.78)] px-3 text-[13px] font-semibold text-white backdrop-blur-md hover:border-lime-line"
             >
               <Pencil className="h-3.5 w-3.5" />
-              {banner ? 'Edit banner' : 'Add banner'}
+              Edit page
             </button>
           ) : null}
         </div>
@@ -184,13 +187,15 @@ export function CollectionView({
             </div>
           </div>
         </div>
-        {collection.description ? (
-          <p className="mt-5 max-w-xl text-[15px] text-t2">{collection.description}</p>
+        {description ? (
+          <p className="mt-5 max-w-xl text-[15px] text-t2">{description}</p>
         ) : null}
         {collection.allowlist ? (
           <p className="mt-2 text-[13px] text-lime-t">Allowlist mint</p>
         ) : null}
 
+        {collection.revealed ? (
+        <>
         <div className="mt-6 hidden items-center gap-3 lg:flex">
           <button
             type="button"
@@ -217,12 +222,21 @@ export function CollectionView({
             </button>
           ) : null}
           {isCreator ? (
-            <Link
-              href={studioPath(collection, 'items')}
-              className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
-            >
-              Upload items
-            </Link>
+            <>
+              <button
+                type="button"
+                onClick={() => setDropSettings(true)}
+                className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
+              >
+                Drop settings
+              </button>
+              <Link
+                href={studioPath(collection, 'items')}
+                className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
+              >
+                Upload items
+              </Link>
+            </>
           ) : null}
         </div>
 
@@ -244,24 +258,44 @@ export function CollectionView({
             </button>
           ) : null}
           {isCreator ? (
-            <Link
-              href={studioPath(collection, 'items')}
-              className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[13px] font-semibold"
-            >
-              Upload items
-            </Link>
+            <>
+              <button
+                type="button"
+                onClick={() => setDropSettings(true)}
+                className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[13px] font-semibold"
+              >
+                Drop settings
+              </button>
+              <Link
+                href={studioPath(collection, 'items')}
+                className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[13px] font-semibold"
+              >
+                Upload items
+              </Link>
+            </>
           ) : null}
         </div>
+        </>
+        ) : null}
 
-        <CollectionItems
-          collection={collection}
-          items={items}
-          isCreator={isCreator}
-          ownedIds={ownedIds}
-          onListSelected={setBatchItems}
-        />
+        {collection.revealed ? (
+          <CollectionItems
+            collection={collection}
+            items={items}
+            isCreator={isCreator}
+            ownedIds={ownedIds}
+            onListSelected={setBatchItems}
+          />
+        ) : (
+          <DropLanding
+            collection={page}
+            isCreator={isCreator}
+            onMint={() => setMintOpen(true)}
+            onSettings={() => setDropSettings(true)}
+          />
+        )}
 
-        {colOffers.length > 0 ? (
+        {collection.revealed && colOffers.length > 0 ? (
           <div className="mt-10">
             <h2 className="text-[17px] font-semibold tracking-tightish">Collection offers</h2>
             <div className="mt-4 divide-y divide-hair2 overflow-hidden rounded-[24px] border border-hair bg-s1">
@@ -350,15 +384,20 @@ export function CollectionView({
         }}
       />
       <EditBannerSheet
-        collection={collection.address}
+        collection={page}
         currentBanner={banner}
         open={bannerEdit}
         onClose={() => setBannerEdit(false)}
-        onSaved={(url) => {
-          setBanner(url)
+        onSaved={(patch) => {
+          setBanner(patch.bannerUrl)
+          if (patch.description !== undefined) setDescription(patch.description)
+          if (patch.twitter !== undefined) setTwitter(patch.twitter)
+          if (patch.telegram !== undefined) setTelegram(patch.telegram)
+          if (patch.website !== undefined) setWebsite(patch.website)
           setBannerEdit(false)
         }}
       />
+      <DropSettingsSheet collection={page} open={dropSettings} onClose={() => setDropSettings(false)} />
     </>
   )
 }

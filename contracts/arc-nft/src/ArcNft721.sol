@@ -29,6 +29,8 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
     error BadN();
     error RoyaltyTooHigh();
     error ZeroAddr();
+    error ScheduleLocked();
+    error PublicStartRequired();
 
     struct Init {
         string name;
@@ -80,6 +82,7 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
     event BaseURISet(string baseURI);
     event AllowlistRootSet(bytes32 root);
     event PriceSet(uint256 price);
+    event ScheduleSet(uint64 publicMintStart, uint64 allowlistMintStart, uint64 allowlistMintEnd);
 
     constructor() {
         _disableInitializers();
@@ -193,6 +196,31 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
     function setPrice(uint256 newPrice) external onlyOwner {
         price = newPrice;
         emit PriceSet(newPrice);
+    }
+
+    /// @notice Update public + allowlist windows. Locked after on-chain reveal (OpenSea-style).
+    function setSchedule(uint64 publicStart, uint64 allowlistStart, uint64 allowlistEnd) external onlyOwner {
+        if (revealed) revert ScheduleLocked();
+        if (publicStart == 0) revert PublicStartRequired();
+        if (allowlistEnd != 0 && allowlistStart != 0 && allowlistEnd < allowlistStart) revert BadN();
+        publicMintStart = publicStart;
+        allowlistMintStart = allowlistStart;
+        allowlistMintEnd = allowlistEnd;
+        emit ScheduleSet(publicStart, allowlistStart, allowlistEnd);
+    }
+
+    /// @notice Team / reserved mint. Skips USDC and the per-wallet cap; still counts against maxSupply.
+    function ownerMint(address to, uint256 n) external onlyOwner nonReentrant {
+        if (to == address(0)) revert ZeroAddr();
+        if (n == 0) revert BadN();
+        if (totalMinted + n > maxSupply) revert SoldOut();
+        uint256 firstId = totalMinted + 1;
+        mintedBy[to] += n;
+        totalMinted += n;
+        for (uint256 i; i < n; ++i) {
+            _safeMint(to, firstId + i);
+        }
+        emit Minted(to, firstId, n, 0);
     }
 
     function setRoyalty(address receiver, uint96 bps) external onlyOwner {

@@ -1,0 +1,151 @@
+'use client'
+
+import Link from 'next/link'
+import { collectionStatus, mintCta, publicMintLive, allowlistWindowLive, type Collection } from '@/lib/port/types'
+import { formatInt, formatUsdc, timeUntil } from '@/lib/port/format'
+import { studioPath } from '@/lib/port/path'
+
+function stageState(start: number, end: number, fallbackLive: boolean) {
+  const now = Date.now()
+  if (start && now < start) return `Starts in ${timeUntil(start)}`
+  if (end && now >= end) return 'Ended'
+  if (fallbackLive || (start && now >= start && (!end || now < end))) return 'Live'
+  return 'Scheduled'
+}
+
+export function DropLanding({
+  collection,
+  isCreator,
+  onMint,
+  onSettings,
+}: {
+  collection: Collection
+  isCreator: boolean
+  onMint: () => void
+  onSettings: () => void
+}) {
+  const status = collectionStatus(collection)
+  const pct = collection.maxSupply > 0 ? Math.min(100, (collection.minted / collection.maxSupply) * 100) : 0
+  const alLive = allowlistWindowLive(collection)
+  const pubLive = publicMintLive(collection)
+
+  return (
+    <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-start">
+      <div className="overflow-hidden rounded-[28px] border border-hair bg-s1">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={collection.image} alt="" className="aspect-square w-full object-cover" />
+      </div>
+      <div>
+        <p className="text-[13px] font-medium text-t3">Unrevealed drop</p>
+        <h2 className="mt-1 text-[28px] font-semibold tracking-display sm:text-[32px]">Mint {collection.name}</h2>
+        <p className="mt-2 text-[15px] text-t2">
+          Every token shows this placeholder until the creator reveals. Art and traits stay hidden.
+        </p>
+
+        <div className="mt-6">
+          <div className="flex items-baseline justify-between text-[15px]">
+            <span className="text-t3">Minted</span>
+            <span className="font-semibold tabular-nums">
+              {formatInt(collection.minted)} / {formatInt(collection.maxSupply)}
+            </span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-s2">
+            <div className="h-full rounded-full bg-lime" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="mt-4 flex items-baseline gap-2">
+            <span className="text-[28px] font-semibold tabular-nums tracking-display">
+              {formatUsdc(collection.mintPriceUsdc)}
+            </span>
+            <span className="text-[15px] text-t3">USDC · {collection.maxPerWallet} per wallet</span>
+          </div>
+        </div>
+
+        <div className="mt-6 space-y-2">
+          {collection.allowlist ? (
+            <div className="flex items-center justify-between rounded-2xl border border-hair bg-s1 px-4 py-3">
+              <div>
+                <div className="text-[14px] font-semibold">Allowlist</div>
+                <div className="text-[13px] text-t3">
+                  {collection.allowlistStart
+                    ? new Date(collection.allowlistStart).toLocaleString()
+                    : 'Open with the list'}
+                  {collection.allowlistEnd ? ` → ${new Date(collection.allowlistEnd).toLocaleString()}` : ''}
+                </div>
+              </div>
+              <span className={`text-[13px] font-semibold ${alLive ? 'text-lime-t' : 'text-t3'}`}>
+                {stageState(collection.allowlistStart, collection.allowlistEnd, alLive)}
+              </span>
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between rounded-2xl border border-hair bg-s1 px-4 py-3">
+            <div>
+              <div className="text-[14px] font-semibold">Public</div>
+              <div className="text-[13px] text-t3">
+                {collection.publicStart ? new Date(collection.publicStart).toLocaleString() : '—'}
+              </div>
+            </div>
+            <span className={`text-[13px] font-semibold ${pubLive ? 'text-lime-t' : 'text-t3'}`}>
+              {stageState(collection.publicStart, 0, pubLive)}
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            disabled={status !== 'live'}
+            onClick={onMint}
+            className="inline-flex h-14 min-w-[160px] items-center justify-center rounded-xl bg-lime px-8 text-[16px] font-bold text-white disabled:opacity-50"
+          >
+            {mintCta(collection)}
+          </button>
+          {isCreator ? (
+            <>
+              <button
+                type="button"
+                onClick={onSettings}
+                className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
+              >
+                Drop settings
+              </button>
+              <Link
+                href={studioPath(collection, 'items')}
+                className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
+              >
+                Upload items
+              </Link>
+            </>
+          ) : null}
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-3 text-[13px]">
+          {collection.twitter ? (
+            <a
+              href={collection.twitter.startsWith('http') ? collection.twitter : `https://x.com/${collection.twitter.replace(/^@/, '')}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-t3 hover:text-white"
+            >
+              X
+            </a>
+          ) : null}
+          {collection.telegram ? (
+            <a
+              href={collection.telegram.startsWith('http') ? collection.telegram : `https://t.me/${collection.telegram.replace(/^@/, '')}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-t3 hover:text-white"
+            >
+              Telegram
+            </a>
+          ) : null}
+          {collection.website ? (
+            <a href={collection.website} target="_blank" rel="noreferrer" className="text-t3 hover:text-white">
+              Website
+            </a>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}

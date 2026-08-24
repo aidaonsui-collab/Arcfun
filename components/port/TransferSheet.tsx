@@ -78,6 +78,11 @@ export function TransferSheet({
         chainId: ARC_CHAIN_ID,
       })
       await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 })
+      await fetch('/api/studio/activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection: nft, txHash: hash }),
+      }).catch(() => null)
       setTo('')
       onClose()
       router.refresh()

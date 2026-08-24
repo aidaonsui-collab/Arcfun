@@ -1,7 +1,6 @@
 'use client'
 
-import { collectionStatus, type Collection } from '@/lib/port/types'
-import { timeUntil } from '@/lib/port/format'
+import { collectionStatus, mintCta, type Collection } from '@/lib/port/types'
 import { Price } from './Price'
 
 export function StickyMintBar({
@@ -12,12 +11,7 @@ export function StickyMintBar({
   onMint: () => void
 }) {
   const status = collectionStatus(collection)
-  const label =
-    status === 'sold'
-      ? 'Sold out'
-      : status === 'soon'
-        ? `Starts in ${timeUntil(collection.publicStart)}`
-        : 'Mint'
+  const label = mintCta(collection)
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-30 border-t border-hair bg-[rgba(10,15,24,0.9)] backdrop-blur-xl lg:hidden">

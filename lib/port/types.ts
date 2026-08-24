@@ -1,3 +1,5 @@
+import { timeUntil } from './format'
+
 export type Trait = { type: string; value: string }
 
 export type Collection = {
@@ -16,6 +18,9 @@ export type Collection = {
   mintPriceUsdc: number
   publicStart: number
   allowlist: boolean
+  allowlistStart: number
+  allowlistEnd: number
+  revealed: boolean
   royalty: number
   minted: number
   owners: number
@@ -46,8 +51,30 @@ export const CREATE_FEE_USDC = 0.1
 export const PLATFORM_FEE = 0.05
 export const CREATOR_SHARE = 0.95
 
+export function allowlistWindowLive(c: Collection): boolean {
+  if (!c.allowlist) return false
+  const now = Date.now()
+  if (c.allowlistStart && now < c.allowlistStart) return false
+  if (c.allowlistEnd && now >= c.allowlistEnd) return false
+  return true
+}
+
+export function publicMintLive(c: Collection): boolean {
+  return c.publicStart > 0 && Date.now() >= c.publicStart
+}
+
 export function collectionStatus(c: Collection): 'live' | 'soon' | 'sold' {
   if (c.minted >= c.maxSupply) return 'sold'
-  if (c.publicStart > Date.now()) return 'soon'
-  return 'live'
+  if (publicMintLive(c) || allowlistWindowLive(c)) return 'live'
+  return 'soon'
+}
+
+export function mintCta(c: Collection): string {
+  const status = collectionStatus(c)
+  if (status === 'sold') return 'Sold out'
+  if (publicMintLive(c)) return 'Mint'
+  if (allowlistWindowLive(c)) return 'Allowlist mint'
+  if (c.allowlist && c.allowlistStart > Date.now()) return `Allowlist in ${timeUntil(c.allowlistStart)}`
+  if (c.publicStart > Date.now()) return `Starts in ${timeUntil(c.publicStart)}`
+  return 'Mint'
 }

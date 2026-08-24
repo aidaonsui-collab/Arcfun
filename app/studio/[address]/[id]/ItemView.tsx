@@ -20,8 +20,8 @@ import { fetchActivity, fetchListings, sortByPriceDesc, type Listing } from '@/l
 import { atomicToUsdc } from '@/lib/port/market'
 import type { MarketActivity } from '@/lib/port/market'
 import { studioPath } from '@/lib/port/path'
-import { collectionStatus, type Collection, type NftItem } from '@/lib/port/types'
-import { formatUsdc, shortAddr, timeUntil } from '@/lib/port/format'
+import { collectionStatus, mintCta, type Collection, type NftItem } from '@/lib/port/types'
+import { formatUsdc, shortAddr } from '@/lib/port/format'
 
 export function ItemView({
   collection,
@@ -69,12 +69,7 @@ export function ItemView({
     ? (Number(listing.priceAtomic) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 4 })
     : null
   const status = collectionStatus(collection)
-  const mintLabel =
-    status === 'sold'
-      ? 'Sold out'
-      : status === 'soon'
-        ? `Starts in ${timeUntil(collection.publicStart)}`
-        : 'Mint'
+  const mintLabel = mintCta(collection)
 
   return (
     <>
@@ -198,7 +193,9 @@ export function ItemView({
             </div>
 
             <h2 className="mt-10 text-[13px] font-medium text-t3">Traits</h2>
-            {item.traits.length === 0 ? (
+            {!collection.revealed ? (
+              <p className="mt-3 text-[15px] text-t3">Unrevealed. Placeholder art until the creator reveals the drop.</p>
+            ) : item.traits.length === 0 ? (
               <p className="mt-3 text-[15px] text-t3">No traits</p>
             ) : (
               <div className="mt-3 grid grid-cols-2 gap-2">

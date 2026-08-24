@@ -3,8 +3,16 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount, useConnect, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi'
-import { erc20Abi, parseUnits, type Address } from 'viem'
-import { collectionStatus, CREATOR_SHARE, PLATFORM_FEE, type Collection } from '@/lib/port/types'
+import { erc20Abi, parseUnits, type Address, type Hex } from 'viem'
+import {
+  allowlistWindowLive,
+  collectionStatus,
+  mintCta,
+  publicMintLive,
+  CREATOR_SHARE,
+  PLATFORM_FEE,
+  type Collection,
+} from '@/lib/port/types'
 import { formatUsdc } from '@/lib/port/format'
 import { Price } from './Price'
 import { PortSheet } from './PortSheet'
@@ -53,6 +61,20 @@ export function MintSheet({
     try {
       const unit = parseUnits(String(collection.mintPriceUsdc), 6)
       const paid = unit * BigInt(qty)
+      const pub = publicMintLive(collection)
+      const alOpen = allowlistWindowLive(collection)
+      let proof: Hex[] = []
+      let onList = false
+      if (alOpen && address) {
+        const row = (await fetch(
+          `/api/studio/allowlist?collection=${collection.address}&wallet=${address}`,
+        ).then((r) => r.json())) as { onList?: boolean; proof?: Hex[] }
+        onList = Boolean(row.onList)
+        proof = row.proof || []
+      }
+      if (!pub && !onList) {
+        throw new Error(alOpen ? 'This wallet is not on the allowlist.' : 'Mint is not live yet.')
+      }
       if (paid > 0n) {
         await writeContractAsync({
           address: ARC.USDC,
@@ -65,8 +87,9 @@ export function MintSheet({
       const hash = await writeContractAsync({
         address: collection.address as Address,
         abi: PORT_NFT_ABI,
-        functionName: 'mint',
-        args: [BigInt(qty)],
+        ...(onList && alOpen
+          ? { functionName: 'mintAllowlist' as const, args: [BigInt(qty), proof] as const }
+          : { functionName: 'mint' as const, args: [BigInt(qty)] as const }),
         chainId: ARC_CHAIN_ID,
       })
       if (publicClient) {
@@ -159,7 +182,7 @@ export function MintSheet({
                     : status === 'sold'
                       ? 'Sold out'
                       : status === 'soon'
-                        ? 'Not live yet'
+                        ? mintCta(collection)
                         : 'Confirm mint'}
           </button>
         </div>

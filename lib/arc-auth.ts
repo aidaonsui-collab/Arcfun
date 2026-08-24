@@ -23,6 +23,24 @@ export function collectionBannerEditMessage(collection: string, timestamp: numbe
   ].join('\n')
 }
 
+export function collectionMetaEditMessage(collection: string, timestamp: number): string {
+  return [
+    'ArcStudio collection edit',
+    `Collection: ${getAddress(collection)}`,
+    'Action: update-collection',
+    `Timestamp: ${timestamp}`,
+  ].join('\n')
+}
+
+export function collectionAllowlistEditMessage(collection: string, timestamp: number): string {
+  return [
+    'ArcStudio collection edit',
+    `Collection: ${getAddress(collection)}`,
+    'Action: update-allowlist',
+    `Timestamp: ${timestamp}`,
+  ].join('\n')
+}
+
 export function collectionItemsEditMessage(collection: string, timestamp: number): string {
   return [
     'ArcStudio collection edit',

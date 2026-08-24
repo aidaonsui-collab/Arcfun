@@ -31,7 +31,7 @@ export type StoredOrder = {
 }
 
 export type MarketActivity = {
-  type: 'list' | 'sale' | 'cancel' | 'offer' | 'mint'
+  type: 'list' | 'sale' | 'cancel' | 'offer' | 'mint' | 'accept' | 'transfer'
   collection: string
   tokenId: string
   priceAtomic: string
@@ -40,6 +40,10 @@ export type MarketActivity = {
   orderHash: string
   txHash?: string
   at: number
+}
+
+export function fillActivityType(kind?: OrderKind): 'sale' | 'accept' {
+  return kind === 'offer' || kind === 'collection-offer' ? 'accept' : 'sale'
 }
 
 export type MarketSnapshot = {
@@ -101,8 +105,9 @@ export async function getActivity(collection: string, tokenId?: string): Promise
   try {
     const raw = (await kv.lrange<string>(ACTIVITY_KEY(collection), 0, ACTIVITY_CAP - 1)) || []
     const rows = parseActivity(raw)
-    if (!tokenId) return rows
-    return rows.filter((e) => e.tokenId === String(tokenId))
+    const sorted = rows.sort((a, b) => b.at - a.at)
+    if (!tokenId) return sorted
+    return sorted.filter((e) => e.tokenId === String(tokenId))
   } catch {
     return []
   }
@@ -112,7 +117,7 @@ export async function getGlobalActivity(limit = 40): Promise<MarketActivity[]> {
   try {
     const n = Math.min(Math.max(1, limit), GLOBAL_ACTIVITY_CAP)
     const raw = (await kv.lrange<string>(GLOBAL_ACTIVITY_KEY, 0, n - 1)) || []
-    return parseActivity(raw)
+    return parseActivity(raw).sort((a, b) => b.at - a.at)
   } catch {
     return []
   }
@@ -155,7 +160,7 @@ async function writeSnapshot(collection: string, live: Listing[]): Promise<Marke
   const activity = await getActivity(collection)
   const cutoff = Date.now() - DAY_MS
   const volume24hUsdc = activity
-    .filter((e) => e.type === 'sale' && e.at >= cutoff)
+    .filter((e) => (e.type === 'sale' || e.type === 'accept') && e.at >= cutoff)
     .reduce((s, e) => s + atomicToUsdc(e.priceAtomic), 0)
   const snap: MarketSnapshot = {
     floorUsdc: prices.length ? Math.min(...prices) / 1e6 : null,
@@ -260,7 +265,7 @@ export async function syncCollection(collection: string): Promise<{ listings: Li
   await Promise.all([
     ...sales.map((r) =>
       recordActivity({
-        type: 'sale',
+        type: fillActivityType(kindOf(r)),
         collection: r.collection,
         tokenId: r.tokenId,
         priceAtomic: r.priceAtomic,

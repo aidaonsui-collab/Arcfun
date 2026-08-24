@@ -31,8 +31,24 @@ async function loadOne(
     })
     if (hidden) return null
 
-    const [name, symbol, owner, uri, maxSupply, maxPerWallet, price, minted, start, root, payout, royalty, origin] =
-      await client.multicall({
+    const [
+      name,
+      symbol,
+      owner,
+      uri,
+      maxSupply,
+      maxPerWallet,
+      price,
+      minted,
+      start,
+      root,
+      payout,
+      royalty,
+      origin,
+      revealed,
+      alStart,
+      alEnd,
+    ] = await client.multicall({
         allowFailure: true,
         contracts: [
           { address, abi: PORT_NFT_ABI, functionName: 'name' },
@@ -48,6 +64,9 @@ async function loadOne(
           { address, abi: PORT_NFT_ABI, functionName: 'creatorPayout' },
           { address, abi: PORT_NFT_ABI, functionName: 'royaltyInfo', args: [1n, 10_000n] },
           { address, abi: PORT_NFT_ABI, functionName: 'originToken' },
+          { address, abi: PORT_NFT_ABI, functionName: 'revealed' },
+          { address, abi: PORT_NFT_ABI, functionName: 'allowlistMintStart' },
+          { address, abi: PORT_NFT_ABI, functionName: 'allowlistMintEnd' },
         ],
       })
 
@@ -100,6 +119,9 @@ async function loadOne(
       mintPriceUsdc: Number(formatUnits(priceRaw, 6)),
       publicStart: start.status === 'success' ? Number(start.result) * 1000 : 0,
       allowlist: root.status === 'success' && String(root.result) !== ZERO_ROOT,
+      allowlistStart: alStart.status === 'success' ? Number(alStart.result) * 1000 : 0,
+      allowlistEnd: alEnd.status === 'success' ? Number(alEnd.result) * 1000 : 0,
+      revealed: revealed.status === 'success' ? Boolean(revealed.result) : false,
       royalty: Number.isFinite(royaltyAmt) ? Math.round(royaltyAmt) / 100 : 5,
       minted: Number.isFinite(mintedN) ? mintedN : 0,
       owners: 0,
@@ -186,13 +208,25 @@ function nftFrom(
   meta?: { imageUrl?: string; name?: string; traits?: { type: string; value: string }[] } | null,
   owner = '',
 ): NftItem {
+  const minted = id <= collection.minted
+  if (!collection.revealed) {
+    return {
+      collection: collection.address,
+      id,
+      name: `${collection.name} #${id}`,
+      image: collection.image,
+      owner,
+      minted,
+      traits: [],
+    }
+  }
   return {
     collection: collection.address,
     id,
     name: meta?.name || `${collection.name} #${id}`,
     image: meta?.imageUrl || collection.image,
     owner,
-    minted: id <= collection.minted,
+    minted,
     traits: meta?.traits?.filter((t) => t.type && t.value) ?? [],
   }
 }
@@ -204,16 +238,19 @@ export function itemsFor(collection: Collection): NftItem[] {
 export async function getItems(id: string): Promise<NftItem[]> {
   const collection = await getCollection(id)
   if (!collection) return []
+  if (!collection.revealed) {
+    return Array.from({ length: collection.minted }, (_, i) => nftFrom(collection, i + 1))
+  }
   const store = await getPortItems(collection.address)
   const ids = new Set<number>()
   for (let i = 1; i <= collection.minted; i++) ids.add(i)
   for (const key of Object.keys(store.items)) {
-    const id = Number(key)
-    if (Number.isInteger(id) && id >= 1 && id <= collection.maxSupply) ids.add(id)
+    const nid = Number(key)
+    if (Number.isInteger(nid) && nid >= 1 && nid <= collection.maxSupply) ids.add(nid)
   }
   return [...ids]
     .sort((a, b) => a - b)
-    .map((id) => nftFrom(collection, id, store.items[String(id)]))
+    .map((tokenId) => nftFrom(collection, tokenId, store.items[String(tokenId)]))
 }
 
 /** Unique owners among minted tokens. Caps at 400 reads. 0 means none or the scan failed. */

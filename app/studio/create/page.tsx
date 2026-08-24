@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useAccount, useConnect, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi'
+import { useAccount, useConnect, usePublicClient, useSwitchChain, useWriteContract, useSignMessage } from 'wagmi'
 import { isAddress, parseEventLogs, parseUnits, zeroAddress, type Address } from 'viem'
 import { ChevronLeft, Rocket } from 'lucide-react'
 import { CREATE_FEE_USDC } from '@/lib/port/types'
@@ -11,10 +11,12 @@ import { formatUsdc } from '@/lib/port/format'
 import { ImageUpload } from '@/components/port/ImageUpload'
 import { OfficialBadge } from '@/components/port/OfficialBadge'
 import { BrandMark } from '@/components/BrandMark'
-import { PORT_FACTORY_ABI } from '@/lib/port/abi'
+import { PORT_FACTORY_ABI, PORT_NFT_ABI } from '@/lib/port/abi'
 import { arcPortEnabled, arcPortFactory } from '@/lib/port/contracts'
 import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
+import { buildAllowlist, parseWallets } from '@/lib/port/merkle'
+import { collectionAllowlistEditMessage } from '@/lib/arc-auth'
 
 const inputClass =
   'h-12 w-full rounded-xl border border-hair bg-s2 px-3.5 text-[15px] tracking-tightish outline-none transition-[border-color] duration-150 focus:border-lime-line placeholder:text-white/25'
@@ -49,6 +51,7 @@ export default function PortCreatePage() {
   const { connect, connectors, isPending } = useConnect()
   const { switchChain, isPending: switching } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
+  const { signMessageAsync } = useSignMessage()
   const publicClient = usePublicClient({ chainId: ARC_CHAIN_ID })
   const live = arcPortEnabled()
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
@@ -70,6 +73,10 @@ export default function PortCreatePage() {
   const [mintPrice, setMintPrice] = useState('10')
   const [publicStart, setPublicStart] = useState(localDatetimeValue)
   const [allowlist, setAllowlist] = useState(false)
+  const [allowlistText, setAllowlistText] = useState('')
+  const [allowlistStart, setAllowlistStart] = useState('')
+  const [allowlistEnd, setAllowlistEnd] = useState('')
+  const [reserved, setReserved] = useState('0')
   const [royalty, setRoyalty] = useState(5)
   const [originInput, setOriginInput] = useState('')
   const [originInfo, setOriginInfo] = useState<{
@@ -245,6 +252,18 @@ export default function PortCreatePage() {
       const start = publicStart
         ? Math.floor(new Date(publicStart).getTime() / 1000)
         : Math.floor(Date.now() / 1000)
+      const wallets = allowlist ? parseWallets(allowlistText) : []
+      const { root } = allowlist
+        ? buildAllowlist(wallets)
+        : { root: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}` }
+      const alStartUnix = allowlist && allowlistStart ? Math.floor(new Date(allowlistStart).getTime() / 1000) : 0
+      const alEndUnix = allowlist && allowlistEnd ? Math.floor(new Date(allowlistEnd).getTime() / 1000) : 0
+      const reservedN = Math.max(0, Math.floor(Number(reserved) || 0))
+      if (reservedN >= supply) {
+        setError('Reserved mints must be less than max supply')
+        setBusy(false)
+        return
+      }
       const payout =
         creatorWallet.trim() && isAddress(creatorWallet.trim())
           ? (creatorWallet.trim() as Address)
@@ -274,9 +293,9 @@ export default function PortCreatePage() {
             maxPerWallet: BigInt(Math.floor(per)),
             price: parseUnits(String(price), 6),
             publicMintStart: BigInt(start),
-            allowlistMintStart: 0n,
-            allowlistMintEnd: 0n,
-            allowlistRoot: '0x0000000000000000000000000000000000000000000000000000000000000000',
+            allowlistMintStart: BigInt(alStartUnix),
+            allowlistMintEnd: BigInt(alEndUnix),
+            allowlistRoot: root,
             royaltyBps: BigInt(royalty * 100),
             creatorRewardsWallet: payout,
             originToken: (originInfo?.token as Address) || zeroAddress,
@@ -311,6 +330,45 @@ export default function PortCreatePage() {
           originToken: originInfo?.token,
         }),
       }).catch(() => null)
+      if (allowlist && wallets.length) {
+        try {
+          const timestamp = Date.now()
+          const signature = await signMessageAsync({
+            message: collectionAllowlistEditMessage(collection, timestamp),
+          })
+          await fetch('/api/studio/allowlist', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              collection,
+              wallets: wallets.join('\n'),
+              signature,
+              timestamp,
+            }),
+          })
+        } catch {
+          /* creator can retry from Drop settings */
+        }
+      }
+      if (reservedN > 0) {
+        try {
+          const teamHash = await writeContractAsync({
+            address: collection,
+            abi: PORT_NFT_ABI,
+            functionName: 'ownerMint',
+            args: [address!, BigInt(reservedN)],
+            chainId: ARC_CHAIN_ID,
+          })
+          await publicClient.waitForTransactionReceipt({ hash: teamHash, timeout: 120_000 })
+          await fetch('/api/studio/activity', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ collection, txHash: teamHash }),
+          }).catch(() => null)
+        } catch {
+          /* old implementations have no ownerMint */
+        }
+      }
       router.push(`/studio/${collection}`)
     } catch (err: unknown) {
       const ax = err as { shortMessage?: string; message?: string }
@@ -618,15 +676,59 @@ export default function PortCreatePage() {
                     className={inputClass}
                   />
                 </Field>
+                <Field label="Reserved for team" hint="Free mint to your wallet after deploy. Needs the updated collection contract. 0 to skip.">
+                  <input
+                    inputMode="numeric"
+                    value={reserved}
+                    onChange={(e) => setReserved(e.target.value.replace(/[^\d]/g, ''))}
+                    className={inputClass}
+                  />
+                </Field>
                 <label className="flex h-12 items-center justify-between rounded-xl border border-hair bg-s2 px-3.5">
                   <span className="text-[15px]">Allowlist</span>
                   <input
                     type="checkbox"
                     checked={allowlist}
-                    onChange={(e) => setAllowlist(e.target.checked)}
+                    onChange={(e) => {
+                      const on = e.target.checked
+                      setAllowlist(on)
+                      if (on && !allowlistStart) setAllowlistStart(localDatetimeValue())
+                      if (on && !allowlistEnd) setAllowlistEnd(publicStart)
+                    }}
                     className="h-5 w-5 accent-[#2f84db]"
                   />
                 </label>
+                {allowlist ? (
+                  <>
+                    <Field label="Allowlist start">
+                      <input
+                        type="datetime-local"
+                        value={allowlistStart}
+                        onChange={(e) => setAllowlistStart(e.target.value)}
+                        className={inputClass}
+                      />
+                    </Field>
+                    <Field label="Allowlist end" hint="Usually the public start. Leave empty for no end.">
+                      <input
+                        type="datetime-local"
+                        value={allowlistEnd}
+                        onChange={(e) => setAllowlistEnd(e.target.value)}
+                        className={inputClass}
+                      />
+                    </Field>
+                    <Field
+                      label="Allowlist wallets"
+                      hint={`${parseWallets(allowlistText).length} unique. One address per line or CSV.`}
+                    >
+                      <textarea
+                        value={allowlistText}
+                        onChange={(e) => setAllowlistText(e.target.value)}
+                        placeholder="0x…"
+                        className={`${inputClass} h-auto min-h-[120px] resize-none py-3 font-mono text-[13px]`}
+                      />
+                    </Field>
+                  </>
+                ) : null}
                 <div className="rounded-[20px] border border-hair bg-s1 p-4">
                   <div className="flex items-center justify-between text-[15px]">
                     <span className="text-t3">Creation fee</span>

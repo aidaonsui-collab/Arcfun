@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isAddress, type Address } from 'viem'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
-import { collectionBannerEditMessage, verifyWalletAuth } from '@/lib/arc-auth'
+import { collectionBannerEditMessage, collectionMetaEditMessage, verifyWalletAuth } from '@/lib/arc-auth'
 import { setPortCollectionMeta } from '@/lib/port/meta'
 import { PORT_FACTORY_ABI, PORT_NFT_ABI } from '@/lib/port/abi'
 import { ARC, arcPublicClient } from '@/lib/contracts-arc'
@@ -25,6 +25,10 @@ export async function PUT(
     signature?: string
     timestamp?: number
     bannerUrl?: string
+    description?: string
+    twitter?: string
+    telegram?: string
+    website?: string
   }
 
   const collection = (body.address || pathAddr).trim()
@@ -54,24 +58,48 @@ export async function PUT(
   }
 
   const timestamp = Number(body.timestamp)
-  const checked = await verifyWalletAuth({
+  const bannerMsg = collectionBannerEditMessage(collection, timestamp)
+  const metaMsg = collectionMetaEditMessage(collection, timestamp)
+  const checkedBanner = await verifyWalletAuth({
     address: owner,
-    message: collectionBannerEditMessage(collection, timestamp),
+    message: bannerMsg,
     signature: body.signature || '',
     timestamp,
   })
-  if (!checked.ok) {
-    return NextResponse.json({ ok: false, error: checked.error }, { status: 401 })
+  const checkedMeta = checkedBanner.ok
+    ? checkedBanner
+    : await verifyWalletAuth({
+        address: owner,
+        message: metaMsg,
+        signature: body.signature || '',
+        timestamp,
+      })
+  if (!checkedMeta.ok) {
+    return NextResponse.json({ ok: false, error: checkedMeta.error }, { status: 401 })
   }
 
-  const bannerUrl = typeof body.bannerUrl === 'string' ? body.bannerUrl.trim() : ''
+  const bannerUrl = typeof body.bannerUrl === 'string' ? body.bannerUrl.trim() : undefined
   if (bannerUrl && !/^https?:\/\//i.test(bannerUrl)) {
     return NextResponse.json({ ok: false, error: 'banner must be an https URL' }, { status: 400 })
   }
+  const clip = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : undefined)
 
   try {
-    await setPortCollectionMeta(collection, { bannerUrl: bannerUrl || '' })
-    return NextResponse.json({ ok: true, bannerUrl: bannerUrl || '' })
+    await setPortCollectionMeta(collection, {
+      ...(bannerUrl !== undefined ? { bannerUrl } : {}),
+      ...(body.description !== undefined ? { description: clip(body.description, 280) || '' } : {}),
+      ...(body.twitter !== undefined ? { twitter: clip(body.twitter, 80) || '' } : {}),
+      ...(body.telegram !== undefined ? { telegram: clip(body.telegram, 80) || '' } : {}),
+      ...(body.website !== undefined ? { website: clip(body.website, 120) || '' } : {}),
+    })
+    return NextResponse.json({
+      ok: true,
+      bannerUrl: bannerUrl || '',
+      description: clip(body.description, 280) || '',
+      twitter: clip(body.twitter, 80) || '',
+      telegram: clip(body.telegram, 80) || '',
+      website: clip(body.website, 120) || '',
+    })
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: (e as Error).message || 'kv write failed' },

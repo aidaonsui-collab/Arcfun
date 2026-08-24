@@ -28,6 +28,7 @@ import {
   COLLECTION_SET,
   ORDER_KEY,
   dropOrder,
+  fillActivityType,
   getStoredOrder,
   recordActivity,
   syncCollection,
@@ -267,7 +268,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   await recordActivity({
-    type: filled ? 'sale' : 'cancel',
+    type: filled ? fillActivityType(row.kind) : 'cancel',
     collection: row.collection,
     tokenId: body?.tokenId || row.tokenId,
     priceAtomic: row.priceAtomic,

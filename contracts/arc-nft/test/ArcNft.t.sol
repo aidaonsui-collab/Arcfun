@@ -227,6 +227,80 @@ contract ArcNftTest is Test {
         assertEq(col.tokenURI(1), "ipfs://cid/1");
     }
 
+    function test_setSchedule_and_lockAfterReveal() public {
+        ArcNft721 col = _create(creator, CREATION_FEE);
+        uint64 pub = uint64(block.timestamp + 3 days);
+        uint64 alStart = uint64(block.timestamp + 1 days);
+        uint64 alEnd = uint64(block.timestamp + 2 days);
+        vm.prank(creator);
+        col.setSchedule(pub, alStart, alEnd);
+        assertEq(col.publicMintStart(), pub);
+        assertEq(col.allowlistMintStart(), alStart);
+        assertEq(col.allowlistMintEnd(), alEnd);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        col.setSchedule(pub, alStart, alEnd);
+
+        vm.prank(creator);
+        vm.expectRevert(ArcNft721.PublicStartRequired.selector);
+        col.setSchedule(0, 0, 0);
+
+        vm.prank(creator);
+        col.reveal("ipfs://cid/");
+        vm.prank(creator);
+        vm.expectRevert(ArcNft721.ScheduleLocked.selector);
+        col.setSchedule(pub + 1, alStart, alEnd);
+    }
+
+    function test_ownerMint_skipsPaymentAndWalletCap() public {
+        ArcNftCollectionFactory.CreateParams memory p = _params();
+        p.publicMintStart = uint64(block.timestamp);
+        p.maxPerWallet = 1;
+        p.maxSupply = 10;
+        vm.prank(creator);
+        ArcNft721 col = ArcNft721(factory.createCollection{value: CREATION_FEE}(p));
+
+        vm.prank(creator);
+        col.ownerMint(alice, 3);
+        assertEq(col.balanceOf(alice), 3);
+        assertEq(col.totalMinted(), 3);
+        assertEq(col.ownerOf(1), alice);
+        assertEq(usdc.balanceOf(payout), 0);
+        assertEq(usdc.balanceOf(treasury), 0);
+
+        vm.prank(creator);
+        col.ownerMint(alice, 1);
+        assertEq(col.balanceOf(alice), 4);
+
+        vm.prank(bob);
+        vm.expectRevert();
+        col.ownerMint(bob, 1);
+    }
+
+    function test_allowlist_twoLeaves() public {
+        bytes32 leafA = keccak256(bytes.concat(keccak256(abi.encode(alice))));
+        bytes32 leafB = keccak256(bytes.concat(keccak256(abi.encode(bob))));
+        bytes32 root = leafA < leafB
+            ? keccak256(abi.encodePacked(leafA, leafB))
+            : keccak256(abi.encodePacked(leafB, leafA));
+        ArcNftCollectionFactory.CreateParams memory p = _params();
+        p.allowlistRoot = root;
+        p.publicMintStart = uint64(block.timestamp + 10 days);
+        p.allowlistMintStart = uint64(block.timestamp);
+        p.allowlistMintEnd = uint64(block.timestamp + 1 days);
+        vm.prank(creator);
+        ArcNft721 col = ArcNft721(factory.createCollection{value: CREATION_FEE}(p));
+
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = leafB;
+        vm.startPrank(alice);
+        usdc.approve(address(col), type(uint256).max);
+        col.mintAllowlist(1, proof);
+        vm.stopPrank();
+        assertEq(col.ownerOf(1), alice);
+    }
+
     function test_freeMint_zeroPrice() public {
         ArcNftCollectionFactory.CreateParams memory p = _params();
         p.price = 0;

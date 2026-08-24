@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ ok: true, activity })
 }
 
-/** Client reports a mint tx. We only write after Seaport-style verification: receipt + Minted log. */
+/** Client reports a mint or send tx. We only write after receipt + Minted / Transfer logs. */
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as { collection?: string; txHash?: string } | null
   const collection = (body?.collection || '').trim()
@@ -55,42 +55,70 @@ export async function POST(req: NextRequest) {
     )
   }
   if (receipt.status !== 'success') {
-    return NextResponse.json({ ok: false, error: 'mint tx did not succeed' }, { status: 400 })
+    return NextResponse.json({ ok: false, error: 'tx did not succeed' }, { status: 400 })
   }
   if (receipt.to && receipt.to.toLowerCase() !== collection.toLowerCase()) {
     return NextResponse.json({ ok: false, error: 'tx is not on this collection' }, { status: 400 })
   }
 
-  const logs = parseEventLogs({
+  const mintedLogs = parseEventLogs({
     abi: PORT_NFT_ABI,
     eventName: 'Minted',
     logs: receipt.logs,
   })
-  if (logs.length === 0) {
-    return NextResponse.json({ ok: false, error: 'no Minted event in tx' }, { status: 400 })
-  }
-
   const at = Date.now()
   let recorded = 0
-  for (const log of logs) {
-    const { to, firstId, n, paid } = log.args
-    const count = Number(n)
-    if (!Number.isInteger(count) || count <= 0) continue
-    const each = paid / n
-    for (let i = 0; i < count; i++) {
-      const tokenId = (firstId + BigInt(i)).toString()
-      await recordActivity({
-        type: 'mint',
-        collection,
-        tokenId,
-        priceAtomic: each.toString(),
-        from: to,
-        orderHash: `${txHash}:${tokenId}`,
-        txHash,
-        at,
-      })
-      recorded += 1
+
+  if (mintedLogs.length > 0) {
+    for (const log of mintedLogs) {
+      const { to, firstId, n, paid } = log.args
+      const count = Number(n)
+      if (!Number.isInteger(count) || count <= 0) continue
+      const each = paid / n
+      for (let i = 0; i < count; i++) {
+        const tokenId = (firstId + BigInt(i)).toString()
+        await recordActivity({
+          type: 'mint',
+          collection,
+          tokenId,
+          priceAtomic: each.toString(),
+          from: to,
+          orderHash: `${txHash}:${tokenId}`,
+          txHash,
+          at,
+        })
+        recorded += 1
+      }
     }
+    return NextResponse.json({ ok: true, recorded })
+  }
+
+  const xfers = parseEventLogs({
+    abi: PORT_NFT_ABI,
+    eventName: 'Transfer',
+    logs: receipt.logs,
+  })
+  const zero = '0x0000000000000000000000000000000000000000'
+  for (const log of xfers) {
+    const from = log.args.from
+    const to = log.args.to
+    if (from.toLowerCase() === zero) continue
+    const tokenId = log.args.tokenId.toString()
+    await recordActivity({
+      type: 'transfer',
+      collection,
+      tokenId,
+      priceAtomic: '0',
+      from,
+      to,
+      orderHash: `${txHash}:${tokenId}`,
+      txHash,
+      at,
+    })
+    recorded += 1
+  }
+  if (recorded === 0) {
+    return NextResponse.json({ ok: false, error: 'no mint or transfer in tx' }, { status: 400 })
   }
   return NextResponse.json({ ok: true, recorded })
 }

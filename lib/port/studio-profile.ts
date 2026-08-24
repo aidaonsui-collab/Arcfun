@@ -79,14 +79,15 @@ async function listHeldItems(owner: string, collections: Collection[]): Promise<
       if (who !== owner) return
       const id = i + 1
       const meta = store.items[String(id)]
+      const hidden = !c.revealed
       out.push({
         collection: c.address,
         id,
-        name: meta?.name || `${c.name} #${id}`,
-        image: meta?.imageUrl || c.image,
+        name: hidden ? `${c.name} #${id}` : meta?.name || `${c.name} #${id}`,
+        image: hidden ? c.image : meta?.imageUrl || c.image,
         owner,
         minted: true,
-        traits: meta?.traits?.filter((t) => t.type && t.value) ?? [],
+        traits: hidden ? [] : meta?.traits?.filter((t) => t.type && t.value) ?? [],
       })
     })
   }
