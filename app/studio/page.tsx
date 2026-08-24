@@ -6,7 +6,10 @@ import { PortHow, PortStudio } from '@/components/port/PortStudio'
 import { listCollections } from '@/lib/port/catalog'
 import { getActivity, getGlobalActivity, type MarketActivity } from '@/lib/port/market'
 
-export const metadata = { title: 'ArcStudio — Arcfun' }
+export const metadata = {
+  title: 'ArcStudio — Launch and trade NFTs on Arc',
+  description: 'Launch and trade NFTs on Arc. Mint in USDC.',
+}
 export const dynamic = 'force-dynamic'
 
 export default async function PortHome({
