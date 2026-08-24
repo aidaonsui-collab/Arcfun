@@ -55,7 +55,7 @@ export async function PUT(
       continue
     }
     if (!meta.imageUrl || !/^https?:\/\//i.test(meta.imageUrl)) continue
-    const traits = cleanTraits(meta.traits)
+    const traits = Array.isArray(meta.traits) ? cleanTraits(meta.traits) || [] : undefined
     cleaned[String(n)] = {
       imageUrl: meta.imageUrl.trim().slice(0, 512),
       name: meta.name?.trim().slice(0, 64),

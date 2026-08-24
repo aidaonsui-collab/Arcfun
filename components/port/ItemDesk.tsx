@@ -4,11 +4,19 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import Link from 'next/link'
 import { useAccount, useConnect, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useSignMessage } from 'wagmi'
-import { FolderUp, Loader2, Upload } from 'lucide-react'
-import type { Collection } from '@/lib/port/types'
+import { FolderUp, Loader2, Pencil, Upload } from 'lucide-react'
+import type { Collection, Trait } from '@/lib/port/types'
 import { studioPath } from '@/lib/port/path'
 import type { PortItemMeta } from '@/lib/port/item-meta'
-import { cleanTraits, studioItemBaseUri } from '@/lib/port/item-meta'
+import {
+  cleanTraits,
+  parseMetadataCsv,
+  rarityOf,
+  RARITY_TIERS,
+  studioItemBaseUri,
+  withRarity,
+} from '@/lib/port/item-meta'
+import { PortSheet } from '@/components/port/PortSheet'
 import { collectionItemsEditMessage } from '@/lib/arc-auth'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
 import { PORT_NFT_ABI } from '@/lib/port/abi'
@@ -38,8 +46,10 @@ export function ItemDesk({ collection }: { collection: Collection }) {
   const [over, setOver] = useState(false)
   const [err, setErr] = useState('')
   const [progress, setProgress] = useState({ done: 0, total: 0, phase: '' as '' | 'upload' | 'save' })
-  const [onChainRevealed, setOnChainRevealed] = useState(false)
+  const [onChainRevealed, setOnChainRevealed] = useState(Boolean(collection.revealed))
   const [editing, setEditing] = useState<number | null>(null)
+  const [viewId, setViewId] = useState<number | null>(null)
+  const [rarityFilter, setRarityFilter] = useState('')
 
   const itemsRef = useRef(items)
   itemsRef.current = items
@@ -116,9 +126,11 @@ export function ItemDesk({ collection }: { collection: Collection }) {
     setProgress({ done: 0, total: 0, phase: 'upload' })
     try {
       const images = files.filter(isImageFile)
-      const jsonFile = files.find((f) => /\.json$/i.test(f.name) && !isImageFile(f))
+      const metaFile = files.find(
+        (f) => !isImageFile(f) && (/\.json$/i.test(f.name) || /\.csv$/i.test(f.name)),
+      )
       const assigned = assignSlots(images, itemsRef.current, collection.maxSupply)
-      if (assigned.length === 0 && !jsonFile) throw new Error('No images to add')
+      if (assigned.length === 0 && !metaFile) throw new Error('No images to add')
 
       if (assigned.length) {
         setProgress({ done: 0, total: assigned.length, phase: 'upload' })
@@ -139,7 +151,7 @@ export function ItemDesk({ collection }: { collection: Collection }) {
         setPage(Math.floor((first - 1) / PAGE))
       }
 
-      if (jsonFile) await applyTraitsJson(await jsonFile.text())
+      if (metaFile) await applyMetaText(await metaFile.text(), metaFile.name)
     } catch (e) {
       setErr((e as Error).message || 'Upload failed')
     } finally {
@@ -150,9 +162,17 @@ export function ItemDesk({ collection }: { collection: Collection }) {
     }
   }
 
-  async function applyTraitsJson(text: string) {
-    const raw = JSON.parse(text) as unknown
-    const map = parseMetaPayload(raw)
+  async function applyMetaText(text: string, filename = '') {
+    let map: Record<string, MetaPatch>
+    const looksCsv = /\.csv$/i.test(filename) || /^tokenid[,;\t]/i.test(text.trim())
+    if (looksCsv) map = parseMetadataCsv(text)
+    else {
+      try {
+        map = parseMetaPayload(JSON.parse(text) as unknown)
+      } catch {
+        map = parseMetadataCsv(text)
+      }
+    }
     const patch: Record<string, PortItemMeta> = {}
     for (const [id, row] of Object.entries(map)) {
       const existing = itemsRef.current[id]
@@ -165,9 +185,74 @@ export function ItemDesk({ collection }: { collection: Collection }) {
       }
     }
     if (Object.keys(patch).length === 0) {
-      throw new Error('No matching items. Upload images first, then import metadata JSON.')
+      throw new Error('No matching items. Upload images first, then import metadata CSV or JSON.')
     }
     await save(patch)
+  }
+
+  async function saveItemEdit(id: number, patch: { name: string; description: string; rarity: string; extra: Trait[] }) {
+    const existing = itemsRef.current[String(id)]
+    if (!existing?.imageUrl) return
+    const traits = withRarity(
+      patch.extra.filter((t) => t.type.trim() && t.value.trim()),
+      patch.rarity,
+    )
+    setErr('')
+    setBusy(true)
+    try {
+      await save({
+        [String(id)]: {
+          ...existing,
+          name: patch.name.trim().slice(0, 64) || `${collection.name} #${id}`,
+          description: patch.description.trim().slice(0, 280),
+          traits,
+        },
+      })
+      setViewId(null)
+    } catch (e) {
+      setErr((e as Error).message || 'Could not save item')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function exportCsv() {
+    const ids = Object.keys(items)
+      .map(Number)
+      .filter((n) => Number.isInteger(n))
+      .sort((a, b) => a - b)
+    const traitTypes = new Set<string>()
+    for (const id of ids) {
+      for (const t of items[String(id)]?.traits || []) {
+        if (t.type) traitTypes.add(t.type)
+      }
+    }
+    const types = ['Rarity', ...[...traitTypes].filter((t) => t.toLowerCase() !== 'rarity').sort()]
+    const esc = (v: string) => {
+      if (/[",\n]/.test(v)) return `"${v.replace(/"/g, '""')}"`
+      return v
+    }
+    const header = ['tokenID', 'name', 'description', ...types]
+    const rows = [header.join(',')]
+    for (const id of ids) {
+      const it = items[String(id)]
+      if (!it) continue
+      const map = new Map((it.traits || []).map((t) => [t.type, t.value]))
+      rows.push(
+        [
+          String(id),
+          esc(it.name || ''),
+          esc(it.description || ''),
+          ...types.map((t) => esc(map.get(t) || '')),
+        ].join(','),
+      )
+    }
+    const blob = new Blob([rows.join('\n') + '\n'], { type: 'text/csv;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${collection.symbol || 'collection'}-metadata.csv`
+    a.click()
+    URL.revokeObjectURL(a.href)
   }
 
   async function saveName(id: number, raw: string) {
@@ -201,9 +286,9 @@ export function ItemDesk({ collection }: { collection: Collection }) {
     setErr('')
     setBusy(true)
     try {
-      await applyTraitsJson(await file.text())
+      await applyMetaText(await file.text(), file.name)
     } catch (e) {
-      setErr((e as Error).message || 'Traits import failed')
+      setErr((e as Error).message || 'Metadata import failed')
     } finally {
       setBusy(false)
       if (traitsRef.current) traitsRef.current.value = ''
@@ -268,8 +353,8 @@ export function ItemDesk({ collection }: { collection: Collection }) {
       <h1 className="mt-3 text-[28px] font-semibold tracking-display sm:text-[32px]">Items</h1>
       <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-t2">
         Add a batch in mint order. Name files 1.png, 2.png, … to lock each image to that ID.
-        Click a label to rename, or import a metadata JSON with name + attributes. Reveal when the
-        set is ready.
+        Click an item to edit name, description, rarity, and traits. Import a CSV or JSON for the
+        whole set. Reveal when it is ready.
       </p>
       <p className="mt-2 text-[13px] text-t3">
         {filled} / {collection.maxSupply} uploaded
@@ -350,11 +435,19 @@ export function ItemDesk({ collection }: { collection: Collection }) {
         </button>
         <button
           type="button"
-          disabled={busy || filled === 0}
+          disabled={busy || filled === 0 || onChainRevealed}
           onClick={() => traitsRef.current?.click()}
           className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[14px] font-semibold text-white hover:border-lime-line disabled:opacity-50"
         >
-          Import metadata JSON
+          Import CSV / JSON
+        </button>
+        <button
+          type="button"
+          disabled={filled === 0}
+          onClick={exportCsv}
+          className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[14px] font-semibold text-white hover:border-lime-line disabled:opacity-50"
+        >
+          Export CSV
         </button>
         <input
           ref={fileRef}
@@ -375,28 +468,68 @@ export function ItemDesk({ collection }: { collection: Collection }) {
         <input
           ref={traitsRef}
           type="file"
-          accept="application/json,.json"
+          accept="application/json,.json,text/csv,.csv"
           className="hidden"
           onChange={(e) => void onTraitsJson(e.target.files)}
         />
       </div>
+      {onChainRevealed ? (
+        <p className="mt-3 text-[13px] text-t3">Revealed on-chain. Metadata is locked, same as an OpenSea drop.</p>
+      ) : null}
       {err || revealErr ? (
         <p className="mt-3 text-[13px] text-coral">{err || (revealErr as Error).message}</p>
       ) : null}
 
+      {filled > 0 ? (
+        <div className="mt-6 flex flex-wrap gap-2">
+          {['', ...RARITY_TIERS].map((tier) => (
+            <button
+              key={tier || 'all'}
+              type="button"
+              onClick={() => setRarityFilter(tier)}
+              className={cn(
+                'h-8 rounded-full border px-3 text-[12px] font-semibold',
+                rarityFilter === tier
+                  ? 'border-lime-line bg-s2 text-white'
+                  : 'border-hair text-t3 hover:text-white',
+              )}
+            >
+              {tier || 'All'}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div className="mt-8 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
-        {slots.map((id) => {
+        {(rarityFilter
+          ? slots.filter((id) => rarityOf(items[String(id)]?.traits) === rarityFilter)
+          : slots
+        ).map((id) => {
           const meta = items[String(id)]
+          const tier = rarityOf(meta?.traits)
           return (
             <div key={id} className="overflow-hidden rounded-2xl border border-hair bg-s1">
-              <div className="aspect-square bg-s2">
-                {meta?.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={meta.imageUrl} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="grid h-full place-items-center text-[12px] text-t3">#{id}</div>
-                )}
-              </div>
+              <button
+                type="button"
+                disabled={!meta}
+                onClick={() => meta && setViewId(id)}
+                className="block w-full disabled:cursor-default"
+                title={meta ? 'View / Edit' : undefined}
+              >
+                <div className="relative aspect-square bg-s2">
+                  {meta?.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={meta.imageUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="grid h-full place-items-center text-[12px] text-t3">#{id}</div>
+                  )}
+                  {meta ? (
+                    <span className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-[rgba(10,15,24,0.72)] text-white">
+                      <Pencil className="h-3 w-3" />
+                    </span>
+                  ) : null}
+                </div>
+              </button>
               <div className="px-1.5 py-1.5">
                 {editing === id && meta ? (
                   <input
@@ -418,12 +551,13 @@ export function ItemDesk({ collection }: { collection: Collection }) {
                 ) : (
                   <button
                     type="button"
-                    disabled={!meta || busy}
-                    onClick={() => meta && setEditing(id)}
-                    title={meta ? 'Click to rename' : undefined}
+                    disabled={!meta || busy || onChainRevealed}
+                    onClick={() => meta && setViewId(id)}
+                    title={meta ? 'View / Edit' : undefined}
                     className="block w-full truncate text-left text-[11px] text-t3 disabled:cursor-default"
                   >
                     {meta ? displayName(meta, collection.name, id) : `#${id}`}
+                    {tier ? <span className="mt-0.5 block truncate text-[10px] text-white/45">{tier}</span> : null}
                   </button>
                 )}
               </div>
@@ -454,7 +588,147 @@ export function ItemDesk({ collection }: { collection: Collection }) {
           </button>
         </div>
       ) : null}
+      <ItemEditSheet
+        collectionName={collection.name}
+        id={viewId}
+        meta={viewId != null ? items[String(viewId)] : undefined}
+        locked={onChainRevealed}
+        busy={busy}
+        onClose={() => setViewId(null)}
+        onSave={(patch) => viewId != null && void saveItemEdit(viewId, patch)}
+      />
     </div>
+  )
+}
+
+function ItemEditSheet({
+  collectionName,
+  id,
+  meta,
+  locked,
+  busy,
+  onClose,
+  onSave,
+}: {
+  collectionName: string
+  id: number | null
+  meta?: PortItemMeta
+  locked: boolean
+  busy: boolean
+  onClose: () => void
+  onSave: (patch: { name: string; description: string; rarity: string; extra: Trait[] }) => void
+}) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [rarity, setRarity] = useState('')
+  const [extra, setExtra] = useState<Trait[]>([])
+
+  useEffect(() => {
+    if (id == null || !meta) return
+    setName(meta.name && meta.name !== `${collectionName} #${id}` ? meta.name : '')
+    setDescription(meta.description || '')
+    setRarity(rarityOf(meta.traits))
+    setExtra((meta.traits || []).filter((t) => t.type.toLowerCase() !== 'rarity'))
+  }, [id, meta, collectionName])
+
+  const inputClass =
+    'mt-1 h-12 w-full rounded-xl border border-hair bg-s2 px-3.5 text-[15px] outline-none placeholder:text-white/25'
+
+  return (
+    <PortSheet open={id != null && !!meta} onClose={onClose} title={id != null ? `Item #${id}` : 'Item'}>
+      {meta ? (
+        <div className="pb-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={meta.imageUrl} alt="" className="mx-auto aspect-square w-40 rounded-2xl object-cover" />
+          <label className="mt-4 block text-[13px] text-t3">Name</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value.slice(0, 64))}
+            placeholder={`${collectionName} #${id}`}
+            disabled={locked}
+            className={inputClass}
+          />
+          <label className="mt-3 block text-[13px] text-t3">Description</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value.slice(0, 280))}
+            disabled={locked}
+            className={`${inputClass} h-auto min-h-[88px] resize-none py-3`}
+          />
+          <label className="mt-3 block text-[13px] text-t3">Rarity</label>
+          <select
+            value={rarity}
+            onChange={(e) => setRarity(e.target.value)}
+            disabled={locked}
+            className={inputClass}
+          >
+            <option value="">None</option>
+            {RARITY_TIERS.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+          <div className="mt-4 flex items-center justify-between">
+            <span className="text-[13px] text-t3">Traits</span>
+            {locked ? null : (
+              <button
+                type="button"
+                onClick={() => setExtra((rows) => [...rows, { type: '', value: '' }].slice(0, 16))}
+                className="text-[13px] font-semibold text-lime-t"
+              >
+                Add trait
+              </button>
+            )}
+          </div>
+          <div className="mt-2 space-y-2">
+            {extra.map((row, i) => (
+              <div key={i} className="flex gap-2">
+                <input
+                  value={row.type}
+                  placeholder="Type"
+                  disabled={locked}
+                  onChange={(e) =>
+                    setExtra((rows) => rows.map((r, j) => (j === i ? { ...r, type: e.target.value.slice(0, 32) } : r)))
+                  }
+                  className="h-11 w-[42%] rounded-xl border border-hair bg-s2 px-3 text-[14px] outline-none"
+                />
+                <input
+                  value={row.value}
+                  placeholder="Value"
+                  disabled={locked}
+                  onChange={(e) =>
+                    setExtra((rows) => rows.map((r, j) => (j === i ? { ...r, value: e.target.value.slice(0, 48) } : r)))
+                  }
+                  className="h-11 min-w-0 flex-1 rounded-xl border border-hair bg-s2 px-3 text-[14px] outline-none"
+                />
+                {locked ? null : (
+                  <button
+                    type="button"
+                    onClick={() => setExtra((rows) => rows.filter((_, j) => j !== i))}
+                    className="h-11 px-2 text-[13px] text-t3 hover:text-white"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {locked ? (
+            <p className="mt-4 text-[13px] text-t3">Locked after reveal.</p>
+          ) : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onSave({ name, description, rarity, extra })}
+              className="mt-5 inline-flex h-12 w-full items-center justify-center rounded-xl bg-lime text-[15px] font-semibold text-white disabled:opacity-50"
+            >
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+          )}
+        </div>
+      ) : null}
+    </PortSheet>
   )
 }
 
