@@ -12,8 +12,8 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { kv } from '@vercel/kv'
-import { createPublicClient, http, isAddress, verifyTypedData, type Address, type Hex } from 'viem'
-import { arcChain, ARC_RPC_URLS } from '@/lib/contracts-arc'
+import { isAddress, verifyTypedData, type Address, type Hex } from 'viem'
+import { arcPublicClient } from '@/lib/contracts-arc'
 import {
   SEAPORT_ABI,
   SEAPORT_ADDRESS,
@@ -42,10 +42,7 @@ type StoredOrder = {
 }
 
 function client() {
-  return createPublicClient({
-    chain: arcChain,
-    transport: http(ARC_RPC_URLS[0] || undefined, { retryCount: 1, timeout: 8_000 }),
-  })
+  return arcPublicClient()
 }
 
 /** JSON gives us decimal strings; Seaport needs bigints. */

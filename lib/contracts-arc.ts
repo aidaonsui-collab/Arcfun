@@ -130,6 +130,11 @@ export function isArcRpcInfraError(err: unknown): boolean {
   const raw = `${e?.shortMessage ?? ''} ${e?.message ?? ''} ${e?.details ?? ''} ${String(err ?? '')}`.toLowerCase()
   return (
     raw.includes('exceeded quota') || // Infura: project ID exceeded quota (-32600)
+    // Infura maps quota / invalid payload to JSON-RPC -32600. viem then surfaces the spec
+    // string "JSON is not a valid request object" instead of "exceeded quota", so the
+    // listing API was treating a dead Infura key as a Seaport failure and never falling
+    // through to baracat / arc-scan.
+    raw.includes('json is not a valid request object') ||
     raw.includes('not able to process your request') || // thirdweb: no node behind the chain (-32603)
     raw.includes('contact thirdweb support') ||
     raw.includes('project id') ||
