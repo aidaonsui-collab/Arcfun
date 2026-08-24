@@ -9,7 +9,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { FormEvent, useEffect, useState } from 'react'
 import { useAccount, useBalance, useConnect, useDisconnect } from 'wagmi'
 import { formatUnits } from 'viem'
-import { Menu, X } from 'lucide-react'
+import { BookOpen, CircleUser, Home, LayoutGrid, Menu, PlusCircle, Wallet, X, type LucideIcon } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
 import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
 
@@ -49,13 +49,31 @@ export function SiteHeader() {
     setMenuOpen(false)
   }, [pathname])
 
-  // Lock body scroll while open
+  // Lock body scroll while open, and publish the REAL visible height as --vvh.
+  //
+  // The drawer can't use 100vh: on iOS Safari that resolves to the toolbar-hidden height, so the
+  // panel runs under the address bar and its bottom entries can't be tapped. 100dvh fixes that on
+  // iOS 16.4+, and is the CSS fallback here — visualViewport.height covers older versions and also
+  // tracks the on-screen keyboard, which dvh does not.
   useEffect(() => {
     if (!menuOpen) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null
+    const syncHeight = () => {
+      const h = vv?.height ?? window.innerHeight
+      if (h > 0) document.documentElement.style.setProperty('--vvh', `${h}px`)
+    }
+    syncHeight()
+    vv?.addEventListener('resize', syncHeight)
+    vv?.addEventListener('scroll', syncHeight)
+
     return () => {
       document.body.style.overflow = prev
+      vv?.removeEventListener('resize', syncHeight)
+      vv?.removeEventListener('scroll', syncHeight)
+      document.documentElement.style.removeProperty('--vvh')
     }
   }, [menuOpen])
 
@@ -77,12 +95,16 @@ export function SiteHeader() {
     router.push(`/?q=${encodeURIComponent(v)}`)
   }
 
-  const navLink = (href: string, label: string) => (
+  /** OpenSea-style drawer row: circular outlined icon + label, flat with a divider — not a pill. */
+  const navRow = (href: string, label: string, Icon: LucideIcon) => (
     <Link
       href={href}
       onClick={() => setMenuOpen(false)}
-      className="flex h-12 items-center px-4 rounded-2xl border border-hair bg-s2 text-[15px] font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
+      className="flex items-center gap-4 px-5 h-[68px] border-b border-hair2 text-[17px] font-semibold text-white active:bg-white/5 transition-colors"
     >
+      <span className="w-11 h-11 shrink-0 rounded-full border border-hair flex items-center justify-center text-t2">
+        <Icon className="w-5 h-5" />
+      </span>
       {label}
     </Link>
   )
@@ -90,6 +112,18 @@ export function SiteHeader() {
   return (
     <>
       <header className="fixed top-0 inset-x-0 z-40 h-16 flex items-center gap-3 sm:gap-6 px-4 sm:px-10 bg-[rgba(10,15,24,0.82)] backdrop-blur-[28px] saturate-150 border-b border-hair2">
+        {/* Menu button sits LEFT of the brand on mobile, matching OpenSea. Desktop is unchanged —
+            it shows the real nav links instead, so this is sm:hidden. */}
+        <button
+          type="button"
+          className="sm:hidden h-9 w-9 -ml-1 shrink-0 inline-flex items-center justify-center rounded-xl text-white active:bg-white/10 transition-colors"
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((o) => !o)}
+        >
+          {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-6 h-6" />}
+        </button>
+
         <Link href="/" className="flex items-center gap-2.5 shrink-0">
           <BrandMark />
           <span className="text-[17px] font-semibold tracking-tightish text-white">Arcfun</span>
@@ -181,70 +215,89 @@ export function SiteHeader() {
           </button>
         )}
 
-        {/* Mobile hamburger — shown when desktop nav links are hidden */}
-        <button
-          type="button"
-          className="sm:hidden h-9 w-9 inline-flex items-center justify-center rounded-xl border border-hair bg-s2 text-white hover:bg-s3 transition-colors"
-          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((o) => !o)}
-        >
-          {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
-
         <span className="hidden" aria-hidden>
           {ARC.USDC}
         </span>
       </header>
 
-      {/* Mobile menu sheet */}
+      {/* Mobile nav drawer — full-width right slide-in, matching OpenSea's mobile menu:
+          brand top-left, close top-right, icon+label rows separated by dividers, and a rule
+          between the site nav and the account group. */}
       {menuOpen && (
-        <div className="sm:hidden fixed inset-0 z-50" role="dialog" aria-modal="true">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            aria-label="Close menu"
-            onClick={() => setMenuOpen(false)}
-            style={{ animation: 'veil 0.15s ease-out' }}
-          />
-          <div className="absolute top-16 inset-x-0 border-b border-hair bg-[rgba(12,16,24,0.98)] shadow-[0_24px_48px_rgba(0,0,0,0.55)] px-4 pt-4 pb-6 flex flex-col gap-2.5 animate-[veil_0.15s_ease-out]">
-            <form
-              onSubmit={onSearch}
-              className="flex h-11 items-center gap-2.5 px-3.5 bg-s2 border border-hair rounded-xl mb-1"
-            >
-              <span className="w-3.5 h-3.5 border-[1.6px] border-t3 rounded-full shrink-0" aria-hidden />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search tokens, collections, addresses"
-                className="flex-1 bg-transparent border-0 outline-none text-sm tracking-tightish placeholder:text-white/25"
-                autoFocus
-              />
-            </form>
-
-            {navLink('/', 'Home')}
-            {navLink('/studio', 'Studio')}
-            {navLink('/studio/create', 'Create collection')}
-            {navLink('/portfolio', 'Portfolio')}
-            {isConnected && address ? (
-              navLink(onStudio ? '/studio/me' : `/creator/${address}`, 'Profile')
-            ) : (
-              // No address yet to link /creator/[address] to — prompt connect instead of
-              // hiding the entry outright, so Profile stays in its place in the menu order.
+        <div className="sm:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Menu">
+          <aside
+            className="nav-drawer absolute inset-0 w-full flex flex-col bg-[var(--bg)]"
+            style={{
+              // Not h-full/100vh: on iOS Safari 100vh is the toolbar-HIDDEN height, so the panel
+              // would run under the address bar and its bottom rows would be untappable. --vvh is
+              // the live visualViewport height (see the effect above); 100dvh is the CSS fallback.
+              height: 'var(--vvh, 100dvh)',
+              paddingTop: 'env(safe-area-inset-top, 0px)',
+              paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+            }}
+          >
+            <div className="flex items-center justify-between h-16 px-5 shrink-0">
+              <Link href="/" onClick={() => setMenuOpen(false)} className="flex items-center gap-2.5">
+                <BrandMark />
+                <span className="text-[20px] font-bold tracking-tightish text-white">Arcfun</span>
+              </Link>
               <button
                 type="button"
-                disabled={isPending}
-                onClick={() => {
-                  setMenuOpen(false)
-                  connect({ connector: connectors[0] })
-                }}
-                className="flex h-12 items-center px-4 rounded-2xl border border-hair bg-s2 text-[15px] font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors disabled:opacity-50"
+                onClick={() => setMenuOpen(false)}
+                aria-label="Close menu"
+                className="h-10 w-10 inline-flex items-center justify-center rounded-full border border-hair text-white active:bg-white/10 transition-colors"
               >
-                Profile
+                <X className="w-5 h-5" />
               </button>
-            )}
-            {navLink('/docs', 'Docs')}
-          </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto overscroll-contain border-t border-hair2">
+              <form onSubmit={onSearch} className="px-5 py-4 border-b border-hair2">
+                <div className="flex h-12 items-center gap-2.5 px-4 bg-s2 border border-hair rounded-full">
+                  <span className="w-4 h-4 border-[1.6px] border-t3 rounded-full shrink-0" aria-hidden />
+                  {/* text-base (16px) is load-bearing, not styling: iOS Safari force-zooms the page
+                      on focus for any input under 16px. That, plus the autoFocus this used to have,
+                      is why opening the menu landed zoomed into the search field. */}
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Search tokens, collections"
+                    className="flex-1 min-w-0 bg-transparent border-0 outline-none text-base tracking-tightish placeholder:text-white/30"
+                  />
+                </div>
+              </form>
+
+              {navRow('/', 'Home', Home)}
+              {navRow('/studio', 'Studio', LayoutGrid)}
+              {navRow('/studio/create', 'Create collection', PlusCircle)}
+
+              {/* Account group, separated by a heavier rule like OpenSea's */}
+              <div className="h-2 bg-black/30 border-y border-hair2" aria-hidden />
+
+              {navRow('/portfolio', 'Portfolio', Wallet)}
+              {isConnected && address ? (
+                navRow(onStudio ? '/studio/me' : `/creator/${address}`, 'Profile', CircleUser)
+              ) : (
+                // No address yet to link /creator/[address] to — prompt connect instead of hiding
+                // the entry, so Profile keeps its place in the order.
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => {
+                    setMenuOpen(false)
+                    connect({ connector: connectors[0] })
+                  }}
+                  className="w-full flex items-center gap-4 px-5 h-[68px] border-b border-hair2 text-[17px] font-semibold text-white active:bg-white/5 transition-colors disabled:opacity-50"
+                >
+                  <span className="w-11 h-11 shrink-0 rounded-full border border-hair flex items-center justify-center text-t2">
+                    <CircleUser className="w-5 h-5" />
+                  </span>
+                  Profile
+                </button>
+              )}
+              {navRow('/docs', 'Docs', BookOpen)}
+            </div>
+          </aside>
         </div>
       )}
     </>
