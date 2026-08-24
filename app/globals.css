@@ -126,6 +126,15 @@
   }
 }
 
+@keyframes drawerIn {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
 @keyframes rise {
   from {
     opacity: 0;
@@ -224,4 +233,17 @@
 }
 .rail-scroll::-webkit-scrollbar {
   display: none;
+}
+
+/* Mobile nav drawer — slides in from the right (OpenSea pattern). Height is set from the visual
+   viewport in JS, not 100vh: on iOS Safari 100vh is the *largest* viewport (toolbars hidden), so a
+   100vh drawer runs under the address bar and its bottom items are unreachable. */
+.nav-drawer {
+  animation: drawerIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-drawer {
+    animation: none;
+  }
 }
