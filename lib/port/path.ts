@@ -1,6 +1,6 @@
 import type { Collection } from './types'
 
-const RESERVED = new Set(['create', 'me', 'u', 'items', 'search', 'api'])
+const RESERVED = new Set(['create', 'me', 'u', 'items', 'airdrop', 'search', 'api'])
 
 export function slugifyCollectionName(name: string): string {
   return name

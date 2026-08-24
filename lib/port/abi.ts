@@ -108,6 +108,20 @@ export const PORT_FACTORY_ABI = [
   },
 ] as const
 
+export const ARC_DISPERSE_ABI = [
+  {
+    type: 'function',
+    name: 'disperseToken',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'token', type: 'address' },
+      { name: 'recipients', type: 'address[]' },
+      { name: 'amounts', type: 'uint256[]' },
+    ],
+    outputs: [],
+  },
+] as const
+
 export const PORT_NFT_ABI = [
   { type: 'function', name: 'name', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
   { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },

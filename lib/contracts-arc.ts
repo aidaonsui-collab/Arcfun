@@ -358,6 +358,8 @@ export const ARC = {
     process.env.NEXT_PUBLIC_ARCPORT_FACTORY,
     '0x0b7aD72020BDF5efECac11890DA8646f1339307e',
   ),
+  /** Stateless ERC-20 batch sender for Studio creator airdrops. */
+  DISPERSE: envAddr(process.env.NEXT_PUBLIC_ARC_DISPERSE, '0xE13D582882008A18e78ABEC0B68Cbe0e0fE25c46'),
 
   // ── Instant Reflection USDC (DeployInstantReflectionUsdcArc 2026-08-09 · TOKEN/USDC) ─
   REFLECTION_FACTORY: envAddr(

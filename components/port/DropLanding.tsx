@@ -114,6 +114,12 @@ export function DropLanding({
               >
                 Upload items
               </Link>
+              <Link
+                href={studioPath(collection, 'airdrop')}
+                className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
+              >
+                Airdrop
+              </Link>
             </>
           ) : null}
         </div>

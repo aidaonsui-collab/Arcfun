@@ -347,9 +347,14 @@ export function ItemDesk({ collection }: { collection: Collection }) {
 
   return (
     <div className="mx-auto w-full max-w-desk px-4 pb-24 pt-8 sm:px-10">
-      <Link href={studioPath(collection)} className="text-[13px] font-semibold text-t3 hover:text-white">
-        ← {collection.name}
-      </Link>
+      <div className="flex flex-wrap items-center gap-3">
+        <Link href={studioPath(collection)} className="text-[13px] font-semibold text-t3 hover:text-white">
+          ← {collection.name}
+        </Link>
+        <Link href={studioPath(collection, 'airdrop')} className="text-[13px] font-semibold text-t3 hover:text-white">
+          Airdrop
+        </Link>
+      </div>
       <h1 className="mt-3 text-[28px] font-semibold tracking-display sm:text-[32px]">Items</h1>
       <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-t2">
         Add a batch in mint order. Name files 1.png, 2.png, … to lock each image to that ID.

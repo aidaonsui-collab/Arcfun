@@ -255,6 +255,12 @@ export function CollectionView({
               >
                 Upload items
               </Link>
+              <Link
+                href={studioPath(collection, 'airdrop')}
+                className="inline-flex h-14 items-center rounded-xl border border-hair px-5 text-[14px] font-semibold text-white hover:border-lime-line"
+              >
+                Airdrop
+              </Link>
             </>
           ) : null}
         </div>
@@ -290,6 +296,12 @@ export function CollectionView({
                 className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[13px] font-semibold"
               >
                 Upload items
+              </Link>
+              <Link
+                href={studioPath(collection, 'airdrop')}
+                className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[13px] font-semibold"
+              >
+                Airdrop
               </Link>
             </>
           ) : null}
