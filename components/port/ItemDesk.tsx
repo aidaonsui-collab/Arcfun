@@ -38,6 +38,7 @@ export function ItemDesk({ collection }: { collection: Collection }) {
   const [err, setErr] = useState('')
   const [progress, setProgress] = useState({ done: 0, total: 0, phase: '' as '' | 'upload' | 'save' })
   const [onChainRevealed, setOnChainRevealed] = useState(false)
+  const [editing, setEditing] = useState<number | null>(null)
 
   const itemsRef = useRef(items)
   itemsRef.current = items
@@ -123,7 +124,7 @@ export function ItemDesk({ collection }: { collection: Collection }) {
         const uploaded = await mapPool(assigned, POOL, async ({ file, id }) => {
           const imageUrl = await uploadImageToCloudinary(file, 'port-items')
           setProgress((p) => ({ ...p, done: p.done + 1 }))
-          const meta: PortItemMeta = { imageUrl, name: `${collection.name} #${id}` }
+          const meta: PortItemMeta = { imageUrl, name: nameFromFile(file.name, `${collection.name} #${id}`) }
           return { id, meta }
         })
         setProgress((p) => ({ ...p, phase: 'save' }))
@@ -150,17 +151,47 @@ export function ItemDesk({ collection }: { collection: Collection }) {
 
   async function applyTraitsJson(text: string) {
     const raw = JSON.parse(text) as unknown
-    const map = parseTraitPayload(raw)
+    const map = parseMetaPayload(raw)
     const patch: Record<string, PortItemMeta> = {}
-    for (const [id, traits] of Object.entries(map)) {
+    for (const [id, row] of Object.entries(map)) {
       const existing = itemsRef.current[id]
       if (!existing?.imageUrl) continue
-      patch[id] = { ...existing, traits }
+      patch[id] = {
+        ...existing,
+        ...(row.name ? { name: row.name } : {}),
+        ...(row.description ? { description: row.description } : {}),
+        ...(row.traits ? { traits: row.traits } : {}),
+      }
     }
     if (Object.keys(patch).length === 0) {
       throw new Error('No matching items. Upload images first, then import metadata JSON.')
     }
     await save(patch)
+  }
+
+  async function saveName(id: number, raw: string) {
+    const existing = itemsRef.current[String(id)]
+    if (!existing?.imageUrl) {
+      setEditing(null)
+      return
+    }
+    const name = raw.trim().slice(0, 64)
+    const fallback = `${collection.name} #${id}`
+    const next = name || fallback
+    if ((existing.name || fallback) === next) {
+      setEditing(null)
+      return
+    }
+    setErr('')
+    setBusy(true)
+    try {
+      await save({ [String(id)]: { ...existing, name: next } })
+    } catch (e) {
+      setErr((e as Error).message || 'Could not save name')
+    } finally {
+      setBusy(false)
+      setEditing(null)
+    }
   }
 
   async function onTraitsJson(files: FileList | null) {
@@ -236,7 +267,8 @@ export function ItemDesk({ collection }: { collection: Collection }) {
       <h1 className="mt-3 text-[28px] font-semibold tracking-display sm:text-[32px]">Items</h1>
       <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-t2">
         Add a batch in mint order. Name files 1.png, 2.png, … to lock each image to that ID.
-        Drop a folder, or import a metadata JSON after the art is in. Reveal when the set is ready.
+        Click a label to rename, or import a metadata JSON with name + attributes. Reveal when the
+        set is ready.
       </p>
       <p className="mt-2 text-[13px] text-t3">
         {filled} / {collection.maxSupply} uploaded
@@ -321,7 +353,7 @@ export function ItemDesk({ collection }: { collection: Collection }) {
           onClick={() => traitsRef.current?.click()}
           className="inline-flex h-11 items-center rounded-xl border border-hair px-4 text-[14px] font-semibold text-white hover:border-lime-line disabled:opacity-50"
         >
-          Import traits JSON
+          Import metadata JSON
         </button>
         <input
           ref={fileRef}
@@ -364,7 +396,36 @@ export function ItemDesk({ collection }: { collection: Collection }) {
                   <div className="grid h-full place-items-center text-[12px] text-t3">#{id}</div>
                 )}
               </div>
-              <div className="px-2 py-1.5 text-[11px] tabular-nums text-t3">#{id}</div>
+              <div className="px-1.5 py-1.5">
+                {editing === id && meta ? (
+                  <input
+                    autoFocus
+                    defaultValue={
+                      meta.name && meta.name !== `${collection.name} #${id}` ? meta.name : ''
+                    }
+                    placeholder={`${collection.name} #${id}`}
+                    maxLength={64}
+                    disabled={busy}
+                    onBlur={(e) => void saveName(id, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur()
+                      if (e.key === 'Escape') setEditing(null)
+                    }}
+                    className="h-7 w-full rounded-md border border-lime-line bg-s2 px-1.5 text-[11px] outline-none"
+                    aria-label={`Name for #${id}`}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!meta || busy}
+                    onClick={() => meta && setEditing(id)}
+                    title={meta ? 'Click to rename' : undefined}
+                    className="block w-full truncate text-left text-[11px] text-t3 disabled:cursor-default"
+                  >
+                    {meta ? displayName(meta, collection.name, id) : `#${id}`}
+                  </button>
+                )}
+              </div>
             </div>
           )
         })}
@@ -399,6 +460,20 @@ export function ItemDesk({ collection }: { collection: Collection }) {
 function isImageFile(file: File) {
   if (file.type.startsWith('image/')) return /png|jpe?g|webp|gif/i.test(file.type)
   return /\.(png|jpe?g|webp|gif)$/i.test(file.name)
+}
+
+function displayName(meta: PortItemMeta, collectionName: string, id: number) {
+  const fallback = `${collectionName} #${id}`
+  const name = (meta.name || '').trim()
+  if (!name || name === fallback || name === `#${id}`) return `#${id}`
+  return name
+}
+
+function nameFromFile(filename: string, fallback: string) {
+  const base = filename.replace(/^.*[/\\]/, '').replace(/\.[^.]+$/, '')
+  const rest = base.replace(/^0*\d+[\s._-]*/, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!rest) return fallback
+  return rest.slice(0, 64)
 }
 
 function fileTokenId(name: string): number | null {
@@ -494,34 +569,43 @@ async function filesFromDataTransfer(dt: DataTransfer): Promise<File[]> {
   return [...dt.files]
 }
 
-function parseTraitPayload(raw: unknown): Record<string, { type: string; value: string }[]> {
-  const out: Record<string, { type: string; value: string }[]> = {}
-  const add = (id: number, attrs: unknown) => {
+type MetaPatch = { name?: string; description?: string; traits?: { type: string; value: string }[] }
+
+function parseMetaPayload(raw: unknown): Record<string, MetaPatch> {
+  const out: Record<string, MetaPatch> = {}
+  const add = (id: number, rec: Record<string, unknown> | unknown[]) => {
     if (!Number.isInteger(id) || id < 1) return
-    const traits = cleanTraits(attrs)
-    if (traits) out[String(id)] = traits
+    if (Array.isArray(rec)) {
+      const traits = cleanTraits(rec)
+      if (traits) out[String(id)] = { ...(out[String(id)] || {}), traits }
+      return
+    }
+    const name = typeof rec.name === 'string' ? rec.name.trim().slice(0, 64) : ''
+    const description = typeof rec.description === 'string' ? rec.description.trim().slice(0, 280) : ''
+    const traits = cleanTraits(rec.attributes || rec.traits)
+    const row: MetaPatch = {}
+    if (name) row.name = name
+    if (description) row.description = description
+    if (traits) row.traits = traits
+    if (row.name || row.description || row.traits) out[String(id)] = { ...(out[String(id)] || {}), ...row }
   }
   if (Array.isArray(raw)) {
     for (const row of raw) {
       const rec = (row || {}) as Record<string, unknown>
-      add(Number(rec.id ?? rec.tokenId ?? rec.edition), rec.attributes || rec.traits)
+      add(Number(rec.id ?? rec.tokenId ?? rec.edition), rec)
     }
     return out
   }
   if (!raw || typeof raw !== 'object') return out
   const obj = raw as Record<string, unknown>
   const nested = obj.items || obj.tokens || obj.nfts
-  if (Array.isArray(nested)) return parseTraitPayload(nested)
-  if (nested && typeof nested === 'object') return parseTraitPayload(nested)
+  if (Array.isArray(nested)) return parseMetaPayload(nested)
+  if (nested && typeof nested === 'object') return parseMetaPayload(nested)
   for (const [key, value] of Object.entries(obj)) {
     const id = Number(key)
     if (!Number.isInteger(id)) continue
-    if (Array.isArray(value)) {
-      add(id, value)
-      continue
-    }
-    const rec = (value || {}) as Record<string, unknown>
-    add(id, rec.attributes || rec.traits)
+    if (Array.isArray(value)) add(id, value)
+    else add(id, (value || {}) as Record<string, unknown>)
   }
   return out
 }

@@ -58,10 +58,18 @@ export async function mergePortItems(
     else {
       const prevRow = items[id]
       const traits = cleanTraits(meta.traits) ?? prevRow?.traits
+      const name =
+        typeof meta.name === 'string'
+          ? meta.name.trim().slice(0, 64) || undefined
+          : prevRow?.name
+      const description =
+        typeof meta.description === 'string'
+          ? meta.description.trim().slice(0, 280) || undefined
+          : prevRow?.description
       items[id] = {
         imageUrl: meta.imageUrl,
-        name: meta.name || prevRow?.name,
-        description: meta.description || prevRow?.description,
+        ...(name ? { name } : {}),
+        ...(description ? { description } : {}),
         ...(traits ? { traits } : {}),
       }
     }
