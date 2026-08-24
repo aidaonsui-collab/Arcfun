@@ -181,6 +181,7 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
     }
 
     function reveal(string calldata newBaseURI) external onlyOwner {
+        if (revealed) revert MetadataLocked();
         baseTokenURI = newBaseURI;
         revealed = true;
         emit Revealed(newBaseURI);

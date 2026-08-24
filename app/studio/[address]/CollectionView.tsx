@@ -212,6 +212,12 @@ export function CollectionView({
         {collection.allowlist ? (
           <p className="mt-2 text-[13px] text-lime-t">Allowlist mint</p>
         ) : null}
+        {collection.revealed ? (
+          <p className="mt-2 max-w-xl text-[13px] leading-snug text-t3">
+            New collections lock mint price after the first mint or public start, and lock the art
+            URI at reveal. The creator can still team-mint remaining supply.
+          </p>
+        ) : null}
 
         {collection.revealed ? (
         <>

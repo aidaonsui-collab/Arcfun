@@ -12,6 +12,7 @@ import {
   ItemType,
   SEAPORT_ABI,
   SEAPORT_ADDRESS,
+  studioTreasury,
   toOrderParameters,
 } from '@/lib/port/seaport'
 import { reviveOrder, type Listing } from '@/lib/port/listings'
@@ -69,6 +70,21 @@ export function AcceptOfferSheet({
     setBusy(true)
     try {
       const order = reviveOrder(offer.order)
+      if (collectionOffer) {
+        const priceAtomic = BigInt(offer.priceAtomic)
+        const [, royaltyAmount] = (await publicClient.readContract({
+          address: nft,
+          abi: PORT_NFT_ABI,
+          functionName: 'royaltyInfo',
+          args: [BigInt(fillId), priceAtomic],
+        })) as [Address, bigint]
+        const signedRoyalty = order.consideration
+          .filter((i) => i.itemType === ItemType.ERC20 && i.recipient.toLowerCase() !== studioTreasury().toLowerCase())
+          .reduce((a, i) => a + i.startAmount, 0n)
+        if (royaltyAmount !== signedRoyalty) {
+          throw new Error('This token’s royalty does not match the collection offer. Pick another item.')
+        }
+      }
       // Royalty + studio are pulled from the seller after they receive the bid.
       // Approve the amounts already baked into the signed order, not a live royalty reread.
       const needUsdc = order.consideration

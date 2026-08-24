@@ -59,6 +59,10 @@ export function DropLanding({
             </span>
             <span className="text-[15px] text-t3">USDC · {collection.maxPerWallet} per wallet</span>
           </div>
+          <p className="mt-3 text-[13px] leading-snug text-t3">
+            New collections lock mint price after the first mint or public start, and lock the art
+            URI at reveal. The creator can still team-mint remaining supply for free.
+          </p>
         </div>
 
         <div className="mt-6 space-y-2">

@@ -19,6 +19,7 @@ export async function limitOr429(
   bucket: string,
   limit: number,
   windowSec = 60,
+  failClosed = false,
 ): Promise<NextResponse | null> {
   const ip = clientIp(req)
   const key = `arcfun:rl:${bucket}:${ip}`
@@ -32,7 +33,12 @@ export async function limitOr429(
       )
     }
   } catch {
-    /* fail open */
+    if (failClosed) {
+      return NextResponse.json(
+        { ok: false, error: 'rate limit unavailable' },
+        { status: 503, headers: { 'Retry-After': String(windowSec) } },
+      )
+    }
   }
   return null
 }

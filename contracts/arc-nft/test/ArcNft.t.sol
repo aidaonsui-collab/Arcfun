@@ -225,6 +225,10 @@ contract ArcNftTest is Test {
         col.reveal("ipfs://cid/");
         assertTrue(col.revealed());
         assertEq(col.tokenURI(1), "ipfs://cid/1");
+
+        vm.prank(creator);
+        vm.expectRevert(ArcNft721.MetadataLocked.selector);
+        col.reveal("ipfs://rug/");
     }
 
     function test_setSchedule_and_lockAfterReveal() public {

@@ -69,6 +69,31 @@ export async function assertAcceptedStudioOrder(order: OrderComponents): Promise
     args: [idForRoyalty, priceAtomic],
   })) as [Address, bigint]
 
+  if (kind === 'collection-offer') {
+    let maxSupply = 1n
+    try {
+      maxSupply = (await client.readContract({
+        address: nft,
+        abi: PORT_NFT_ABI,
+        functionName: 'maxSupply',
+      })) as bigint
+    } catch {
+      maxSupply = 1n
+    }
+    if (maxSupply > 1n) {
+      const otherId = maxSupply >= 2n ? 2n : maxSupply
+      const [otherRecv, otherAmt] = (await client.readContract({
+        address: nft,
+        abi: PORT_NFT_ABI,
+        functionName: 'royaltyInfo',
+        args: [otherId, priceAtomic],
+      })) as [Address, bigint]
+      if (otherRecv.toLowerCase() !== royaltyReceiver.toLowerCase() || otherAmt !== royaltyAmount) {
+        throw new Error('collection offers need a flat royalty across tokens')
+      }
+    }
+  }
+
   const expected =
     kind === 'listing'
       ? buildListing({

@@ -8,7 +8,7 @@ import { limitOr429 } from '@/lib/rate-limit'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const limited = await limitOr429(req, 'studio-holders', 10)
+  const limited = await limitOr429(req, 'studio-holders', 10, 60, true)
   if (limited) return limited
   const collection = (req.nextUrl.searchParams.get('collection') || '').trim()
   if (!isAddress(collection)) {

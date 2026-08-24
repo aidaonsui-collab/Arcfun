@@ -48,7 +48,7 @@ function client() {
 }
 
 export async function POST(req: NextRequest) {
-  const limited = await limitOr429(req, 'studio-orders-post', 30)
+  const limited = await limitOr429(req, 'studio-orders-post', 30, 60, true)
   if (limited) return limited
   const body = (await req.json().catch(() => null)) as { order?: Record<string, unknown>; signature?: Hex } | null
   if (!body?.order || !body?.signature) {

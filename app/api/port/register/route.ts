@@ -13,7 +13,7 @@ import { limitOr429 } from '@/lib/rate-limit'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const limited = await limitOr429(req, 'port-register', 10)
+  const limited = await limitOr429(req, 'port-register', 10, 60, true)
   if (limited) return limited
   const body = (await req.json().catch(() => ({}))) as {
     address?: string
