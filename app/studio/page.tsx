@@ -1,4 +1,5 @@
-import { CollectionCard } from '@/components/port/CollectionCard'
+import { CollectionTable } from '@/components/port/CollectionTable'
+import { FeaturedCollectionCard } from '@/components/port/FeaturedCollectionCard'
 import { PortHow, PortStudio } from '@/components/port/PortStudio'
 import { listCollections } from '@/lib/port/catalog'
 
@@ -45,13 +46,11 @@ export default async function PortHome({
             <PortHow />
           </>
         ) : (
-          <div className="rise-in flex items-end justify-between gap-4 pb-5 pt-8 sm:pt-10">
-            <div className="min-w-0">
-              <h1 className="text-[28px] font-semibold leading-[1.1] tracking-display sm:text-[32px]">
-                All collections
-              </h1>
-              <p className="mt-1.5 text-[15px] text-t2">Live on Arc. Mint in USDC.</p>
-            </div>
+          <div className="rise-in pb-4 pt-8 sm:pt-10">
+            <h1 className="text-[28px] font-semibold leading-[1.1] tracking-display sm:text-[32px]">
+              Featured
+            </h1>
+            <p className="mt-1.5 text-[15px] text-t2">Live collections on Arc. Mint in USDC.</p>
           </div>
         )}
 
@@ -63,11 +62,21 @@ export default async function PortHome({
             </div>
           ) : null
         ) : (
-          <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
-            {list.map((c) => (
-              <CollectionCard key={c.address} collection={c} />
-            ))}
-          </div>
+          <>
+            {!searching ? (
+              <div className="rail-scroll -mx-4 flex gap-3 overflow-x-auto px-4 pb-1 sm:-mx-0 sm:px-0 sm:gap-4">
+                {list.slice(0, 8).map((c) => (
+                  <FeaturedCollectionCard key={c.address} collection={c} />
+                ))}
+              </div>
+            ) : null}
+            <div className={searching ? 'mt-2' : 'mt-10'}>
+              {!searching ? (
+                <h2 className="mb-4 text-[21px] font-semibold tracking-tightish">Collections</h2>
+              ) : null}
+              <CollectionTable collections={list} />
+            </div>
+          </>
         )}
       </div>
     </main>
