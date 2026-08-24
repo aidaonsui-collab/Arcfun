@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { cn } from '@/lib/cn'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAccount, usePublicClient } from 'wagmi'
@@ -15,17 +16,18 @@ import { StickyMintBar } from '@/components/port/StickyMintBar'
 import { MintSheet } from '@/components/port/MintSheet'
 import { EditBannerSheet } from '@/components/port/EditBannerSheet'
 import { CollectionItems } from '@/components/port/CollectionItems'
+import { CollectionListings, CollectionOffers } from '@/components/port/CollectionListings'
 import { MarketActivityList } from '@/components/port/MarketActivityList'
+import { BuySheet } from '@/components/port/BuySheet'
 import { OfferSheet } from '@/components/port/OfferSheet'
 import { AcceptOfferSheet } from '@/components/port/AcceptOfferSheet'
 import { BatchListSheet } from '@/components/port/BatchListSheet'
-import { CancelOrderButton } from '@/components/port/CancelOrderButton'
 import { SweepSheet } from '@/components/port/SweepSheet'
 import { fetchListings, isListing, sortByPriceDesc, type Listing } from '@/lib/port/listings'
-import { atomicToUsdc, type MarketActivity } from '@/lib/port/market'
+import { type MarketActivity } from '@/lib/port/market'
 import { studioPath } from '@/lib/port/path'
 import { collectionStatus, mintCta, type Collection, type NftItem } from '@/lib/port/types'
-import { formatInt, formatUsdc, shortAddr } from '@/lib/port/format'
+import { formatInt, formatUsdc } from '@/lib/port/format'
 import { DropLanding } from '@/components/port/DropLanding'
 import { DropSettingsSheet } from '@/components/port/DropSettingsSheet'
 
@@ -56,6 +58,9 @@ export function CollectionView({
   const [accept, setAccept] = useState<Listing | null>(null)
   const [sweepOpen, setSweepOpen] = useState(false)
   const [dropSettings, setDropSettings] = useState(false)
+  const [tab, setTab] = useState<'items' | 'listings' | 'offers' | 'activity'>('items')
+  const [buyListing, setBuyListing] = useState<Listing | null>(null)
+  const [itemOffers, setItemOffers] = useState<Listing[]>([])
   const [description, setDescription] = useState(collection.description)
   const [twitter, setTwitter] = useState(collection.twitter || '')
   const [telegram, setTelegram] = useState(collection.telegram || '')
@@ -68,7 +73,36 @@ export function CollectionView({
     void fetchListings(collection.address, undefined, 'collection-offer').then((rows) =>
       setColOffers(sortByPriceDesc(rows)),
     )
+    void fetchListings(collection.address, undefined, 'offer').then((rows) =>
+      setItemOffers(rows.filter((r) => r.kind === 'offer')),
+    )
   }, [collection.address])
+
+  useEffect(() => {
+    if (!collection.revealed) return
+    let cancelled = false
+    const pull = () => {
+      void Promise.all([
+        fetchListings(collection.address, undefined, 'listing'),
+        fetchListings(collection.address, undefined, 'offer'),
+      ]).then(([asks, bids]) => {
+        if (cancelled) return
+        setListings(asks.filter(isListing))
+        setColOffers(sortByPriceDesc(bids.filter((r) => r.kind === 'collection-offer')))
+        setItemOffers(bids.filter((r) => r.kind === 'offer'))
+      })
+    }
+    const tick = () => {
+      if (document.visibilityState === 'visible') pull()
+    }
+    const id = window.setInterval(tick, 10_000)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [collection.address, collection.revealed])
 
   useEffect(() => {
     setListings(listingsProp)
@@ -316,71 +350,113 @@ export function CollectionView({
         ) : null}
 
         {collection.revealed ? (
-          <CollectionItems
-            collection={collection}
-            items={items}
-            isCreator={isCreator}
-            ownedIds={ownedIds}
-            onListSelected={setBatchItems}
-          />
-        ) : (
-          <DropLanding
-            collection={page}
-            isCreator={isCreator}
-            onMint={() => setMintOpen(true)}
-            onSettings={() => setDropSettings(true)}
-          />
-        )}
-
-        {collection.revealed && colOffers.length > 0 ? (
-          <div className="mt-10">
-            <h2 className="text-[17px] font-semibold tracking-tightish">Collection offers</h2>
-            <div className="mt-4 divide-y divide-hair2 overflow-hidden rounded-[24px] border border-hair bg-s1">
-              {colOffers.map((o) => (
-                <div key={o.orderHash} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div>
-                    <div className="text-[14px] font-semibold tabular-nums">
-                      {formatUsdc(atomicToUsdc(o.priceAtomic))} USDC
-                    </div>
-                    <div className="text-[13px] text-t3">{shortAddr(o.offerer)}</div>
-                  </div>
-                  {address && o.offerer.toLowerCase() === address.toLowerCase() ? (
-                    <CancelOrderButton
-                      order={o}
-                      onDone={() =>
-                        void fetchListings(collection.address, undefined, 'collection-offer').then((rows) =>
-                          setColOffers(sortByPriceDesc(rows)),
-                        )
-                      }
-                    />
-                  ) : ownedIds.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => setAccept(o)}
-                      className="h-10 rounded-xl bg-lime px-4 text-[13px] font-semibold text-white"
-                    >
-                      Accept
-                    </button>
-                  ) : null}
-                </div>
+          <>
+            <div className="mt-10 flex flex-wrap gap-1 border-b border-hair">
+              {(
+                [
+                  ['items', 'Items'],
+                  ['listings', `Listings${listings.length ? ` ${listings.length}` : ''}`],
+                  [
+                    'offers',
+                    `Offers${colOffers.length + itemOffers.length ? ` ${colOffers.length + itemOffers.length}` : ''}`,
+                  ],
+                  ['activity', 'Activity'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTab(id)}
+                  className={cn(
+                    '-mb-px border-b-2 px-3 py-2.5 text-[14px] font-semibold',
+                    tab === id ? 'border-white text-white' : 'border-transparent text-t3 hover:text-white',
+                  )}
+                >
+                  {label}
+                </button>
               ))}
             </div>
-          </div>
-        ) : null}
-
-        <div className="mt-10">
-          <h2 className="text-[17px] font-semibold tracking-tightish">Activity</h2>
-          <div className="mt-4">
-            <MarketActivityList
-              events={activity}
-              collection={collection.slug || collection.address}
-              pollCollection={collection.address}
+            {tab === 'items' ? (
+              <CollectionItems
+                collection={collection}
+                items={items}
+                isCreator={isCreator}
+                ownedIds={ownedIds}
+                onListSelected={setBatchItems}
+              />
+            ) : null}
+            {tab === 'listings' ? (
+              <CollectionListings
+                collection={collection}
+                items={items}
+                listings={listings}
+                onBuy={setBuyListing}
+                onChanged={() =>
+                  void fetchListings(collection.address, undefined, 'listing').then((rows) =>
+                    setListings(rows.filter(isListing)),
+                  )
+                }
+              />
+            ) : null}
+            {tab === 'offers' ? (
+              <CollectionOffers
+                collection={collection}
+                items={items}
+                offers={[...colOffers, ...itemOffers]}
+                ownedIds={ownedIds}
+                onAccept={setAccept}
+                onChanged={() =>
+                  void fetchListings(collection.address, undefined, 'offer').then((rows) => {
+                    setColOffers(sortByPriceDesc(rows.filter((r) => r.kind === 'collection-offer')))
+                    setItemOffers(rows.filter((r) => r.kind === 'offer'))
+                  })
+                }
+              />
+            ) : null}
+            {tab === 'activity' ? (
+              <div className="mt-5">
+                <MarketActivityList
+                  events={activity}
+                  collection={collection.slug || collection.address}
+                  pollCollection={collection.address}
+                />
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <DropLanding
+              collection={page}
+              isCreator={isCreator}
+              onMint={() => setMintOpen(true)}
+              onSettings={() => setDropSettings(true)}
             />
-          </div>
-        </div>
+            <div className="mt-10">
+              <h2 className="text-[17px] font-semibold tracking-tightish">Activity</h2>
+              <div className="mt-4">
+                <MarketActivityList
+                  events={activity}
+                  collection={collection.slug || collection.address}
+                  pollCollection={collection.address}
+                />
+              </div>
+            </div>
+          </>
+        )}
       </div>
       <StickyMintBar collection={collection} onMint={() => setMintOpen(true)} />
       <MintSheet collection={collection} open={mintOpen} onClose={() => setMintOpen(false)} />
+      <BuySheet
+        listing={buyListing}
+        open={!!buyListing}
+        onClose={() => {
+          setBuyListing(null)
+          void fetchListings(collection.address, undefined, 'listing').then((rows) =>
+            setListings(rows.filter(isListing)),
+          )
+          router.refresh()
+        }}
+      />
       <SweepSheet
         listings={listings}
         open={sweepOpen}

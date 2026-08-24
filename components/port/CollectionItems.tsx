@@ -179,8 +179,8 @@ export function CollectionItems({
 
   if (items.length === 0) {
     return (
-      <div className="mt-10">
-        <h2 className="text-[17px] font-semibold tracking-tightish">Items</h2>
+      <div className="mt-5">
+        <h2 className="sr-only">Items</h2>
         <div className="mt-5 overflow-hidden rounded-[28px] border border-hair bg-s1 px-5 py-10 text-center sm:px-6 sm:py-14">
           <SetPreviewFan src={collection.image} side={collection.banner || collection.image} />
           <h3 className="mt-5 text-[20px] font-semibold tracking-display sm:text-[26px]">
@@ -205,9 +205,9 @@ export function CollectionItems({
   }
 
   return (
-    <div className="mt-10">
+    <div className="mt-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-[17px] font-semibold tracking-tightish">Items</h2>
+        <h2 className="sr-only">Items</h2>
         <div className="flex items-center gap-2">
           {ownedIds.length > 0 && onListSelected ? (
             <>
