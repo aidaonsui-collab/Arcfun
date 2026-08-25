@@ -73,7 +73,10 @@ export function StudioProfileView({ address }: { address?: string }) {
     }
     let cancelled = false
     void Promise.all(cols.map((c) => fetchListings(c.address))).then((rows) => {
-      if (!cancelled) setBook(rows.flat())
+      // Any null leg means that collection's fetch failed. Replacing the book with only the
+      // legs that succeeded would silently drop a collection's listings and read as "cancelled",
+      // so hold the previous book until a full pass succeeds.
+      if (!cancelled && rows.every((r) => r !== null)) setBook(rows.flat() as Listing[])
     })
     return () => {
       cancelled = true
@@ -116,7 +119,9 @@ export function StudioProfileView({ address }: { address?: string }) {
 
   function reloadBook() {
     const cols = profile?.heldCollections || []
-    void Promise.all(cols.map((c) => fetchListings(c.address))).then((rows) => setBook(rows.flat()))
+    void Promise.all(cols.map((c) => fetchListings(c.address))).then((rows) => {
+      if (rows.every((r) => r !== null)) setBook(rows.flat() as Listing[])
+    })
   }
 
   if (!target) {

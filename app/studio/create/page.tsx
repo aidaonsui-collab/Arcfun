@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAccount, useConnect, usePublicClient, useSwitchChain, useWriteContract, useSignMessage } from 'wagmi'
 import { getAddress, isAddress, parseEventLogs, parseUnits, zeroAddress, type Address } from 'viem'
-import { ChevronLeft, Rocket } from 'lucide-react'
+import { AlertCircle, ChevronLeft, Rocket } from 'lucide-react'
 import { CREATE_FEE_USDC } from '@/lib/port/types'
 import { formatUsdc } from '@/lib/port/format'
 import { ImageUpload } from '@/components/port/ImageUpload'
@@ -20,6 +20,18 @@ import { prepareCollectionAuth } from '@/lib/arc-auth'
 
 const inputClass =
   'h-12 w-full rounded-xl border border-hair bg-s2 px-3.5 text-[15px] tracking-tightish outline-none transition-[border-color] duration-150 focus:border-lime-line placeholder:text-white/25'
+
+type CollectionRegisterPayload = {
+  collection: string
+  name: string
+  symbol: string
+  description: string
+  imageUrl: string
+  bannerUrl: string
+  twitter: string
+  telegram: string
+  website: string
+}
 
 function Field({
   label,
@@ -90,6 +102,14 @@ export default function PortCreatePage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [feeWei, setFeeWei] = useState<bigint | null>(null)
+  // Set when the collection is live on-chain but its overlay (art, description, socials) did not
+  // save — the creator stays on this page with a retry instead of being sent to a blank page.
+  const [pendingRegister, setPendingRegister] = useState<{
+    collection: Address
+    payload: CollectionRegisterPayload
+  } | null>(null)
+  const [registerError, setRegisterError] = useState('')
+  const [registering, setRegistering] = useState(false)
 
   useEffect(() => {
     if (!live || !address || !publicClient) {
@@ -198,6 +218,57 @@ export default function PortCreatePage() {
       return
     }
     setStep(2)
+  }
+
+  /**
+   * Sign and save the collection overlay. Returns false instead of throwing so the caller can
+   * decide what to do — a declined signature is a normal outcome here, not an exception.
+   * Checks res.ok too: this used to be a bare `await fetch(...)` inside a swallowing catch, so a
+   * 4xx/5xx from the server was as invisible as a declined signature.
+   */
+  async function submitCollectionRegister(
+    collection: Address,
+    payload: CollectionRegisterPayload,
+  ): Promise<boolean> {
+    try {
+      const prepared = prepareCollectionAuth(collection, 'register-collection', payload)
+      const signature = await signMessageAsync({ message: prepared.message })
+      const res = await fetch('/api/port/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          address: collection,
+          ...payload,
+          signature,
+          timestamp: prepared.timestamp,
+          nonce: prepared.nonce,
+        }),
+      })
+      if (!res.ok) {
+        const j = (await res.json().catch(() => null)) as { error?: string } | null
+        setRegisterError(j?.error || `save failed (${res.status})`)
+        return false
+      }
+      setRegisterError('')
+      return true
+    } catch (e: unknown) {
+      const ax = e as { shortMessage?: string; message?: string }
+      const msg = ax?.shortMessage || ax?.message || String(e)
+      setRegisterError(msg.length > 160 ? msg.slice(0, 160) + '…' : msg)
+      return false
+    }
+  }
+
+  async function retryRegister() {
+    if (!pendingRegister) return
+    setRegistering(true)
+    const ok = await submitCollectionRegister(pendingRegister.collection, pendingRegister.payload)
+    setRegistering(false)
+    if (ok) {
+      const to = pendingRegister.collection
+      setPendingRegister(null)
+      router.push(`/studio/${to}`)
+    }
   }
 
   async function publish() {
@@ -313,34 +384,18 @@ export default function PortCreatePage() {
       })
       const collection = created?.args?.collection as Address | undefined
       if (!collection) throw new Error('Collection created but the address was not in the receipt.')
-      try {
-        const registerPayload = {
-          collection: getAddress(collection),
-          name: name.trim(),
-          symbol: symbol.trim().toUpperCase(),
-          description: description.trim(),
-          imageUrl: imageUrl || '',
-          bannerUrl: bannerUrl || '',
-          twitter: twitter.trim(),
-          telegram: telegram.trim(),
-          website: website.trim(),
-        }
-        const prepared = prepareCollectionAuth(collection, 'register-collection', registerPayload)
-        const signature = await signMessageAsync({ message: prepared.message })
-        await fetch('/api/port/register', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            address: collection,
-            ...registerPayload,
-            signature,
-            timestamp: prepared.timestamp,
-            nonce: prepared.nonce,
-          }),
-        })
-      } catch {
-        /* on-chain collection exists; overlay can be set from collection settings */
+      const registerPayload = {
+        collection: getAddress(collection),
+        name: name.trim(),
+        symbol: symbol.trim().toUpperCase(),
+        description: description.trim(),
+        imageUrl: imageUrl || '',
+        bannerUrl: bannerUrl || '',
+        twitter: twitter.trim(),
+        telegram: telegram.trim(),
+        website: website.trim(),
       }
+      const registered = await submitCollectionRegister(collection, registerPayload)
       if (allowlist && wallets.length) {
         try {
           const walletsText = wallets.join('\n')
@@ -381,7 +436,15 @@ export default function PortCreatePage() {
           /* old implementations have no ownerMint */
         }
       }
-      router.push(`/studio/${collection}`)
+      // Do NOT navigate away on a failed overlay save. The collection is live on-chain and keeps
+      // its name/symbol from the contract, but its art, description and socials are only in that
+      // POST — and imageUrl in particular cannot be set from collection settings afterwards, so
+      // silently leaving would strand the creator with an artless collection and no way back.
+      if (registered) {
+        router.push(`/studio/${collection}`)
+      } else {
+        setPendingRegister({ collection, payload: registerPayload })
+      }
     } catch (err: unknown) {
       const ax = err as { shortMessage?: string; message?: string }
       const msg = ax?.shortMessage || ax?.message || String(err)
@@ -754,6 +817,35 @@ export default function PortCreatePage() {
                 </div>
               </div>
               {error ? <p className="mt-6 max-w-xl text-[13px] text-coral">{error}</p> : null}
+              {pendingRegister ? (
+                <div className="mt-6 max-w-xl rounded-[14px] border border-amber-500/40 bg-amber-500/10 px-4 py-3.5">
+                  <p className="flex items-start gap-1.5 text-[13px] font-medium text-amber-200">
+                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    Collection deployed &mdash; its name and ticker are already live on-chain. Its
+                    art, description and socials didn&rsquo;t save
+                    {registerError ? ` — ${registerError}` : ''}. The collection image can only be
+                    set here, so retry before leaving.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={registering}
+                      onClick={() => void retryRegister()}
+                      className="h-9 rounded-xl border border-amber-400/50 bg-amber-500/20 px-3 text-[13px] font-semibold text-amber-100 disabled:opacity-50"
+                    >
+                      {registering ? 'Saving…' : 'Retry save'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={registering}
+                      onClick={() => router.push(`/studio/${pendingRegister.collection}`)}
+                      className="h-9 rounded-xl border border-hair bg-s2 px-3 text-[13px] font-semibold text-t2 disabled:opacity-50"
+                    >
+                      Skip, view collection
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         )}
@@ -768,7 +860,11 @@ export default function PortCreatePage() {
             </Link>
             <button
               type="submit"
-              disabled={isPending || switching || busy}
+              // pendingRegister must disable this: the collection is already deployed at that
+              // point, and busy has been cleared by the finally, so a second click would run
+              // publish() again — deploying a second contract and charging the creation fee
+              // twice. Retry/Skip in the banner are the only ways forward from that state.
+              disabled={isPending || switching || busy || !!pendingRegister}
               className="inline-flex h-11 min-w-[160px] items-center justify-center rounded-full bg-lime px-6 text-[14px] font-semibold text-white hover:bg-lime-2 disabled:opacity-50"
             >
               {primaryLabel}

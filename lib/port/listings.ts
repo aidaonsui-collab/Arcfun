@@ -44,22 +44,33 @@ export function reviveOrder(o: Record<string, unknown>): OrderComponents {
   }
 }
 
-/** Active orders for a collection. Never throws — none is normal. */
+/**
+ * Active orders for a collection. Never throws.
+ *
+ * Returns null when the request FAILED and [] only when the book is genuinely empty — the two
+ * are not the same thing and must not be collapsed. This used to return [] for both, and every
+ * caller writes the result straight into component state, so a single 429 or 503 wiped every
+ * visible listing and offer and told the seller their order had vanished. It hadn't: the order
+ * is signed and live on Seaport either way, the UI was just reporting a failed read as an empty
+ * market. That is reachable in normal use — /api/studio/orders is capped at 40 req/min per IP
+ * and one open collection page spends 12 of them a minute, so a few tabs (or several phones
+ * behind one carrier NAT) is enough. Callers must treat null as "keep what you have".
+ */
 export async function fetchListings(
   collection: string,
   tokenId?: number,
   kind?: Listing['kind'],
-): Promise<Listing[]> {
+): Promise<Listing[] | null> {
   try {
     const q = new URLSearchParams({ collection })
     if (tokenId != null) q.set('tokenId', String(tokenId))
     if (kind) q.set('kind', kind)
     const res = await fetch(`/api/studio/orders?${q}`, { cache: 'no-store' })
-    if (!res.ok) return []
+    if (!res.ok) return null
     const j = (await res.json()) as { listings?: Listing[] }
     return j.listings ?? []
   } catch {
-    return []
+    return null
   }
 }
 

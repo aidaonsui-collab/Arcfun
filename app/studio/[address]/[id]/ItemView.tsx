@@ -52,8 +52,10 @@ export function ItemView({
       fetchListings(collection.address, item.id, 'offer'),
       fetchActivity(collection.address, item.id),
     ])
-    setListing(rows[0] ?? null)
-    setOffers(sortByPriceDesc(bids))
+    // null means the fetch failed — leave the current row alone rather than showing the item as
+    // unlisted / offer-free, which is what a failed read used to look like here.
+    if (rows) setListing(rows[0] ?? null)
+    if (bids) setOffers(sortByPriceDesc(bids))
     setActivity(tape)
   }, [collection.address, item.id])
 
