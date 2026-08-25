@@ -93,6 +93,16 @@ export function ArcCreateForm() {
 
   const [step, setStep] = useState<Step>('idle')
   const [error, setError] = useState<string | null>(null)
+  // Set only when the on-chain create succeeded but the off-chain name/image/socials write
+  // (a signed, separate step — see prepareTokenRegisterAuth) failed or the creator dismissed
+  // that second wallet prompt. The token is already live either way; this just remembers enough
+  // to retry the metadata write without asking the creator to fill the form out again.
+  const [pendingRegister, setPendingRegister] = useState<{
+    token: Address
+    payload: Record<string, unknown>
+  } | null>(null)
+  const [registerError, setRegisterError] = useState<string | null>(null)
+  const [registering, setRegistering] = useState(false)
 
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
   const configured = arcInstantEnabled()
@@ -112,6 +122,45 @@ export function ArcCreateForm() {
   const onPickImage = (f: File | null) => {
     setImageFile(f)
     setImagePreview(f ? URL.createObjectURL(f) : '')
+  }
+
+  /** Signs + POSTs the off-chain name/image/socials record. Returns false rather than throwing —
+   *  callers decide what "the creator never got to sign, or the write failed" means for the UI. */
+  const submitRegister = async (token: Address, payload: Record<string, unknown>): Promise<boolean> => {
+    try {
+      const prepared = prepareTokenRegisterAuth(token, payload)
+      const signature = await signMessageAsync({ message: prepared.message })
+      const res = await fetch('/api/arc/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...payload,
+          signature,
+          timestamp: prepared.timestamp,
+          nonce: prepared.nonce,
+        }),
+      })
+      if (!res.ok) {
+        const j = (await res.json().catch(() => null)) as { error?: string } | null
+        setRegisterError(j?.error || `save failed (${res.status})`)
+        return false
+      }
+      setRegisterError(null)
+      return true
+    } catch (e: unknown) {
+      const ax = e as { shortMessage?: string; message?: string }
+      // Most common case in practice: the creator closed the second wallet prompt.
+      setRegisterError(ax?.shortMessage || ax?.message || 'signature was not completed')
+      return false
+    }
+  }
+
+  const retryRegister = async () => {
+    if (!pendingRegister || registering) return
+    setRegistering(true)
+    const ok = await submitRegister(pendingRegister.token, pendingRegister.payload)
+    setRegistering(false)
+    if (ok) setPendingRegister(null)
   }
 
   const onSubmit = async () => {
@@ -231,37 +280,31 @@ export function ArcCreateForm() {
         )
 
       setStep('registering')
-      try {
-        const registerPayload = {
-          token: getAddress(token),
-          name: name.trim(),
-          symbol: symbol.trim(),
-          description: description.trim() || '',
-          imageUrl: imageUrl || '',
-          twitter: twitter.trim(),
-          telegram: telegram.trim(),
-          website: website.trim(),
-          streamUrl: '',
-          pool: pool || '',
-        }
-        const prepared = prepareTokenRegisterAuth(token, registerPayload)
-        const signature = await signMessageAsync({ message: prepared.message })
-        await fetch('/api/arc/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...registerPayload,
-            signature,
-            timestamp: prepared.timestamp,
-            nonce: prepared.nonce,
-          }),
-        })
-      } catch {
-        /* token exists on-chain; overlay can be retried */
+      const registerPayload = {
+        token: getAddress(token),
+        name: name.trim(),
+        symbol: symbol.trim(),
+        description: description.trim() || '',
+        imageUrl: imageUrl || '',
+        twitter: twitter.trim(),
+        telegram: telegram.trim(),
+        website: website.trim(),
+        streamUrl: '',
+        pool: pool || '',
       }
+      const registered = await submitRegister(token, registerPayload)
 
       setStep('done')
-      router.push(`/token/${token}`)
+      if (registered) {
+        router.push(`/token/${token}`)
+      } else {
+        // Do NOT navigate away silently — a failed/declined signature here used to leave the
+        // token live with no name, image or socials and nothing telling the creator that
+        // happened (found live 2026-08 on "Lazy Chameleon"). Stay put with a retry banner
+        // instead; the creator can still jump to the token page themselves once they've had a
+        // chance to fix it, or on purpose if they don't care.
+        setPendingRegister({ token, payload: registerPayload })
+      }
     } catch (e: unknown) {
       const ax = e as { shortMessage?: string; message?: string }
       const msg = ax?.shortMessage || ax?.message || String(e)
@@ -277,6 +320,11 @@ export function ArcCreateForm() {
     name.trim().length > 0 &&
     symbol.trim().length > 0 &&
     !busy &&
+    // step 'done' + a pending metadata retry means the on-chain create already happened —
+    // busy alone doesn't cover this window, and without this guard the re-enabled "Launched"
+    // button re-runs the whole mint flow (fresh signatures, a second on-chain token) instead of
+    // just retrying the metadata save the banner is there for.
+    !pendingRegister &&
     rewardsOk &&
     (isReflection
       ? reflectionLive && rewardTokenOk
@@ -659,6 +707,34 @@ export function ArcCreateForm() {
           <p className="mt-4 text-xs text-coral flex items-start gap-1.5">
             <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {error}
           </p>
+        )}
+
+        {pendingRegister && (
+          <div className="mt-4 rounded-[14px] border border-amber-500/40 bg-amber-500/10 px-4 py-3.5">
+            <p className="flex items-start gap-1.5 text-[13px] font-medium text-amber-200">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              Token launched on-chain, but its name, image and socials didn’t save
+              {registerError ? ` — ${registerError}` : ''}. It’s live and tradeable either way.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={registering}
+                onClick={() => void retryRegister()}
+                className="h-9 px-4 rounded-[10px] bg-amber-500 text-black text-[13px] font-semibold disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {registering ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                {registering ? 'Retrying…' : 'Retry save'}
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push(`/token/${pendingRegister.token}`)}
+                className="h-9 px-4 rounded-[10px] border border-hair text-[13px] font-medium text-t2 hover:text-white"
+              >
+                Skip, view token
+              </button>
+            </div>
+          </div>
         )}
 
         {!isConnected ? (
