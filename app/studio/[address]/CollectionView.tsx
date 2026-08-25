@@ -70,26 +70,31 @@ export function CollectionView({
   )
 
   useEffect(() => {
-    void fetchListings(collection.address, undefined, 'collection-offer').then((rows) =>
-      setColOffers(sortByPriceDesc(rows)),
-    )
-    void fetchListings(collection.address, undefined, 'offer').then((rows) =>
-      setItemOffers(rows.filter((r) => r.kind === 'offer')),
-    )
+    void fetchListings(collection.address, undefined, 'collection-offer').then((rows) => {
+      if (rows) setColOffers(sortByPriceDesc(rows))
+    })
+    void fetchListings(collection.address, undefined, 'offer').then((rows) => {
+      if (rows) setItemOffers(rows.filter((r) => r.kind === 'offer'))
+    })
   }, [collection.address])
 
   useEffect(() => {
     if (!collection.revealed) return
     let cancelled = false
+    // A null leg means that fetch failed, not that the book emptied — keep the rows already on
+    // screen instead of blanking them. Each leg is applied independently so one failing does not
+    // discard the other's good data.
     const pull = () => {
       void Promise.all([
         fetchListings(collection.address, undefined, 'listing'),
         fetchListings(collection.address, undefined, 'offer'),
       ]).then(([asks, bids]) => {
         if (cancelled) return
-        setListings(asks.filter(isListing))
-        setColOffers(sortByPriceDesc(bids.filter((r) => r.kind === 'collection-offer')))
-        setItemOffers(bids.filter((r) => r.kind === 'offer'))
+        if (asks) setListings(asks.filter(isListing))
+        if (bids) {
+          setColOffers(sortByPriceDesc(bids.filter((r) => r.kind === 'collection-offer')))
+          setItemOffers(bids.filter((r) => r.kind === 'offer'))
+        }
       })
     }
     const tick = () => {
@@ -392,9 +397,9 @@ export function CollectionView({
                 listings={listings}
                 onBuy={setBuyListing}
                 onChanged={() =>
-                  void fetchListings(collection.address, undefined, 'listing').then((rows) =>
-                    setListings(rows.filter(isListing)),
-                  )
+                  void fetchListings(collection.address, undefined, 'listing').then((rows) => {
+                    if (rows) setListings(rows.filter(isListing))
+                  })
                 }
               />
             ) : null}
@@ -407,6 +412,7 @@ export function CollectionView({
                 onAccept={setAccept}
                 onChanged={() =>
                   void fetchListings(collection.address, undefined, 'offer').then((rows) => {
+                    if (!rows) return
                     setColOffers(sortByPriceDesc(rows.filter((r) => r.kind === 'collection-offer')))
                     setItemOffers(rows.filter((r) => r.kind === 'offer'))
                   })
@@ -451,9 +457,9 @@ export function CollectionView({
         open={!!buyListing}
         onClose={() => {
           setBuyListing(null)
-          void fetchListings(collection.address, undefined, 'listing').then((rows) =>
-            setListings(rows.filter(isListing)),
-          )
+          void fetchListings(collection.address, undefined, 'listing').then((rows) => {
+            if (rows) setListings(rows.filter(isListing))
+          })
           router.refresh()
         }}
       />
@@ -462,9 +468,9 @@ export function CollectionView({
         open={sweepOpen}
         onClose={() => {
           setSweepOpen(false)
-          void fetchListings(collection.address, undefined, 'listing').then((rows) =>
-            setListings(rows.filter(isListing)),
-          )
+          void fetchListings(collection.address, undefined, 'listing').then((rows) => {
+            if (rows) setListings(rows.filter(isListing))
+          })
         }}
       />
       <OfferSheet
@@ -472,9 +478,9 @@ export function CollectionView({
         open={offerOpen}
         onClose={() => {
           setOfferOpen(false)
-          void fetchListings(collection.address, undefined, 'collection-offer').then((rows) =>
-            setColOffers(sortByPriceDesc(rows)),
-          )
+          void fetchListings(collection.address, undefined, 'collection-offer').then((rows) => {
+            if (rows) setColOffers(sortByPriceDesc(rows))
+          })
         }}
       />
       <BatchListSheet
@@ -490,9 +496,9 @@ export function CollectionView({
         open={!!accept}
         onClose={() => {
           setAccept(null)
-          void fetchListings(collection.address, undefined, 'collection-offer').then((rows) =>
-            setColOffers(sortByPriceDesc(rows)),
-          )
+          void fetchListings(collection.address, undefined, 'collection-offer').then((rows) => {
+            if (rows) setColOffers(sortByPriceDesc(rows))
+          })
           router.refresh()
         }}
       />

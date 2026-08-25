@@ -44,22 +44,28 @@ export function reviveOrder(o: Record<string, unknown>): OrderComponents {
   }
 }
 
-/** Active orders for a collection. Never throws — none is normal. */
+/**
+ * Active orders for a collection. Never throws.
+ *
+ * null = the read failed, keep whatever is on screen. [] = the book is genuinely empty.
+ * Collapsing the two makes a rate-limited or degraded read render as an empty market, which
+ * reads to a seller as "my listing is gone" while the order is still live on Seaport.
+ */
 export async function fetchListings(
   collection: string,
   tokenId?: number,
   kind?: Listing['kind'],
-): Promise<Listing[]> {
+): Promise<Listing[] | null> {
   try {
     const q = new URLSearchParams({ collection })
     if (tokenId != null) q.set('tokenId', String(tokenId))
     if (kind) q.set('kind', kind)
     const res = await fetch(`/api/studio/orders?${q}`, { cache: 'no-store' })
-    if (!res.ok) return []
+    if (!res.ok) return null
     const j = (await res.json()) as { listings?: Listing[] }
     return j.listings ?? []
   } catch {
-    return []
+    return null
   }
 }
 
