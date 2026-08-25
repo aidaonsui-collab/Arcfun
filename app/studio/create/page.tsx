@@ -102,8 +102,10 @@ export default function PortCreatePage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [feeWei, setFeeWei] = useState<bigint | null>(null)
-  // Set when the collection is live on-chain but its overlay (art, description, socials) did not
-  // save — the creator stays on this page with a retry instead of being sent to a blank page.
+  // Set when the collection is live on-chain but its overlay did not save. Nothing here is
+  // unrecoverable — name/symbol/art come from the contract and the rest can be set later from
+  // collection settings — but failing silently and navigating away left the creator with no idea
+  // anything was missing.
   const [pendingRegister, setPendingRegister] = useState<{
     collection: Address
     payload: CollectionRegisterPayload
@@ -272,6 +274,11 @@ export default function PortCreatePage() {
   }
 
   async function publish() {
+    // The collection is already deployed once pendingRegister is set. Guarding here rather than
+    // only on the button: the button is a submit control, and implicit form submission (Enter in
+    // a text field) reaches onSubmit without it. Re-running would deploy a second contract and
+    // charge the creation fee again.
+    if (pendingRegister) return
     setError('')
     if (!isConnected) {
       const c = connectors[0]
@@ -436,10 +443,11 @@ export default function PortCreatePage() {
           /* old implementations have no ownerMint */
         }
       }
-      // Do NOT navigate away on a failed overlay save. The collection is live on-chain and keeps
-      // its name/symbol from the contract, but its art, description and socials are only in that
-      // POST — and imageUrl in particular cannot be set from collection settings afterwards, so
-      // silently leaving would strand the creator with an artless collection and no way back.
+      // Do NOT navigate away on a failed overlay save. Nothing is lost permanently — name, symbol
+      // and the collection image all resolve from the contract (createCollection writes the image
+      // as unrevealedURI, which reveal() never clears, and the catalog falls back to it) — but the
+      // description, banner and socials are only in that POST, and leaving silently gave the
+      // creator no signal that they were missing.
       if (registered) {
         router.push(`/studio/${collection}`)
       } else {
@@ -481,6 +489,9 @@ export default function PortCreatePage() {
           onClick={(e) => {
             if (step === 2) {
               e.preventDefault()
+              // Editing the form again is meaningless once the contract is deployed — the only
+              // moves left are Retry or Skip in the banner.
+              if (pendingRegister) return
               setError('')
               setStep(1)
             }
@@ -506,6 +517,39 @@ export default function PortCreatePage() {
       </div>
 
       <form onSubmit={onSubmit} className="pb-28">
+        {/* Outside the step branches on purpose: Back drops to step 1, and a banner that only
+            rendered in step 2 left the creator on a step whose Continue is disabled with no way
+            to reach Retry or Skip. */}
+        {pendingRegister ? (
+          <div className="mx-auto max-w-[1280px] px-5 pt-5 sm:px-8">
+            <div className="rounded-[14px] border border-amber-500/40 bg-amber-500/10 px-4 py-3.5">
+              <p className="flex items-start gap-1.5 text-[13px] font-medium text-amber-200">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Collection deployed &mdash; its name, ticker and art are already live on-chain. Its
+                description, banner and socials didn&rsquo;t save
+                {registerError ? ` — ${registerError}` : ''}.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={registering}
+                  onClick={() => void retryRegister()}
+                  className="h-9 rounded-xl border border-amber-400/50 bg-amber-500/20 px-3 text-[13px] font-semibold text-amber-100 disabled:opacity-50"
+                >
+                  {registering ? 'Saving…' : 'Retry save'}
+                </button>
+                <button
+                  type="button"
+                  disabled={registering}
+                  onClick={() => router.push(`/studio/${pendingRegister.collection}`)}
+                  className="h-9 rounded-xl border border-hair bg-s2 px-3 text-[13px] font-semibold text-t2 disabled:opacity-50"
+                >
+                  Skip, view collection
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {step === 1 ? (
           <div className="mx-auto grid min-h-[calc(100vh-8.5rem)] max-w-[1280px] lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
             <div className="flex flex-col border-b border-hair p-5 pb-24 sm:p-8 lg:border-b-0 lg:border-r lg:pb-28">
@@ -817,35 +861,6 @@ export default function PortCreatePage() {
                 </div>
               </div>
               {error ? <p className="mt-6 max-w-xl text-[13px] text-coral">{error}</p> : null}
-              {pendingRegister ? (
-                <div className="mt-6 max-w-xl rounded-[14px] border border-amber-500/40 bg-amber-500/10 px-4 py-3.5">
-                  <p className="flex items-start gap-1.5 text-[13px] font-medium text-amber-200">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    Collection deployed &mdash; its name and ticker are already live on-chain. Its
-                    art, description and socials didn&rsquo;t save
-                    {registerError ? ` — ${registerError}` : ''}. The collection image can only be
-                    set here, so retry before leaving.
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={registering}
-                      onClick={() => void retryRegister()}
-                      className="h-9 rounded-xl border border-amber-400/50 bg-amber-500/20 px-3 text-[13px] font-semibold text-amber-100 disabled:opacity-50"
-                    >
-                      {registering ? 'Saving…' : 'Retry save'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={registering}
-                      onClick={() => router.push(`/studio/${pendingRegister.collection}`)}
-                      className="h-9 rounded-xl border border-hair bg-s2 px-3 text-[13px] font-semibold text-t2 disabled:opacity-50"
-                    >
-                      Skip, view collection
-                    </button>
-                  </div>
-                </div>
-              ) : null}
             </div>
           </div>
         )}

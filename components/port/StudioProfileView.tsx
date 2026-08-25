@@ -17,6 +17,25 @@ import { AcceptOfferSheet } from './AcceptOfferSheet'
 import { studioPath } from '@/lib/port/path'
 import type { Collection, NftItem } from '@/lib/port/types'
 
+/**
+ * Rebuild the book one collection at a time: take fresh rows where the fetch answered, keep the
+ * previous rows where it failed. Per-collection rather than all-or-nothing, so one failing
+ * collection neither blanks the others nor holds back a listing that was just made elsewhere.
+ */
+function mergeBook(
+  prev: Listing[],
+  cols: { address: string }[],
+  rows: (Listing[] | null)[],
+): Listing[] {
+  const out: Listing[] = []
+  cols.forEach((c, i) => {
+    const fresh = rows[i]
+    if (fresh) out.push(...fresh)
+    else out.push(...prev.filter((l) => l.collection.toLowerCase() === c.address.toLowerCase()))
+  })
+  return out
+}
+
 export function StudioProfileView({ address }: { address?: string }) {
   const { address: connected } = useAccount()
   const { connect, connectors, isPending } = useConnect()
@@ -73,10 +92,7 @@ export function StudioProfileView({ address }: { address?: string }) {
     }
     let cancelled = false
     void Promise.all(cols.map((c) => fetchListings(c.address))).then((rows) => {
-      // Any null leg means that collection's fetch failed. Replacing the book with only the
-      // legs that succeeded would silently drop a collection's listings and read as "cancelled",
-      // so hold the previous book until a full pass succeeds.
-      if (!cancelled && rows.every((r) => r !== null)) setBook(rows.flat() as Listing[])
+      if (!cancelled) setBook((prev) => mergeBook(prev, cols, rows))
     })
     return () => {
       cancelled = true
@@ -120,7 +136,7 @@ export function StudioProfileView({ address }: { address?: string }) {
   function reloadBook() {
     const cols = profile?.heldCollections || []
     void Promise.all(cols.map((c) => fetchListings(c.address))).then((rows) => {
-      if (rows.every((r) => r !== null)) setBook(rows.flat() as Listing[])
+      setBook((prev) => mergeBook(prev, cols, rows))
     })
   }
 
