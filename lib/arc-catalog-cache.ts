@@ -16,7 +16,7 @@ import { buildArcCatalog } from './arc-instant-tokens'
 import { bigintReplacer } from './json-safe'
 import { summarizeRpcError } from './rpc-error'
 
-const KV_KEY = 'arcfun:catalog:home:v1'
+const KV_KEY = 'arcfun:catalog:home:v2'
 const FRESH_MS = 20_000
 const KV_TTL_SEC = 10 * 60
 
@@ -70,6 +70,14 @@ async function rebuild(): Promise<CatalogSnapshot> {
       /* indexer optional */
     }
     const snap: CatalogSnapshot = cloneJson({ tokens, source, at: Date.now() })
+    // An empty rebuild is almost always a failed Instant/RPC pass, not a pad
+    // with zero launches. Writing it would wipe the home grid until the next
+    // successful read (the same [] vs failure collapse as fetchListings).
+    const prev = memory ?? (await readKv())
+    if (snap.tokens.length === 0 && prev && prev.tokens.length > 0) {
+      console.warn('[arc-catalog] empty rebuild, keeping last-known-good', prev.tokens.length)
+      return prev
+    }
     memory = snap
     await writeKv(snap)
     return snap

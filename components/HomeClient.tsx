@@ -41,7 +41,8 @@ export function HomeClient({
       const res = await coalescedFetch('/api/arc/tokens')
       if (res.ok) {
         const data = (await res.json()) as { tokens?: PoolToken[] }
-        setTokens(data.tokens ?? [])
+        const next = data.tokens ?? []
+        setTokens((prev) => (next.length === 0 && prev.length > 0 ? prev : next))
       }
     } catch {
       /* keep prior */

@@ -673,6 +673,9 @@ async function listInstantFactoryTokens(
   const addrs = listed
     .map((r) => mcOk<Address>(r))
     .filter((a): a is Address => !!a && a !== ZERO)
+  if (count > 0 && addrs.length === 0) {
+    throw new Error(`instant factory ${factory} has ${count} tokens but allTokens returned none`)
+  }
   const launchVq = (await client
     .readContract({
       address: factory,
@@ -692,9 +695,13 @@ export async function fetchArcInstantPoolTokens(): Promise<PoolToken[]> {
   const client = arcPublicClient()
   try {
     const factories = [ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_LEGACY]
-    const listed = await Promise.all(
-      factories.map((f) => listInstantFactoryTokens(f).catch(() => ({ addrs: [] as Address[], launchVq: 5_500_000_000n }))),
-    )
+    const listed = await Promise.all([
+      listInstantFactoryTokens(factories[0]),
+      listInstantFactoryTokens(factories[1]).catch(() => ({
+        addrs: [] as Address[],
+        launchVq: 5_500_000_000n,
+      })),
+    ])
 
     // Dedupe by token address (prefer first = current factory).
     const seen = new Set<string>()
@@ -725,10 +732,13 @@ export async function fetchArcInstantPoolTokens(): Promise<PoolToken[]> {
       if (!p) continue
       rows.push({ ...entries[i], pool: p })
     }
+    if (rows.length === 0) {
+      throw new Error('instant getPool reads returned no pools')
+    }
     return hydrateInstantRows(rows)
   } catch (e) {
     console.error('[arc-instant-tokens] catalog', summarizeRpcError(e))
-    return []
+    throw e
   }
 }
 
@@ -899,7 +909,7 @@ export async function fetchArcCurvePoolTokens(): Promise<PoolToken[]> {
 
 export async function buildArcCatalog(): Promise<{ tokens: PoolToken[]; source: string }> {
   const [instant, reflection, curve] = await Promise.all([
-    fetchArcInstantPoolTokens().catch(() => [] as PoolToken[]),
+    fetchArcInstantPoolTokens(),
     fetchArcReflectionPoolTokens().catch(() => [] as PoolToken[]),
     fetchArcCurvePoolTokens().catch(() => [] as PoolToken[]),
   ])

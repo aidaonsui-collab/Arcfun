@@ -457,7 +457,11 @@ const ARC_SERVER_RPC_CANDIDATES: string[] = (() => {
   const infura = serverInfuraRpc()
   const seen = new Set<string>()
   const out: string[] = []
-  for (const u of [priv, infura, ...ARC_RPC_URLS]) {
+  const privIsInfura = !!priv && isKeyedInfuraUrl(priv)
+  // Public RPCs before Infura. A hanging or quota-exhausted Infura primary made
+  // catalog rebuilds time out and write an empty home grid.
+  const ordered = [privIsInfura ? '' : priv, ...ARC_RPC_URLS, infura, privIsInfura ? priv : '']
+  for (const u of ordered) {
     if (u && !isBannedArcRpc(u) && !seen.has(u)) {
       seen.add(u)
       out.push(u)

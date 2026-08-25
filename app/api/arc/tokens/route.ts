@@ -20,7 +20,12 @@ export async function GET() {
     const { tokens, source, at } = await getArcHomeCatalog()
     return jsonSafe(
       { ok: true, source, at, tokens },
-      { headers: CATALOG_CACHE_HEADERS },
+      {
+        headers:
+          tokens.length === 0
+            ? { 'Cache-Control': 'no-store' }
+            : CATALOG_CACHE_HEADERS,
+      },
     )
   } catch (e) {
     console.error('[api/arc/tokens]', summarizeRpcError(e))
