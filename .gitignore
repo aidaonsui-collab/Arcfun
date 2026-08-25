@@ -17,3 +17,4 @@ subgraph/**/node_modules
 subgraph/**/generated
 subgraph/**/build
 subgraph/**/package-lock.json
+.claude/launch.json
