@@ -279,6 +279,20 @@ export function ArcCreateForm() {
           'Token created, but could not read its address from the transaction. Check ArcScan.',
         )
 
+      // No signature, can't meaningfully fail, best-effort — see the route's own comment for why
+      // this is safe with zero auth: name/symbol/creator are chain reads, not client claims. This
+      // runs BEFORE the signed step below so a token's basic identity never again depends on that
+      // second wallet prompt being completed.
+      try {
+        await fetch('/api/arc/register/identity', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: getAddress(token), pool: pool || '' }),
+        })
+      } catch {
+        /* purely a cache warm — every reader already falls back to the same chain reads */
+      }
+
       setStep('registering')
       const registerPayload = {
         token: getAddress(token),
@@ -298,11 +312,13 @@ export function ArcCreateForm() {
       if (registered) {
         router.push(`/token/${token}`)
       } else {
-        // Do NOT navigate away silently — a failed/declined signature here used to leave the
-        // token live with no name, image or socials and nothing telling the creator that
-        // happened (found live 2026-08 on "Lazy Chameleon"). Stay put with a retry banner
-        // instead; the creator can still jump to the token page themselves once they've had a
-        // chance to fix it, or on purpose if they don't care.
+        // Do NOT navigate away silently. The token's name/symbol are already safe regardless —
+        // written above with no signature required, and every reader falls back to the same live
+        // chain reads anyway — so what's actually at risk here is only the image/description/
+        // socials, which genuinely do need the creator's signature (arbitrary content, nothing
+        // on-chain to check it against). Stay put with a retry banner instead of navigating away
+        // as if nothing happened; the creator can still jump to the token page themselves once
+        // they've had a chance to fix it, or on purpose if they don't care.
         setPendingRegister({ token, payload: registerPayload })
       }
     } catch (e: unknown) {
@@ -713,8 +729,8 @@ export function ArcCreateForm() {
           <div className="mt-4 rounded-[14px] border border-amber-500/40 bg-amber-500/10 px-4 py-3.5">
             <p className="flex items-start gap-1.5 text-[13px] font-medium text-amber-200">
               <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              Token launched on-chain, but its name, image and socials didn’t save
-              {registerError ? ` — ${registerError}` : ''}. It’s live and tradeable either way.
+              Token launched — its name and ticker are already live. Its image and socials didn’t
+              save{registerError ? ` — ${registerError}` : ''}, though.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <button
