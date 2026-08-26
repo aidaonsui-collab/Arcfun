@@ -9,6 +9,7 @@ import {ISwapRouter02} from "./interfaces/ISwapRouter02.sol";
 ///         USDC → ARCFUN on SwapRouter02, ARCFUN to `0x…dead`. Burn tape event is `Burn`.
 /// @dev `$ARCFUN` is not launched yet. While `arcfun == address(0)` USDC is HELD here —
 ///      cook() reverts, nothing is bought, nothing is sent to dead.
+///      `setArcfun` is one-shot. cook is never called from collect; a keeper passes minOut.
 contract Crucible {
     address public owner;
     address public usdc;
@@ -32,6 +33,10 @@ contract Crucible {
     error NotOwner();
     error ZeroAddress();
     error ArcfunUnset();
+    error ArcfunAlreadySet();
+    error ZeroFee();
+    error ZeroMinOut();
+    error InsufficientUsdc();
     error CookIsPaused();
     error Reentrancy();
     error TransferFailed();
@@ -63,19 +68,25 @@ contract Crucible {
         owner = next;
     }
 
-    /// @notice Set or update the `$ARCFUN` token. Zero holds USDC again (no buy, no dead send).
+    /// @notice One-shot. Points the burn target. Cannot unset or repoint.
     function setArcfun(address token) external onlyOwner {
+        if (token == address(0)) revert ZeroAddress();
+        if (arcfun != address(0)) revert ArcfunAlreadySet();
         arcfun = token;
         emit ArcfunSet(token);
     }
 
     function setArcfunPoolFee(uint24 fee) external onlyOwner {
+        if (fee == 0) revert ZeroFee();
         arcfunPoolFee = fee;
         emit ArcfunPoolFeeSet(fee);
     }
 
+    /// @notice Rotate the router and revoke the old one's USDC allowance.
     function setSwapRouter(address router) external onlyOwner {
         if (router == address(0)) revert ZeroAddress();
+        address old = swapRouter;
+        if (old != router) _approve(usdc, old, 0);
         swapRouter = router;
         emit SwapRouterSet(router);
     }
@@ -85,25 +96,24 @@ contract Crucible {
         emit CookPausedSet(paused);
     }
 
-    /// @notice Permissionless. Swaps the full USDC balance for ARCFUN and sends it to dead.
-    ///         Reverts while `arcfun` is unset or cook is paused. No-op if USDC balance is 0.
-    function cook() external returns (uint256 arcfunOut) {
-        return _cook(0);
+    /// @notice Permissionless. Swaps `amountIn` USDC for ARCFUN and sends it to dead.
+    ///         Reverts while `arcfun` is unset or cook is paused. `amountIn == 0` is a no-op.
+    ///         `minArcfunOut` must be > 0 when swapping; there is no zero-slippage overload.
+    function cook(uint256 amountIn, uint256 minArcfunOut) external returns (uint256 arcfunOut) {
+        return _cook(amountIn, minArcfunOut);
     }
 
-    function cook(uint256 minArcfunOut) external returns (uint256 arcfunOut) {
-        return _cook(minArcfunOut);
-    }
-
-    function _cook(uint256 minArcfunOut) internal nonReentrant returns (uint256 arcfunOut) {
+    function _cook(uint256 amountIn, uint256 minArcfunOut) internal nonReentrant returns (uint256 arcfunOut) {
         address token = arcfun;
         if (token == address(0)) revert ArcfunUnset();
         if (cookPaused) revert CookIsPaused();
+        if (amountIn == 0) return 0;
 
-        uint256 usdcIn = IERC20Minimal(usdc).balanceOf(address(this));
-        if (usdcIn == 0) return 0;
+        uint256 bal = IERC20Minimal(usdc).balanceOf(address(this));
+        if (amountIn > bal) revert InsufficientUsdc();
+        if (minArcfunOut == 0) revert ZeroMinOut();
 
-        _approveMax(usdc, swapRouter, usdcIn);
+        _approveMax(usdc, swapRouter, amountIn);
 
         arcfunOut = ISwapRouter02(swapRouter).exactInputSingle(
             ISwapRouter02.ExactInputSingleParams({
@@ -111,13 +121,13 @@ contract Crucible {
                 tokenOut: token,
                 fee: arcfunPoolFee,
                 recipient: DEAD,
-                amountIn: usdcIn,
+                amountIn: amountIn,
                 amountOutMinimum: minArcfunOut,
                 sqrtPriceLimitX96: 0
             })
         );
 
-        emit Burn(token, usdcIn, arcfunOut, block.timestamp);
+        emit Burn(token, amountIn, arcfunOut, block.timestamp);
     }
 
     function _approveMax(address token, address spender, uint256 needed) internal {

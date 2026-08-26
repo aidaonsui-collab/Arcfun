@@ -62,6 +62,10 @@ contract ReferralRegistry {
         return codes[keccak256(bytes(code))].payout;
     }
 
+    function payoutOfHash(bytes32 h) external view returns (address) {
+        return codes[h].payout;
+    }
+
     function ownerOf(string calldata code) external view returns (address) {
         return codes[keccak256(bytes(code))].owner;
     }

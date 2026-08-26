@@ -37,10 +37,9 @@ contract CrucibleLockTest is Test {
             address(nfpm), address(usdc), address(router), address(crucible), address(registry), platform
         );
 
-        // token0 = USDC, token1 = launch. Factory-style: mint to this test, approve locker, lock.
         nfpm.mint(TOKEN_ID, address(this), address(usdc), address(launch), 10_000);
         nfpm.approve(address(locker), TOKEN_ID);
-        locker.lock(TOKEN_ID, creator, CrucibleLock.Kind.Meme, address(0));
+        locker.lock(TOKEN_ID, creator, CrucibleLock.Kind.Meme, address(0), "");
 
         arcfun.mint(address(router), 1_000_000e18);
         launch.mint(address(router), 1_000_000e18);
@@ -50,6 +49,12 @@ contract CrucibleLockTest is Test {
         if (usdcFee > 0) usdc.mint(address(nfpm), usdcFee);
         if (tokenFee > 0) launch.mint(address(nfpm), tokenFee);
         nfpm.setOwed(TOKEN_ID, uint128(usdcFee), uint128(tokenFee));
+    }
+
+    function _lockWithCode(uint256 id, string memory code) internal {
+        nfpm.mint(id, address(this), address(usdc), address(launch), 10_000);
+        nfpm.approve(address(locker), id);
+        locker.lock(id, creator, CrucibleLock.Kind.Meme, address(0), code);
     }
 
     function test_creatorSplitsStampedAtLock() public view {
@@ -74,45 +79,52 @@ contract CrucibleLockTest is Test {
     }
 
     function test_unsetArcfunHoldsUsdcOnCrucible() public {
-        uint256 fee = 10_000e6; // $10k USDC fee → easy bps
+        uint256 fee = 10_000e6;
         _seedFees(fee, 0);
 
         locker.collectFees(TOKEN_ID);
+        locker.projectBurn(TOKEN_ID, 1_000e18);
 
         // Meme, no referrer: creator 50%, crucible 30% (25+5), project burn 10%, platform 10%
         assertEq(usdc.balanceOf(creator), 5_000e6);
         assertEq(usdc.balanceOf(platform), 1_000e6);
         assertEq(usdc.balanceOf(address(crucible)), 3_000e6);
-        // project burn swapped USDC → launch to dead
         assertEq(launch.balanceOf(dead), 1_000e18);
         assertEq(usdc.balanceOf(dead), 0);
         assertEq(crucible.arcfun(), address(0));
 
         vm.expectRevert(Crucible.ArcfunUnset.selector);
-        crucible.cook();
+        crucible.cook(3_000e6, 3_000e18);
         assertEq(usdc.balanceOf(address(crucible)), 3_000e6);
         assertEq(arcfun.balanceOf(dead), 0);
     }
 
-    function test_setArcfunThenCollectCooksBurnTape() public {
+    function test_collectDoesNotAutoCook() public {
         uint256 fee = 10_000e6;
         _seedFees(fee, 0);
         crucible.setArcfun(address(arcfun));
 
         locker.collectFees(TOKEN_ID);
 
+        assertEq(usdc.balanceOf(address(crucible)), 3_000e6);
+        assertEq(arcfun.balanceOf(dead), 0);
+
+        crucible.cook(3_000e6, 3_000e18);
+        locker.projectBurn(TOKEN_ID, 1_000e18);
+
         assertEq(usdc.balanceOf(address(crucible)), 0);
-        // crucible slice 3000e6 USDC → 3000e18 ARCFUN to dead
         assertEq(arcfun.balanceOf(dead), 3_000e18);
-        assertEq(launch.balanceOf(dead), 1_000e18); // project burn
+        assertEq(launch.balanceOf(dead), 1_000e18);
     }
 
     function test_unknownReferrerGoesToCrucible() public {
         uint256 fee = 10_000e6;
         _seedFees(fee, 0);
         address stranger = makeAddr("stranger");
+        vm.prank(stranger);
+        registry.register("unrelated", stranger);
 
-        locker.collectFees(TOKEN_ID, stranger);
+        locker.collectFees(TOKEN_ID);
 
         assertEq(usdc.balanceOf(stranger), 0);
         assertEq(usdc.balanceOf(address(crucible)), 3_000e6);
@@ -120,12 +132,15 @@ contract CrucibleLockTest is Test {
     }
 
     function test_registeredReferrerGetsFiveHundredBps() public {
-        uint256 fee = 10_000e6;
-        _seedFees(fee, 0);
+        uint256 id = 11;
         vm.prank(referrer);
         registry.register("texxas", referrer);
+        _lockWithCode(id, "texxas");
 
-        locker.collectFees(TOKEN_ID, referrer);
+        usdc.mint(address(nfpm), 10_000e6);
+        nfpm.setOwed(id, 10_000e6, 0);
+
+        locker.collectFees(id);
 
         assertEq(usdc.balanceOf(referrer), 500e6);
         assertEq(usdc.balanceOf(address(crucible)), 2_500e6);
@@ -134,54 +149,60 @@ contract CrucibleLockTest is Test {
     }
 
     function test_rotatedPayoutReceivesFees() public {
-        uint256 fee = 10_000e6;
-        _seedFees(fee, 0);
+        uint256 id = 12;
         address payout = makeAddr("payout");
         vm.prank(referrer);
         registry.register("texxas", referrer);
+        _lockWithCode(id, "texxas");
         vm.prank(referrer);
         registry.rotatePayout("texxas", payout);
 
-        locker.collectFees(TOKEN_ID, payout);
+        usdc.mint(address(nfpm), 10_000e6);
+        nfpm.setOwed(id, 10_000e6, 0);
+        locker.collectFees(id);
 
         assertEq(usdc.balanceOf(payout), 500e6);
         assertEq(usdc.balanceOf(referrer), 0);
         assertEq(usdc.balanceOf(address(crucible)), 2_500e6);
-        // old payout no longer registered
         assertFalse(registry.isRegisteredPayout(referrer));
         assertTrue(registry.isRegisteredPayout(payout));
     }
 
-    function test_oldPayoutAfterRotateIsUnknown() public {
-        uint256 fee = 10_000e6;
-        _seedFees(fee, 0);
-        address payout = makeAddr("payout");
+    function test_attackerCannotSelfAssignReferrer() public {
+        uint256 id = 13;
+        address attacker = makeAddr("attacker");
         vm.prank(referrer);
         registry.register("texxas", referrer);
-        vm.prank(referrer);
-        registry.rotatePayout("texxas", payout);
+        vm.prank(attacker);
+        registry.register("unrelated", attacker);
+        _lockWithCode(id, "texxas");
 
-        locker.collectFees(TOKEN_ID, referrer);
-        assertEq(usdc.balanceOf(referrer), 0);
-        assertEq(usdc.balanceOf(address(crucible)), 3_000e6);
+        usdc.mint(address(nfpm), 10_000e6);
+        nfpm.setOwed(id, 10_000e6, 0);
+        vm.prank(attacker);
+        locker.collectFees(id);
+
+        assertEq(usdc.balanceOf(attacker), 0);
+        assertEq(usdc.balanceOf(referrer), 500e6);
     }
 
     function test_reflectHoldersLeg() public {
         uint256 id = 8;
         nfpm.mint(id, address(this), address(usdc), address(launch), 10_000);
         nfpm.approve(address(locker), id);
-        locker.lock(id, creator, CrucibleLock.Kind.Reflect, holders);
+        locker.lock(id, creator, CrucibleLock.Kind.Reflect, holders, "");
 
         usdc.mint(address(nfpm), 10_000e6);
         nfpm.setOwed(id, 10_000e6, 0);
 
         locker.collectFees(id);
+        locker.projectBurn(id, 1_500e18);
 
         assertEq(usdc.balanceOf(holders), 2_000e6);
         assertEq(usdc.balanceOf(creator), 2_000e6);
         assertEq(usdc.balanceOf(platform), 1_000e6);
         assertEq(usdc.balanceOf(address(crucible)), 3_500e6); // 3000 + 500 unknown ref
-        assertEq(launch.balanceOf(dead), 1_500e18); // project burn 15%
+        assertEq(launch.balanceOf(dead), 1_500e18);
         (address w, uint16 bps) = locker.creatorSplits(id);
         assertEq(w, creator);
         assertEq(bps, 2_000);
@@ -197,7 +218,7 @@ contract CrucibleLockTest is Test {
         _seedFees(10_000e6, 1e18);
         vm.prank(makeAddr("keeper"));
         locker.collectFees(TOKEN_ID);
-        // sell-side 1e18 token burn + project-burn 1000e6 USDC → 1000e18 launch
+        locker.projectBurn(TOKEN_ID, 1_000e18);
         assertEq(launch.balanceOf(dead), 1e18 + 1_000e18);
         assertEq(usdc.balanceOf(creator), 5_000e6);
     }
@@ -208,6 +229,23 @@ contract CrucibleLockTest is Test {
         nfpm.approve(address(locker), id);
         vm.prank(makeAddr("rando"));
         vm.expectRevert(CrucibleLock.NotFactory.selector);
-        locker.lock(id, creator, CrucibleLock.Kind.Meme, address(0));
+        locker.lock(id, creator, CrucibleLock.Kind.Meme, address(0), "");
+    }
+
+    function test_projectBurnZeroMinOutReverts() public {
+        _seedFees(10_000e6, 0);
+        locker.collectFees(TOKEN_ID);
+        vm.expectRevert(CrucibleLock.ZeroMinOut.selector);
+        locker.projectBurn(TOKEN_ID, 0);
+    }
+
+    function test_projectBurnCollapsedRateReverts() public {
+        _seedFees(10_000e6, 0);
+        locker.collectFees(TOKEN_ID);
+        router.setOutPerIn(1);
+        vm.expectRevert();
+        locker.projectBurn(TOKEN_ID, 1_000e18);
+        assertEq(locker.pendingProjectBurn(TOKEN_ID), 1_000e6);
+        assertEq(launch.balanceOf(dead), 0);
     }
 }

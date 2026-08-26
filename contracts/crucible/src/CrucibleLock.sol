@@ -4,7 +4,6 @@ pragma solidity ^0.8.26;
 import {IERC20Minimal} from "./interfaces/IERC20Minimal.sol";
 import {ISwapRouter02} from "./interfaces/ISwapRouter02.sol";
 import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionManager.sol";
-import {ICrucible} from "./interfaces/ICrucible.sol";
 import {IReferralRegistry} from "./interfaces/IReferralRegistry.sol";
 
 /// @title CrucibleLock
@@ -17,12 +16,12 @@ import {IReferralRegistry} from "./interfaces/IReferralRegistry.sol";
 ///   Reflect: Holders 2000, Crucible 3000, Creator 2000, Project burn 1500, Platform 1000, Referrer 500
 ///
 /// Sell path: collected launch token is 100% sent to dead. No USDC from sells.
-/// Project burn: that USDC slice buys the launch token on the same pool and sends it to dead.
+/// Project burn: that USDC slice is accrued, then `projectBurn(tokenId, minOut)` buys the launch
+/// token on the same pool and sends it to dead. Collect does not swap.
 ///
-/// Honest referrer constraint: Uni V3 LP fees accrue on the NFT. `collectFees` is batched, so
-/// this contract cannot know which trader's code applied to which dollars without a custom
-/// swap router. Referrer 500 bps goes to Crucible unless `referrer` is passed AND is a currently
-/// registered payout wallet in ReferralRegistry. Do not fake per-trade attribution.
+/// Referrer is bound at lock (code hash). Collect cannot name a payout. Rotate on the registry
+/// still flows through. Unknown / empty / unregistered code → Crucible takes 500 bps.
+/// Uni V3 collect is still batched: this is one referrer per launch, not per trade.
 contract CrucibleLock {
     enum Kind {
         Meme,
@@ -35,6 +34,7 @@ contract CrucibleLock {
         uint16 creatorBps;
         Kind kind;
         bool locked;
+        bytes32 referrerCodeHash;
     }
 
     struct Split {
@@ -74,6 +74,9 @@ contract CrucibleLock {
     address public platformWallet;
 
     mapping(uint256 => Position) public positions;
+    mapping(uint256 => uint256) public pendingProjectBurn;
+    /// @notice token => account => USDC (or other) that failed to push (e.g. Circle blacklist).
+    mapping(address => mapping(address => uint256)) public owed;
 
     uint256 private _unlocked = 1;
 
@@ -82,7 +85,14 @@ contract CrucibleLock {
     event PlatformWalletSet(address indexed wallet);
     event CrucibleSet(address indexed crucible);
     event ReferralRegistrySet(address indexed registry);
-    event Locked(uint256 indexed tokenId, address indexed creator, Kind kind, address holders, uint16 creatorBps);
+    event Locked(
+        uint256 indexed tokenId,
+        address indexed creator,
+        Kind kind,
+        address holders,
+        uint16 creatorBps,
+        bytes32 referrerCodeHash
+    );
     event FeesCollected(
         uint256 indexed tokenId,
         uint256 usdcAmount,
@@ -92,9 +102,11 @@ contract CrucibleLock {
         uint256 cruciblePaid
     );
     event ProjectBurn(address indexed token, uint256 usdcIn, uint256 tokenOut);
+    event Accrued(address indexed token, address indexed to, uint256 amount);
 
     error NotOwner();
     error NotFactory();
+    error NotNfpm();
     error ZeroAddress();
     error AlreadyLocked();
     error NotLocked();
@@ -105,6 +117,7 @@ contract CrucibleLock {
     error TransferFailed();
     error ApproveFailed();
     error NoNftWithdraw();
+    error ZeroMinOut();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -178,14 +191,16 @@ contract CrucibleLock {
         revert NoNftWithdraw();
     }
 
-    /// @notice Stamp creator + kind and take the LP NFT. Factory (or owner) only.
-    ///         If the NFT is already here (mint recipient = locker), only factory/owner can stamp —
-    ///         that stops a third party from claiming creator bps on a just-minted position.
-    function lock(uint256 tokenId, address creatorWallet, Kind kind, address holdersWallet)
-        external
-        onlyFactoryOrOwner
-        nonReentrant
-    {
+    /// @notice Stamp creator + kind + referrer code and take the LP NFT. Factory (or owner) only.
+    ///         Empty `referrerCode` means no referrer (500 bps → Crucible). Code need not be
+    ///         registered yet; collect resolves the current payout from the registry.
+    function lock(
+        uint256 tokenId,
+        address creatorWallet,
+        Kind kind,
+        address holdersWallet,
+        string calldata referrerCode
+    ) external onlyFactoryOrOwner nonReentrant {
         if (creatorWallet == address(0)) revert ZeroAddress();
         if (uint8(kind) > uint8(Kind.Reflect)) revert BadKind();
         if (kind == Kind.Reflect && holdersWallet == address(0)) revert HoldersRequired();
@@ -196,25 +211,61 @@ contract CrucibleLock {
             INonfungiblePositionManager(nfpm).transferFrom(nftOwner, address(this), tokenId);
         }
 
+        bytes32 refHash;
+        if (bytes(referrerCode).length != 0) {
+            refHash = keccak256(bytes(referrerCode));
+        }
+
         uint16 creatorBps = kind == Kind.Meme ? MEME_CREATOR_BPS : REFLECT_CREATOR_BPS;
         positions[tokenId] = Position({
             creator: creatorWallet,
             holders: kind == Kind.Reflect ? holdersWallet : address(0),
             creatorBps: creatorBps,
             kind: kind,
-            locked: true
+            locked: true,
+            referrerCodeHash: refHash
         });
-        emit Locked(tokenId, creatorWallet, kind, holdersWallet, creatorBps);
+        emit Locked(tokenId, creatorWallet, kind, holdersWallet, creatorBps, refHash);
     }
 
-    /// @notice MonLock-compatible. Permissionless keeper collect. No referrer → Crucible takes 500 bps.
+    /// @notice MonLock-compatible. Permissionless keeper collect. Pays USDC legs, burns sell-side
+    ///         launch token, accrues project-burn USDC. Does not swap. Does not cook.
     function collectFees(uint256 tokenId) external returns (uint256 amount0, uint256 amount1) {
-        return _collect(tokenId, address(0));
+        return _collect(tokenId);
     }
 
-    /// @notice Same split. `referrer` receives 500 bps only if it is a registered payout wallet.
-    function collectFees(uint256 tokenId, address referrer) external returns (uint256 amount0, uint256 amount1) {
-        return _collect(tokenId, referrer);
+    /// @notice Swap accrued project-burn USDC for the launch token and send it to dead.
+    ///         Keeper passes `minLaunchOut`. Reverts on collapsed price instead of burning dust.
+    function projectBurn(uint256 tokenId, uint256 minLaunchOut) external nonReentrant returns (uint256 tokenOut) {
+        Position memory pos = positions[tokenId];
+        if (!pos.locked) revert NotLocked();
+        uint256 usdcIn = pendingProjectBurn[tokenId];
+        if (usdcIn == 0) return 0;
+        if (minLaunchOut == 0) revert ZeroMinOut();
+
+        address quote = usdc;
+        address launch;
+        uint24 poolFee;
+        {
+            (,, address token0, address token1, uint24 fee,,,,,,,) =
+                INonfungiblePositionManager(nfpm).positions(tokenId);
+            poolFee = fee;
+            if (token0 == quote) launch = token1;
+            else if (token1 == quote) launch = token0;
+            else revert NotUsdcPool();
+        }
+
+        tokenOut = _projectBurn(quote, launch, poolFee, usdcIn, minLaunchOut);
+        pendingProjectBurn[tokenId] = 0;
+        emit ProjectBurn(launch, usdcIn, tokenOut);
+    }
+
+    /// @notice Pull a failed push (blacklist, etc.). Anyone may push to `to`.
+    function withdrawOwed(address token, address to) external nonReentrant {
+        uint256 amount = owed[token][to];
+        if (amount == 0) return;
+        _pay(token, to, amount);
+        owed[token][to] = 0;
     }
 
     /// @notice MonLock-compatible view: stamped creator wallet + bps.
@@ -264,15 +315,11 @@ contract CrucibleLock {
         Kind kind;
         uint256 usdcGot;
         uint256 launchGot;
-        uint256 projectTokenOut;
+        bytes32 referrerCodeHash;
         bool payReferrer;
     }
 
-    function _collect(uint256 tokenId, address referrer)
-        internal
-        nonReentrant
-        returns (uint256 amount0, uint256 amount1)
-    {
+    function _collect(uint256 tokenId) internal nonReentrant returns (uint256 amount0, uint256 amount1) {
         Position memory pos = positions[tokenId];
         if (!pos.locked) revert NotLocked();
 
@@ -281,6 +328,7 @@ contract CrucibleLock {
         c.creator = pos.creator;
         c.holders = pos.holders;
         c.kind = pos.kind;
+        c.referrerCodeHash = pos.referrerCodeHash;
         {
             (,, address token0, address token1, uint24 poolFee,,,,,,,) =
                 INonfungiblePositionManager(nfpm).positions(tokenId);
@@ -308,36 +356,26 @@ contract CrucibleLock {
         // Sell path: 100% of collected launch token is burned. Nobody is paid.
         if (c.launchGot > 0) _pay(c.launch, DEAD, c.launchGot);
 
-        c.payReferrer =
-            referrer != address(0) && IReferralRegistry(referralRegistry).isRegisteredPayout(referrer);
+        if (c.referrerCodeHash != bytes32(0)) {
+            c.paidReferrer = IReferralRegistry(referralRegistry).payoutOfHash(c.referrerCodeHash);
+        }
+        c.payReferrer = c.paidReferrer != address(0);
         Split memory s = quoteSplit(c.usdcGot, c.kind, c.payReferrer);
-        _payoutLegs(c, s, referrer);
+        _payoutLegs(tokenId, c, s);
 
-        if (ICrucible(crucible).arcfun() != address(0) && !ICrucible(crucible).cookPaused()) {
-            ICrucible(crucible).cook();
-        }
-
-        emit FeesCollected(
-            tokenId, c.usdcGot, c.launchGot, c.paidReferrer, s.referrer, s.crucible
-        );
-        if (s.projectBurn > 0) emit ProjectBurn(c.launch, s.projectBurn, c.projectTokenOut);
+        emit FeesCollected(tokenId, c.usdcGot, c.launchGot, c.paidReferrer, s.referrer, s.crucible);
     }
 
-    function _payoutLegs(CollectCache memory c, Split memory s, address referrer) internal {
-        if (s.creator > 0) _pay(c.quote, c.creator, s.creator);
-        if (s.platform > 0) _pay(c.quote, platformWallet, s.platform);
-        if (s.holders > 0) _pay(c.quote, c.holders, s.holders);
-        if (s.referrer > 0) {
-            _pay(c.quote, referrer, s.referrer);
-            c.paidReferrer = referrer;
-        }
-        if (s.projectBurn > 0) {
-            c.projectTokenOut = _projectBurn(c.quote, c.launch, c.poolFee, s.projectBurn);
-        }
-        if (s.crucible > 0) _pay(c.quote, crucible, s.crucible);
+    function _payoutLegs(uint256 tokenId, CollectCache memory c, Split memory s) internal {
+        if (s.creator > 0) _payOrAccrue(c.quote, c.creator, s.creator);
+        if (s.platform > 0) _payOrAccrue(c.quote, platformWallet, s.platform);
+        if (s.holders > 0) _payOrAccrue(c.quote, c.holders, s.holders);
+        if (s.referrer > 0) _payOrAccrue(c.quote, c.paidReferrer, s.referrer);
+        if (s.projectBurn > 0) pendingProjectBurn[tokenId] += s.projectBurn;
+        if (s.crucible > 0) _payOrAccrue(c.quote, crucible, s.crucible);
     }
 
-    function _projectBurn(address quote, address launch, uint24 poolFee, uint256 usdcIn)
+    function _projectBurn(address quote, address launch, uint24 poolFee, uint256 usdcIn, uint256 minLaunchOut)
         internal
         returns (uint256 tokenOut)
     {
@@ -349,15 +387,24 @@ contract CrucibleLock {
                 fee: poolFee,
                 recipient: DEAD,
                 amountIn: usdcIn,
-                amountOutMinimum: 0,
+                amountOutMinimum: minLaunchOut,
                 sqrtPriceLimitX96: 0
             })
         );
     }
 
     function onERC721Received(address, address, uint256, bytes calldata) external view returns (bytes4) {
-        if (msg.sender != nfpm) revert NotFactory();
+        if (msg.sender != nfpm) revert NotNfpm();
         return this.onERC721Received.selector;
+    }
+
+    function _payOrAccrue(address token, address to, uint256 amount) internal {
+        if (amount == 0 || to == address(0)) return;
+        (bool ok, bytes memory data) =
+            token.call(abi.encodeWithSelector(IERC20Minimal.transfer.selector, to, amount));
+        if (ok && (data.length == 0 || abi.decode(data, (bool)))) return;
+        owed[token][to] += amount;
+        emit Accrued(token, to, amount);
     }
 
     function _pay(address token, address to, uint256 amount) internal {
