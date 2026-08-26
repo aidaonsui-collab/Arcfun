@@ -6,6 +6,9 @@ export function Footer() {
     <footer className="border-t border-hair mt-8">
       <div className="max-w-desk mx-auto px-4 sm:px-10 py-10 flex items-center justify-end gap-5 text-[13px] text-t3">
         <div className="flex items-center gap-5 font-medium text-t2">
+          <Link href="/crucible" className="hover:text-white">
+            Crucible
+          </Link>
           <Link href="/docs" className="hover:text-white">
             Docs
           </Link>

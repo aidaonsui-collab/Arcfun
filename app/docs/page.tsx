@@ -11,6 +11,7 @@ const TOC = [
   { href: '#pairs', label: 'Pairs' },
   { href: '#launches', label: 'Launch types' },
   { href: '#fees', label: 'LP fees' },
+  { href: '#crucible', label: 'Crucible' },
   { href: '#portfolio', label: 'Portfolio' },
   { href: '#studio', label: 'ArcStudio' },
   { href: '#agents', label: 'Agents' },
@@ -114,12 +115,12 @@ export default function DocsPage() {
                 Instant
               </h3>
               <p className="mt-2 mb-4 text-[14px] text-t2 leading-relaxed">
-                Tradable from block one. Quote-side LP fees go to the creator and the platform.
+                Tradable from block one. Quote-side LP fees split across creator, Crucible, project burn, platform, and referrer.
                 Launch-token fees are burned.
               </p>
               <ul className="m-0 pl-4 text-[13px] text-t2 space-y-1.5 leading-snug">
                 <li>Full float on Uniswap V3 at creation</li>
-                <li>70% creator · 30% platform</li>
+                <li>Creator 50 · Crucible 25 · project burn 10 · platform 10 · referrer 5</li>
                 <li>Optional USDC first buy in the create tx</li>
               </ul>
             </article>
@@ -130,7 +131,7 @@ export default function DocsPage() {
                 Instant Reflection
               </h3>
               <p className="mt-2 mb-4 text-[14px] text-t2 leading-relaxed">
-                Same Instant pool, but half of quote-side LP fees are distributed to holders of
+                Same Instant pool, but 20% of quote-side LP fees are distributed to holders of
                 the token. Claim from{' '}
                 <Link href="/portfolio" className="text-lime-t font-semibold hover:text-white">
                   Portfolio
@@ -138,8 +139,8 @@ export default function DocsPage() {
                 .
               </p>
               <ul className="m-0 pl-4 text-[13px] text-t2 space-y-1.5 leading-snug">
-                <li>50% holders · 25% creator · 25% platform</li>
-                <li>Default reward is Arc USDC</li>
+                <li>Holders 20 · Crucible 30 · Creator 20 · project burn 15 · platform 10 · referrer 5</li>
+                <li>Default reward is Arc USDC. Protocol-token holders earn via Crucible, not pad-wide USDC</li>
                 <li>Share scales with how much of the token you hold</li>
               </ul>
             </article>
@@ -169,9 +170,12 @@ export default function DocsPage() {
                   {[
                     ['Pair', 'TOKEN / USDC', 'TOKEN / USDC'],
                     ['Pool fee', '1%', '1%'],
-                    ['Creator', '70%', '25%'],
-                    ['Holders', '—', '50% via reflect()'],
-                    ['Platform', '30%', '25%'],
+                    ['Creator', '50%', '20%'],
+                    ['Crucible', '25%', '30%'],
+                    ['Holders', '—', '20% via reflect()'],
+                    ['Project burn', '10%', '15%'],
+                    ['Platform', '10%', '10%'],
+                    ['Referrer', '5%', '5%'],
                     ['Launch-token fees', 'Burned', 'Burned'],
                     ['Supply', '1,000,000,000', '1,000,000,000'],
                   ].map(([k, a, b]) => (
@@ -191,8 +195,11 @@ export default function DocsPage() {
               <p className="m-0 text-[13px] font-semibold text-t3 mb-3">Meme — quote-side split</p>
               <FeeBar
                 parts={[
-                  { label: 'Creator 70%', pct: 70, className: 'bg-lime' },
-                  { label: 'Platform 30%', pct: 30, className: 'bg-s3' },
+                  { label: 'Creator 50%', pct: 50, className: 'bg-lime' },
+                  { label: 'Crucible 25%', pct: 25, className: 'bg-lime-t' },
+                  { label: 'Project burn 10%', pct: 10, className: 'bg-coral' },
+                  { label: 'Platform 10%', pct: 10, className: 'bg-s3' },
+                  { label: 'Referrer 5%', pct: 5, className: 'bg-amber-500' },
                 ]}
               />
             </div>
@@ -202,9 +209,12 @@ export default function DocsPage() {
               </p>
               <FeeBar
                 parts={[
-                  { label: 'Holders 50%', pct: 50, className: 'bg-violet-500' },
-                  { label: 'Creator 25%', pct: 25, className: 'bg-lime' },
-                  { label: 'Platform 25%', pct: 25, className: 'bg-s3' },
+                  { label: 'Holders 20%', pct: 20, className: 'bg-violet-500' },
+                  { label: 'Crucible 30%', pct: 30, className: 'bg-lime-t' },
+                  { label: 'Creator 20%', pct: 20, className: 'bg-lime' },
+                  { label: 'Project burn 15%', pct: 15, className: 'bg-coral' },
+                  { label: 'Platform 10%', pct: 10, className: 'bg-s3' },
+                  { label: 'Referrer 5%', pct: 5, className: 'bg-amber-500' },
                 ]}
               />
             </div>
@@ -224,7 +234,28 @@ export default function DocsPage() {
               position, forwards USDC, then calls <code className="text-t2">reflect()</code> so
               balances become claimable.
             </li>
+            <li>
+              Missing referrer on a buy falls into Crucible. Sell: 100% of the launch-token fee
+              is burned. Nobody is paid — not even the creator.
+            </li>
           </ul>
+          <p className="mt-4 mb-0 max-w-2xl text-[13px] text-t3 leading-relaxed">
+            Next — live pools still use 70/30 (Meme) or 50/25/25 (Reflection). Contracts still
+            need to ship before Crucible, project-burn, and referrer legs pay on-chain.
+          </p>
+        </section>
+
+        <section id="crucible" className="scroll-mt-24 mt-14">
+          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">Crucible</h2>
+          <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
+            Crucible is the buy/burn engine for the protocol token. A slice of quote-side USDC
+            fees buys $ARCFUN and sends it to the dead wallet. Protocol-token holders do not get
+            pad-wide USDC — Crucible is their reward.{' '}
+            <Link href="/crucible" className="text-lime-t font-semibold hover:text-white">
+              Open Crucible
+            </Link>
+            .
+          </p>
         </section>
 
         {/* Portfolio */}
@@ -286,7 +317,7 @@ export default function DocsPage() {
               </li>
               <li>
                 Holding more of a reflection token earns a larger share of that token&apos;s
-                50% holder leg. Meme Instant launches do not pay holders.
+                20% holder leg. Meme Instant launches do not pay holders — they feed Crucible instead.
               </li>
               <li>
                 Fees are not streamed per swap. A keeper collects the locked LP, forwards USDC,

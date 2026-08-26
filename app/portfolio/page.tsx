@@ -11,11 +11,12 @@ import {
   useWriteContract,
   useWaitForTransactionReceipt,
 } from 'wagmi'
-import { Loader2 } from 'lucide-react'
+import { Check, Copy, Loader2 } from 'lucide-react'
 import type { Address } from 'viem'
 import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { REFLECTION_REWARD_ABI, type ReflectionRewardLine } from '@/lib/arc-reflection-rewards'
 import { fmtUsd } from '@/lib/ui-format'
+import { getOrCreateReferralCode, referralLink } from '@/lib/crucible'
 
 type PortfolioPayload = {
   address: string
@@ -38,6 +39,62 @@ function fmtReward(n: number): string {
   if (n >= 0.01) return `$${n.toFixed(4)}`
   if (n > 0) return `$${n.toFixed(6)}`
   return '$0.00'
+}
+
+function ReferralRow({ wallet }: { wallet: string }) {
+  const [code, setCode] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    setCode(getOrCreateReferralCode(wallet))
+  }, [wallet])
+
+  const link = code ? referralLink(code) : ''
+
+  const copy = () => {
+    if (!link) return
+    navigator.clipboard
+      .writeText(link)
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      })
+      .catch(() => {})
+  }
+
+  return (
+    <section className="border border-hair rounded-[24px] bg-s1 overflow-hidden mb-6">
+      <div className="px-5 py-4 border-b border-hair2">
+        <h2 className="m-0 text-[17px] font-semibold tracking-tightish">Referrer</h2>
+        <p className="m-0 mt-0.5 text-[13px] text-t3">
+          Share an opaque link. Missing referrer on a buy falls into Crucible. Payout trail may be
+          public.
+        </p>
+      </div>
+      <div className="px-5 py-4 grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-4 items-center">
+        <div className="min-w-0">
+          <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-t3">Your link</p>
+          <p className="m-0 mt-1 text-sm font-semibold tabular-nums tracking-tightish truncate">
+            {link || '…'}
+          </p>
+          <p className="m-0 mt-2 text-[13px] text-t3">
+            Earned USDC{' '}
+            <span className="text-white font-semibold tabular-nums">$0.00</span>
+            <span className="ml-1.5 text-[11px] font-semibold uppercase tracking-wide">preview</span>
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={copy}
+          disabled={!link}
+          className="h-9 inline-flex items-center justify-center gap-1.5 px-3.5 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white disabled:opacity-40"
+        >
+          {copied ? <Check className="w-3.5 h-3.5 text-lime-t" /> : <Copy className="w-3.5 h-3.5" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+    </section>
+  )
 }
 
 export default function PortfolioPage() {
@@ -222,6 +279,8 @@ export default function PortfolioPage() {
             <p className="m-0 mt-1 text-[13px] text-t3">Pushed or manual claim()</p>
           </div>
         </section>
+
+        <ReferralRow wallet={address} />
 
         {portfolio?.usdcRewards.otherClaimable?.length ? (
           <p className="mb-4 text-sm text-t3">

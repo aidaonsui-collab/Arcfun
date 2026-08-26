@@ -6,6 +6,7 @@ import { Loader2 } from 'lucide-react'
 import type { PoolToken, VolumeWindow } from '@/lib/tokens'
 import { volumeForWindow } from '@/lib/tokens'
 import { TokenCard, TokenRailCard } from '@/components/TokenCard'
+import { CrucibleChip } from '@/components/CrucibleChip'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
 
 type SortKey = 'Top volume' | 'New' | 'Top MC'
@@ -103,6 +104,7 @@ export function HomeClient({
             <h1 className="m-0 text-[26px] sm:text-[32px] leading-[1.15] font-bold tracking-display text-pretty text-white">
               The best way to launch and trade tokens on Arc.
             </h1>
+            <CrucibleChip className="self-start" />
             <div className="flex flex-wrap gap-3 pt-1 lg:hidden">
               <Link
                 href="/create"

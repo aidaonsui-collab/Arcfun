@@ -9,8 +9,9 @@ import { usePathname, useRouter } from 'next/navigation'
 import { FormEvent, useEffect, useState } from 'react'
 import { useAccount, useBalance, useConnect, useDisconnect } from 'wagmi'
 import { formatUnits } from 'viem'
-import { BookOpen, CircleUser, Home, LayoutGrid, Menu, PlusCircle, Wallet, X, type LucideIcon } from 'lucide-react'
+import { BookOpen, CircleUser, Flame, Home, LayoutGrid, Menu, PlusCircle, Wallet, X, type LucideIcon } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
+import { CrucibleChip } from '@/components/CrucibleChip'
 import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
 
 const SUPPORTED_CHAIN_IDS = new Set([ARC_CHAIN_ID])
@@ -147,6 +148,8 @@ export function SiteHeader() {
 
         <div className="flex-1" />
 
+        <CrucibleChip compact className="hidden lg:inline-flex" />
+
         <Link
           href="/studio"
           className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
@@ -268,6 +271,7 @@ export function SiteHeader() {
               </form>
 
               {navRow('/', 'Home', Home)}
+              {navRow('/crucible', 'Crucible', Flame)}
               {navRow('/studio', 'Studio', LayoutGrid)}
               {navRow('/studio/create', 'Create collection', PlusCircle)}
 
