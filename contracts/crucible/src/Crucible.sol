@@ -18,6 +18,9 @@ contract Crucible {
     uint24 public arcfunPoolFee;
     bool public cookPaused;
 
+    /// @notice Addresses allowed to execute the swap. The owner is always allowed.
+    mapping(address => bool) public keepers;
+
     address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
 
     uint256 private _unlocked = 1;
@@ -26,11 +29,13 @@ contract Crucible {
     event ArcfunSet(address indexed token);
     event ArcfunPoolFeeSet(uint24 fee);
     event CookPausedSet(bool paused);
+    event KeeperSet(address indexed keeper, bool allowed);
     event SwapRouterSet(address indexed router);
     /// @notice Burn tape row. `token` is the ARCFUN that was bought and sent to dead.
     event Burn(address indexed token, uint256 usdcIn, uint256 arcfunOut, uint256 ts);
 
     error NotOwner();
+    error NotKeeper();
     error ZeroAddress();
     error ArcfunUnset();
     error ArcfunAlreadySet();
@@ -44,6 +49,14 @@ contract Crucible {
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
+        _;
+    }
+
+    /// @dev Swap execution is keeper-gated. `minArcfunOut` is supplied by the caller, so leaving
+    ///      this open let anyone pass 1 and accept a manipulated price — the ZeroMinOut guard only
+    ///      rejects a literal zero. A caller-chosen bound cannot protect against the caller.
+    modifier onlyKeeper() {
+        if (msg.sender != owner && !keepers[msg.sender]) revert NotKeeper();
         _;
     }
 
@@ -96,10 +109,16 @@ contract Crucible {
         emit CookPausedSet(paused);
     }
 
+    function setKeeper(address keeper, bool allowed) external onlyOwner {
+        if (keeper == address(0)) revert ZeroAddress();
+        keepers[keeper] = allowed;
+        emit KeeperSet(keeper, allowed);
+    }
+
     /// @notice Permissionless. Swaps `amountIn` USDC for ARCFUN and sends it to dead.
     ///         Reverts while `arcfun` is unset or cook is paused. `amountIn == 0` is a no-op.
     ///         `minArcfunOut` must be > 0 when swapping; there is no zero-slippage overload.
-    function cook(uint256 amountIn, uint256 minArcfunOut) external returns (uint256 arcfunOut) {
+    function cook(uint256 amountIn, uint256 minArcfunOut) external onlyKeeper returns (uint256 arcfunOut) {
         return _cook(amountIn, minArcfunOut);
     }
 

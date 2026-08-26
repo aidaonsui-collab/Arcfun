@@ -73,6 +73,9 @@ contract CrucibleLock {
     address public referralRegistry;
     address public platformWallet;
 
+    /// @notice Addresses allowed to execute the project-burn swap. The owner is always allowed.
+    mapping(address => bool) public keepers;
+
     mapping(uint256 => Position) public positions;
     mapping(uint256 => uint256) public pendingProjectBurn;
     /// @notice token => account => USDC (or other) that failed to push (e.g. Circle blacklist).
@@ -83,6 +86,7 @@ contract CrucibleLock {
     event OwnerTransferred(address indexed previous, address indexed next);
     event FactorySet(address indexed factory);
     event PlatformWalletSet(address indexed wallet);
+    event KeeperSet(address indexed keeper, bool allowed);
     event CrucibleSet(address indexed crucible);
     event ReferralRegistrySet(address indexed registry);
     event Locked(
@@ -105,6 +109,7 @@ contract CrucibleLock {
     event Accrued(address indexed token, address indexed to, uint256 amount);
 
     error NotOwner();
+    error NotKeeper();
     error NotFactory();
     error NotNfpm();
     error ZeroAddress();
@@ -121,6 +126,15 @@ contract CrucibleLock {
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
+        _;
+    }
+
+    /// @dev Only the swap is gated; collectFees stays permissionless because it no longer swaps.
+    ///      `minLaunchOut` is chosen by the caller, so an open entrypoint let an attacker pass 1,
+    ///      clearing the ZeroMinOut guard while accepting any price. A caller-supplied floor is
+    ///      not a defence against that caller.
+    modifier onlyKeeper() {
+        if (msg.sender != owner && !keepers[msg.sender]) revert NotKeeper();
         _;
     }
 
@@ -172,6 +186,12 @@ contract CrucibleLock {
         if (wallet == address(0)) revert ZeroAddress();
         platformWallet = wallet;
         emit PlatformWalletSet(wallet);
+    }
+
+    function setKeeper(address keeper, bool allowed) external onlyOwner {
+        if (keeper == address(0)) revert ZeroAddress();
+        keepers[keeper] = allowed;
+        emit KeeperSet(keeper, allowed);
     }
 
     function setCrucible(address crucible_) external onlyOwner {
@@ -235,8 +255,14 @@ contract CrucibleLock {
     }
 
     /// @notice Swap accrued project-burn USDC for the launch token and send it to dead.
-    ///         Keeper passes `minLaunchOut`. Reverts on collapsed price instead of burning dust.
-    function projectBurn(uint256 tokenId, uint256 minLaunchOut) external nonReentrant returns (uint256 tokenOut) {
+    ///         Keeper-gated: `minLaunchOut` is caller-supplied, so an open entrypoint could pass 1
+    ///         and accept a manipulated price. Reverts on a collapsed price instead of burning dust.
+    function projectBurn(uint256 tokenId, uint256 minLaunchOut)
+        external
+        onlyKeeper
+        nonReentrant
+        returns (uint256 tokenOut)
+    {
         Position memory pos = positions[tokenId];
         if (!pos.locked) revert NotLocked();
         uint256 usdcIn = pendingProjectBurn[tokenId];

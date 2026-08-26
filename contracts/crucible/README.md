@@ -11,11 +11,29 @@ Fee engine for **new** ArcFun launches. Live Instant / Reflection lockers are **
 
 | Contract | Role |
 |---|---|
-| `Crucible` | Holds quote-side Crucible USDC. `setArcfun(address)` is **one-shot**. `cook(amountIn, minOut)` swaps USDC→ARCFUN on SwapRouter02 and sends ARCFUN to `0x…dead`. No zero-slippage overload. |
-| `CrucibleLock` | Holds the Uni V3 LP NFT. Permissionless `collectFees(tokenId)` (MonLock-compatible) pays USDC legs and burns sell-side token. **Does not swap. Does not cook.** `projectBurn(tokenId, minOut)` does the launch-token buy/burn. Referrer code is stamped at `lock`. **No NFT withdraw.** |
+| `Crucible` | Holds quote-side Crucible USDC. `setArcfun(address)` is **one-shot**. `cook(amountIn, minOut)` swaps USDC→ARCFUN on SwapRouter02 and sends ARCFUN to `0x…dead`. No zero-slippage overload, and **keeper-gated** (see Swap execution). |
+| `CrucibleLock` | Holds the Uni V3 LP NFT. Permissionless `collectFees(tokenId)` (MonLock-compatible) pays USDC legs and burns sell-side token. **Does not swap. Does not cook.** `projectBurn(tokenId, minOut)` does the launch-token buy/burn and is **keeper-gated**. Referrer code is stamped at `lock`. **No NFT withdraw.** |
 | `ReferralRegistry` | Public first-come `code → payout` wallet. Owner of a code can `rotatePayout`. Codes are opaque strings, never `0x` addresses. Links: `https://www.arcfun.co/r/{code}`. |
 
 Optional minimal interfaces: `ISwapRouter02`, `INonfungiblePositionManager`, `ICrucible`, `IReferralRegistry`.
+
+## Swap execution is keeper-gated
+
+`collectFees(tokenId)` stays permissionless — it moves USDC to fixed destinations and burns the
+sell-side token, and it does not swap, so it is not price-sensitive.
+
+The two entrypoints that **do** swap, `CrucibleLock.projectBurn` and `Crucible.cook`, are
+restricted to the owner or an address allowlisted via `setKeeper(address, bool)`.
+
+Requiring `minOut != 0` is not sufficient on its own. Both functions take the bound from the
+caller, so while they were open, an attacker could move the pool, pass `minOut = 1` to clear the
+zero-check, and let the contract buy at the manipulated price in the same transaction — spending
+the whole budget for dust. A caller-supplied floor cannot protect against that caller.
+
+A TWAP-derived floor was considered instead. It was rejected for now because these pools launch
+with `observationCardinality = 1`, which makes the TWAP manipulable in the same transaction it is
+read; it would offer the appearance of protection without the substance. If cardinality is raised
+at launch, an on-chain floor becomes a viable way to reopen these entrypoints to everyone.
 
 ## What `cook()` does while `arcfun` is unset
 
@@ -40,7 +58,7 @@ Uniswap V3 pool fee on Instant launches is 1% (`fee = 10000`).
 **Reflect:** Holders 2000, Crucible 3000, Creator 2000, Project burn 1500, Platform 1000, Referrer 500
 
 - **Sell path:** collected launch token is 100% sent to dead. Nobody is paid. No USDC from sells.
-- **Project burn:** that USDC slice is accrued on collect. `projectBurn(tokenId, minLaunchOut)` buys the **launch** token on the same pool and sends it to dead. Collapsed price reverts instead of burning dust.
+- **Project burn:** that USDC slice is accrued on collect. A keeper calls `projectBurn(tokenId, minLaunchOut)`, which buys the **launch** token on the same pool and sends it to dead. Collapsed price reverts instead of burning dust.
 - **Missing / unknown referrer:** referrer 500 bps falls into Crucible (held until cook).
 - Rounding dust goes to Crucible.
 - A blacklisted payee (Circle USDC) accrues to `owed[token][account]` instead of reverting the whole collect. `withdrawOwed(token, to)` pulls it later.
@@ -94,7 +112,8 @@ Do not run this against Arc mainnet from this PR.
 2. Deploy `Crucible(usdc, swapRouter02, 10000)` — leave `arcfun` unset.
 3. Deploy `CrucibleLock(nfpm, usdc, swapRouter02, crucible, registry, platformWallet)`.
 4. `lock.setFactory(newLaunchFactory)` when the new factory exists.
-5. After `$ARCFUN` exists and a USDC/ARCFUN 1% pool is live: `crucible.setArcfun(arcfun)` then a keeper may `cook(amountIn, minOut)`.
+5. Allowlist the keeper on both contracts: `lock.setKeeper(keeper, true)` and `crucible.setKeeper(keeper, true)`.
+6. After `$ARCFUN` exists and a USDC/ARCFUN 1% pool is live: `crucible.setArcfun(arcfun)` then a keeper may `cook(amountIn, minOut)`.
 
 ## Tests
 
