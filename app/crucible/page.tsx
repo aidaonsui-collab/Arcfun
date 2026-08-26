@@ -13,6 +13,7 @@ import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { ageLabel, fmtCompact, fmtUsd } from '@/lib/ui-format'
 import { ExternalLink } from 'lucide-react'
 import { CrucibleFeePath } from '@/components/CrucibleFeePath'
+import { CrucibleCountUp } from '@/components/CrucibleChip'
 
 export const revalidate = 20
 
@@ -20,15 +21,6 @@ export const metadata: Metadata = {
   title: 'Crucible — Arcfun',
   description:
     'Crucible buys $ARCFUN from quote-side USDC fees and burns it. $ARCFUN holders do not get pad-wide USDC.',
-}
-
-function fmtBurnedPct(p: number | null | undefined): string {
-  if (p == null || !Number.isFinite(p)) return '—'
-  if (p <= 0) return '0%'
-  if (p < 0.1) return '<0.1%'
-  if (p >= 99.95) return '100%'
-  if (p < 1) return `${p.toFixed(2)}%`
-  return `${p.toFixed(1)}%`
 }
 
 async function liveBurnedPct(): Promise<number | null> {
@@ -53,7 +45,9 @@ export default async function CruciblePage() {
   const tiles = [
     {
       label: 'Burned',
-      value: fmtBurnedPct(stats.burnedPct),
+      value: (
+        <CrucibleCountUp value={stats.burnedPct ?? 0} kind="pct" />
+      ),
       sub: 'of supply',
       subColor: 'var(--limeT)',
       bar: stats.burnedPct,
@@ -62,7 +56,7 @@ export default async function CruciblePage() {
     },
     {
       label: 'USDC in',
-      value: fmtUsd(stats.usdcIn),
+      value: <CrucibleCountUp value={stats.usdcIn} kind="usd" />,
       sub: 'quote fees into Crucible',
       subColor: 'var(--t3)',
       bar: null as number | null,
@@ -71,7 +65,7 @@ export default async function CruciblePage() {
     },
     {
       label: 'ARCFUN bought',
-      value: fmtCompact(stats.arcfunBought),
+      value: <CrucibleCountUp value={stats.arcfunBought} kind="compact" />,
       sub: 'from USDC burns',
       subColor: 'var(--limeT)',
       bar: null,
@@ -80,7 +74,7 @@ export default async function CruciblePage() {
     },
     {
       label: 'ARCFUN removed',
-      value: fmtCompact(stats.arcfunAtDead),
+      value: <CrucibleCountUp value={stats.arcfunAtDead} kind="compact" />,
       sub: `${meltCount} burn${meltCount === 1 ? '' : 's'}`,
       subColor: 'var(--limeT)',
       bar: null,
@@ -134,7 +128,7 @@ export default async function CruciblePage() {
                 {m.bar != null && Number.isFinite(m.bar) ? (
                   <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
                     <div
-                      className="h-full rounded-full"
+                      className="h-full rounded-full crucible-bar"
                       style={{
                         width: `${Math.min(100, Math.max(0, m.bar))}%`,
                         background: 'var(--limeT)',
@@ -198,9 +192,22 @@ export default async function CruciblePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {stats.melts.map((m) => (
-                    <tr key={m.id} className="border-b border-hair2 last:border-0">
-                      <td className="px-5 py-3 text-t2 tabular-nums">{ageLabel(m.ts)} ago</td>
+                  {stats.melts.map((m, i) => (
+                    <tr
+                      key={m.id}
+                      className="tape-row border-b border-hair2 last:border-0"
+                      style={{ ['--tape-i' as string]: i }}
+                    >
+                      <td className="px-5 py-3 text-t2 tabular-nums">
+                        <span className="inline-flex items-center gap-2">
+                          {i === 0 ? (
+                            <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot shrink-0" />
+                          ) : (
+                            <span className="w-1.5 h-1.5 shrink-0" aria-hidden />
+                          )}
+                          {ageLabel(m.ts)} ago
+                        </span>
+                      </td>
                       <td className="px-5 py-3 text-right tabular-nums font-semibold">
                         {fmtUsd(m.usdcIn)}
                       </td>

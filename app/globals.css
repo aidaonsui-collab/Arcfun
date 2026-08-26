@@ -183,13 +183,70 @@
   .rise-in,
   .rise-in-2,
   .rise-in-3,
-  .success-pop {
+  .success-pop,
+  .crucible-in,
+  .tape-row,
+  .crucible-bar,
+  .live-dot {
     animation: none;
+  }
+  .crucible-xfade {
+    transition: none;
   }
 }
 
 .live-dot {
   animation: livePulse 1.8s ease-in-out infinite;
+}
+
+@keyframes crucible-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes tape-row {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes crucible-bar {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.crucible-in {
+  transform-origin: center;
+  animation: crucible-in 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.tape-row {
+  animation: tape-row 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--tape-i, 0) * 42ms);
+}
+
+.crucible-bar {
+  transform-origin: left center;
+  animation: crucible-bar 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.crucible-xfade {
+  transition: opacity 320ms ease;
 }
 
 /* Hero backdrop: concentric arcs radiating from above the fold, fading out toward the
