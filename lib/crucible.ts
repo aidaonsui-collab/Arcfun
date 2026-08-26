@@ -73,8 +73,8 @@ export const REFLECT_FEE_LEGS: FeeLeg[] = [
   { id: 'crucible', label: 'Crucible', bps: 3_000, swatch: 'bg-lime-t', color: '#7ec0f7' },
   { id: 'creator', label: 'Creator', bps: 2_000, swatch: 'bg-lime', color: '#2f84db' },
   { id: 'projectBurn', label: 'Project burn', bps: 1_500, swatch: 'bg-coral', color: '#ff7a62' },
-  { id: 'platform', label: 'Platform', bps: 1_000, swatch: 'bg-s3' },
-  { id: 'referrer', label: 'Referrer', bps: 500, swatch: 'bg-amber-500' },
+  { id: 'platform', label: 'Platform', bps: 1_000, swatch: 'bg-s3', color: '#9aa3b5' },
+  { id: 'referrer', label: 'Referrer', bps: 500, swatch: 'bg-amber-500', color: '#f5b942' },
 ]
 
 /** On-chain today (MonLock) — shown only as a "next" footnote, never as the product bar. */
