@@ -50,41 +50,43 @@ export type FeeLeg = {
   label: string
   /** Share of the quote-side 1% USDC fee (10_000 = 100% of that fee). */
   bps: number
-  /** Tailwind background class for stacked bars. */
+  /** Tailwind background class (chips). */
   swatch: string
+  /** Hex for pie / bar charts. Distinct from Tolly stacked bars. */
+  color: string
 }
 
 export type FeeSplitLeg = FeeLeg & { usdc: number; pct: number }
 
 /** Product Meme split of the 1% USDC (quote) fee. Missing referrer falls into Crucible. */
 export const MEME_FEE_LEGS: FeeLeg[] = [
-  { id: 'creator', label: 'Creator', bps: 5_000, swatch: 'bg-lime' },
-  { id: 'crucible', label: 'Crucible', bps: 2_500, swatch: 'bg-lime-t' },
-  { id: 'projectBurn', label: 'Project burn', bps: 1_000, swatch: 'bg-coral' },
-  { id: 'platform', label: 'Platform', bps: 1_000, swatch: 'bg-s3' },
-  { id: 'referrer', label: 'Referrer', bps: 500, swatch: 'bg-amber-500' },
+  { id: 'creator', label: 'Creator', bps: 5_000, swatch: 'bg-lime', color: '#2f84db' },
+  { id: 'crucible', label: 'Crucible', bps: 2_500, swatch: 'bg-lime-t', color: '#7ec0f7' },
+  { id: 'projectBurn', label: 'Project burn', bps: 1_000, swatch: 'bg-coral', color: '#ff7a62' },
+  { id: 'platform', label: 'Platform', bps: 1_000, swatch: 'bg-s3', color: '#9aa3b5' },
+  { id: 'referrer', label: 'Referrer', bps: 500, swatch: 'bg-amber-500', color: '#f5b942' },
 ]
 
 /** Product Reflect split of the 1% USDC (quote) fee. */
 export const REFLECT_FEE_LEGS: FeeLeg[] = [
-  { id: 'holders', label: 'Holders', bps: 2_000, swatch: 'bg-violet-500' },
-  { id: 'crucible', label: 'Crucible', bps: 3_000, swatch: 'bg-lime-t' },
-  { id: 'creator', label: 'Creator', bps: 2_000, swatch: 'bg-lime' },
-  { id: 'projectBurn', label: 'Project burn', bps: 1_500, swatch: 'bg-coral' },
+  { id: 'holders', label: 'Holders', bps: 2_000, swatch: 'bg-violet-500', color: '#a78bfa' },
+  { id: 'crucible', label: 'Crucible', bps: 3_000, swatch: 'bg-lime-t', color: '#7ec0f7' },
+  { id: 'creator', label: 'Creator', bps: 2_000, swatch: 'bg-lime', color: '#2f84db' },
+  { id: 'projectBurn', label: 'Project burn', bps: 1_500, swatch: 'bg-coral', color: '#ff7a62' },
   { id: 'platform', label: 'Platform', bps: 1_000, swatch: 'bg-s3' },
   { id: 'referrer', label: 'Referrer', bps: 500, swatch: 'bg-amber-500' },
 ]
 
 /** On-chain today (MonLock) — shown only as a "next" footnote, never as the product bar. */
 export const LEGACY_MEME_FEE_LEGS: FeeLeg[] = [
-  { id: 'creator', label: 'Creator', bps: 7_000, swatch: 'bg-lime' },
-  { id: 'platform', label: 'Platform', bps: 3_000, swatch: 'bg-s3' },
+  { id: 'creator', label: 'Creator', bps: 7_000, swatch: 'bg-lime', color: '#2f84db' },
+  { id: 'platform', label: 'Platform', bps: 3_000, swatch: 'bg-s3', color: '#9aa3b5' },
 ]
 
 export const LEGACY_REFLECT_FEE_LEGS: FeeLeg[] = [
-  { id: 'holders', label: 'Holders', bps: 5_000, swatch: 'bg-violet-500' },
-  { id: 'creator', label: 'Creator', bps: 2_500, swatch: 'bg-lime' },
-  { id: 'platform', label: 'Platform', bps: 2_500, swatch: 'bg-s3' },
+  { id: 'holders', label: 'Holders', bps: 5_000, swatch: 'bg-violet-500', color: '#a78bfa' },
+  { id: 'creator', label: 'Creator', bps: 2_500, swatch: 'bg-lime', color: '#2f84db' },
+  { id: 'platform', label: 'Platform', bps: 2_500, swatch: 'bg-s3', color: '#9aa3b5' },
 ]
 
 export const SELL_FEE_LEG: FeeLeg = {
@@ -92,6 +94,7 @@ export const SELL_FEE_LEG: FeeLeg = {
   label: 'Launch-token burn',
   bps: 10_000,
   swatch: 'bg-coral',
+  color: '#ff7a62',
 }
 
 export function feeLegsFor(kind: LaunchKind): FeeLeg[] {

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { CrucibleFeePath } from '@/components/CrucibleFeePath'
 
 export const metadata: Metadata = {
   title: 'Docs — Arcfun',
@@ -191,33 +192,8 @@ export default function DocsPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-            <div className="border border-hair rounded-[22px] bg-s1 p-5">
-              <p className="m-0 text-[13px] font-semibold text-t3 mb-3">Meme — quote-side split</p>
-              <FeeBar
-                parts={[
-                  { label: 'Creator 50%', pct: 50, className: 'bg-lime' },
-                  { label: 'Crucible 25%', pct: 25, className: 'bg-lime-t' },
-                  { label: 'Project burn 10%', pct: 10, className: 'bg-coral' },
-                  { label: 'Platform 10%', pct: 10, className: 'bg-s3' },
-                  { label: 'Referrer 5%', pct: 5, className: 'bg-amber-500' },
-                ]}
-              />
-            </div>
-            <div className="border border-hair rounded-[22px] bg-s1 p-5">
-              <p className="m-0 text-[13px] font-semibold text-t3 mb-3">
-                Reflection — quote-side split
-              </p>
-              <FeeBar
-                parts={[
-                  { label: 'Holders 20%', pct: 20, className: 'bg-violet-500' },
-                  { label: 'Crucible 30%', pct: 30, className: 'bg-lime-t' },
-                  { label: 'Creator 20%', pct: 20, className: 'bg-lime' },
-                  { label: 'Project burn 15%', pct: 15, className: 'bg-coral' },
-                  { label: 'Platform 10%', pct: 10, className: 'bg-s3' },
-                  { label: 'Referrer 5%', pct: 5, className: 'bg-amber-500' },
-                ]}
-              />
-            </div>
+            <CrucibleFeePath kind="meme" showSideToggle={false} />
+            <CrucibleFeePath kind="reflect" showSideToggle={false} />
           </div>
 
           <ul className="mt-5 mb-0 pl-4 text-[14px] text-t2 space-y-2 leading-relaxed max-w-2xl">
@@ -479,31 +455,3 @@ export default function DocsPage() {
   )
 }
 
-function FeeBar({
-  parts,
-}: {
-  parts: { label: string; pct: number; className: string }[]
-}) {
-  return (
-    <div>
-      <div className="flex h-2.5 rounded-full overflow-hidden bg-black/40">
-        {parts.map((p) => (
-          <div
-            key={p.label}
-            className={p.className}
-            style={{ width: `${p.pct}%` }}
-            title={p.label}
-          />
-        ))}
-      </div>
-      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-t3">
-        {parts.map((p) => (
-          <span key={p.label} className="inline-flex items-center gap-1.5">
-            <span className={`inline-block w-2 h-2 rounded-sm ${p.className}`} />
-            {p.label}
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
