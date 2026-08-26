@@ -181,7 +181,33 @@ export default async function CruciblePage() {
           {stats.melts.length === 0 ? (
             <p className="px-5 py-12 text-center text-sm text-t3">No burns yet.</p>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            <div className="sm:hidden divide-y divide-hair2">
+              {stats.melts.map((m, i) => (
+                <div
+                  key={m.id}
+                  className="tape-row px-5 py-3.5 flex flex-col gap-1.5"
+                  style={{ ['--tape-i' as string]: i }}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="inline-flex items-center gap-2 text-[13px] text-t2 tabular-nums">
+                      {i === 0 ? (
+                        <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot shrink-0" />
+                      ) : null}
+                      {ageLabel(m.ts)} ago
+                    </span>
+                    <span className="text-[15px] font-semibold tabular-nums text-coral">
+                      {fmtCompact(m.arcfunBurned)} burned
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[12px] text-t3 tabular-nums">
+                    <span>{fmtUsd(m.usdcIn)} in</span>
+                    <span>{fmtCompact(m.arcfunBought)} bought</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="text-[12px] font-semibold text-t3 border-b border-hair2">
@@ -222,6 +248,7 @@ export default async function CruciblePage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </section>
 

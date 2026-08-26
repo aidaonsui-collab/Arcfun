@@ -57,10 +57,10 @@ export function FeeDonut({
   const hovering = hoverId != null
 
   return (
-    <div className="flex flex-col sm:flex-row items-center gap-5 sm:gap-8 min-w-0 w-full">
+    <div className="flex flex-col items-center sm:flex-row sm:items-center gap-5 sm:gap-8 min-w-0 w-full">
       <div
         key={pieKey}
-        className="relative w-[168px] h-[168px] sm:w-[184px] sm:h-[184px] rounded-full shrink-0 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] crucible-in"
+        className="relative w-[220px] h-[220px] sm:w-[184px] sm:h-[184px] rounded-full shrink-0 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] crucible-in"
         style={{ background: conicFromLegs(legs, hoverId) }}
         role="img"
         aria-label={legs.map((l) => `${l.label} ${fmtBpsPct(l.bps)}`).join(', ')}
@@ -81,14 +81,15 @@ export function FeeDonut({
           return (
             <li
               key={leg.id}
-              className="flex items-center justify-between gap-3 min-w-0 rounded-xl px-2.5 py-1.5 -mx-1 transition-[background,opacity,filter] duration-200"
+              className="flex items-center justify-between gap-3 min-w-0 rounded-xl px-3 py-2.5 sm:py-1.5 -mx-1 transition-[background,opacity,filter] duration-200"
               style={{
-                background: active ? 'rgba(255,255,255,0.05)' : 'transparent',
+                background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
                 opacity: dim ? 0.45 : 1,
                 filter: active ? 'brightness(1.12)' : undefined,
               }}
               onMouseEnter={() => setHoverId(leg.id)}
               onMouseLeave={() => setHoverId(null)}
+              onClick={() => setHoverId((cur) => (cur === leg.id ? null : leg.id))}
             >
               <span className="inline-flex items-center gap-2 min-w-0 text-[13px] font-semibold text-t2">
                 <span
