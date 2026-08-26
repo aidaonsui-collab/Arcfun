@@ -1,5 +1,5 @@
 /**
- * Crucible product surface — quote-side 1% USDC fee splits, referral codes, mock melt tape.
+ * Crucible product surface — quote-side 1% USDC fee splits, referral codes, mock Burn tape.
  *
  * Live locks may still be 70/30 (Meme) or 50/25/25 (Reflection). The numbers here are the
  * product splits. Do not treat them as on-chain until NEXT_PUBLIC_CRUCIBLE_ONCHAIN=1.
@@ -245,7 +245,7 @@ function mulberry(seed: number): () => number {
 }
 
 /**
- * Deterministic demo melt tape until Crucible buy/burn events exist.
+ * Deterministic demo Burn tape until Crucible buy/burn events exist.
  * Always tagged `preview: true`.
  */
 export function mockMeltFeed(nowMs = Date.now()): CrucibleMelt[] {

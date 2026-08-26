@@ -72,7 +72,7 @@ export default async function CruciblePage() {
     {
       label: 'ARCFUN bought',
       value: fmtCompact(stats.arcfunBought),
-      sub: 'from USDC melts',
+      sub: 'from USDC burns',
       subColor: 'var(--limeT)',
       bar: null,
       live: false,
@@ -81,7 +81,7 @@ export default async function CruciblePage() {
     {
       label: 'ARCFUN removed',
       value: fmtCompact(stats.arcfunAtDead),
-      sub: `${meltCount} melt${meltCount === 1 ? '' : 's'}`,
+      sub: `${meltCount} burn${meltCount === 1 ? '' : 's'}`,
       subColor: 'var(--limeT)',
       bar: null,
       live: false,
@@ -113,7 +113,7 @@ export default async function CruciblePage() {
 
         {preview ? (
           <p className="mt-4 mb-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-hair bg-s2 text-[12px] font-semibold text-t2">
-            Preview tape · events not indexed yet
+            Burn tape · preview, events not indexed yet
           </p>
         ) : null}
 
@@ -174,18 +174,18 @@ export default async function CruciblePage() {
         <section className="mt-5 border border-hair rounded-[24px] bg-s1 overflow-hidden">
           <div className="px-5 py-4 border-b border-hair2 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 className="m-0 text-[17px] font-semibold tracking-tightish">Melt tape</h2>
+              <h2 className="m-0 text-[17px] font-semibold tracking-tightish">Burn tape</h2>
               <p className="m-0 mt-0.5 text-[13px] text-t3">
                 {stats.lastMelt
-                  ? `Last melt ${ageLabel(stats.lastMelt.ts)} ago`
-                  : 'No melts yet'}
+                  ? `Last burn ${ageLabel(stats.lastMelt.ts)} ago`
+                  : 'No burns yet'}
                 {' · '}
                 preview until buy/burn events exist
               </p>
             </div>
           </div>
           {stats.melts.length === 0 ? (
-            <p className="px-5 py-12 text-center text-sm text-t3">No melts yet.</p>
+            <p className="px-5 py-12 text-center text-sm text-t3">No burns yet.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">

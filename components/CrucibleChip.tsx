@@ -1,5 +1,5 @@
 /**
- * Thin Crucible status chip — last melt + burned amount. Preview until events exist.
+ * Thin Crucible status chip — last burn + burned amount. Preview until events exist.
  */
 'use client'
 
@@ -37,8 +37,8 @@ export function CrucibleChip({
       <span className="whitespace-nowrap tracking-tightish">
         {stats
           ? compact
-            ? `Crucible · ${age} · ${burned} burned`
-            : `Crucible · last melt ${age} · ${burned} burned`
+            ? `Burn tape · ${age} · ${burned} burned`
+            : `Burn tape · ${age} · ${burned} burned`
           : 'Crucible'}
       </span>
     </Link>
