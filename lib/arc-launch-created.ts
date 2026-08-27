@@ -183,16 +183,15 @@ async function backfillLogs(
     if (from <= FACTORY_FLOOR) break
   }
 
+  if (ranges.length && upTo === 0n) upTo = ranges[0].to
+
   for (let i = 0; i < ranges.length; i += PAR) {
     const batch = ranges.slice(i, i + PAR)
     const parts = await Promise.all(batch.map((r) => scanFactoryWindow(r.from, r.to)))
     for (const part of parts) Object.assign(times, part)
-  }
-
-  if (ranges.length) {
-    const lowest = ranges[ranges.length - 1].from
-    downTo = lowest < downTo ? lowest : downTo
-    if (upTo === 0n) upTo = ranges[0].to
+    const lowest = batch[batch.length - 1].from
+    if (lowest < downTo) downTo = lowest
+    await writeState({ times, downTo: downTo.toString(), upTo: upTo.toString() })
   }
 
   return { times, downTo: downTo.toString(), upTo: upTo.toString() }
