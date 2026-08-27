@@ -171,7 +171,10 @@ export default function DocsPage() {
 
         {/* Fees */}
         <section id="fees" className="scroll-mt-24 mt-14">
-          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">LP fee structure</h2>
+          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">
+            LP fee structure{' '}
+            <span className="text-[15px] font-semibold text-t3 tracking-normal">(coming soon)</span>
+          </h2>
           <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
             The pool charges a <strong className="text-white font-semibold">1% Uniswap V3 swap
             fee</strong>. When fees are collected from the locked LP NFT, the quote (USDC) side is
