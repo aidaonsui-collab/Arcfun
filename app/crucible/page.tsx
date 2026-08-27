@@ -20,7 +20,7 @@ export const revalidate = 20
 export const metadata: Metadata = {
   title: 'Crucible — Arcfun',
   description:
-    'Crucible buys $ARCFUN from quote-side USDC fees and burns it. $ARCFUN holders do not get pad-wide USDC.',
+    'Crucible buys $ARCFUN from quote-side USDC fees and burns it.',
 }
 
 async function liveBurnedPct(): Promise<number | null> {
@@ -101,8 +101,7 @@ export default async function CruciblePage() {
         </h1>
         <p className="mt-3 mb-0 max-w-2xl text-[16px] text-t2 leading-relaxed">
           Quote-side 1% USDC fees feed Crucible. It buys $ARCFUN and sends it to the dead wallet.
-          $ARCFUN holders do not get pad-wide USDC — this burn path is their reward. Share a
-          referral link anytime after a launch. Buys through Arcfun pay 0.05% of the USDC in.
+          Share a referral link anytime after a launch. Buys through Arcfun pay 0.05% of the USDC in.
         </p>
 
         {preview ? (
