@@ -18,6 +18,8 @@ export type IndexedVolume = {
   volume6h: number
   volume12h: number
   volume24h: number
+  /** Lifetime USD on the indexed tape. Monotonic; never use a 24h window as a stand-in. */
+  volumeAll?: number
   /** last swap ts seen */
   lastTradeAt: number
   updatedAt: number

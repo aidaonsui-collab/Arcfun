@@ -126,7 +126,8 @@ export async function listIndexedTokens(): Promise<IndexedToken[]> {
 }
 
 export async function setVolume(token: Address | string, vol: IndexedVolume): Promise<void> {
-  await safeSet(volumeKey(String(token)), vol, 7 * 24 * 3600)
+  // No TTL: volumeAll is monotonic lifetime and cannot be rebuilt if this key expires.
+  await safeSet(volumeKey(String(token)), vol)
 }
 
 export async function getVolume(token: Address | string): Promise<IndexedVolume | null> {
