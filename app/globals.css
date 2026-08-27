@@ -196,7 +196,7 @@
   }
   .crucible-title {
     animation: none;
-    background-position: 20% 70%, 50% 80%, 80% 75%, 0 50%, 50% 70%;
+    background-position: 18% 100%, 50% 100%, 82% 100%, 50% 0%;
   }
 }
 
@@ -254,51 +254,44 @@
   transition: opacity 320ms ease;
 }
 
-/* Flame fill inside the Crucible h1 — letters are the fire. */
+/* Flame fill in the lower half of the Crucible h1 — tops stay type-white. */
 .crucible-title {
   display: inline-block;
-  color: #ff8a2a;
-  background-color: #c43a08;
+  color: #fff;
+  background-color: #fff;
   background-image:
-    radial-gradient(120% 90% at 18% 110%, #fff8d6 0%, rgba(255, 200, 80, 0.85) 22%, transparent 52%),
-    radial-gradient(100% 80% at 52% 120%, #ffd36a 0%, #ff7a18 32%, transparent 64%),
-    radial-gradient(110% 85% at 84% 115%, #ff9a3c 0%, #e03a00 36%, transparent 66%),
-    repeating-linear-gradient(
-      -18deg,
-      transparent 0 6px,
-      rgba(255, 236, 180, 0.28) 7px,
-      transparent 13px
-    ),
+    radial-gradient(80% 70% at 18% 100%, #fff6c8 0%, #ffb03a 26%, #e03a00 48%, transparent 72%),
+    radial-gradient(90% 58% at 50% 100%, #ffe7a0 0%, #ff8a1a 30%, #c43000 52%, transparent 70%),
+    radial-gradient(75% 64% at 82% 100%, #ffd36a 0%, #ff7a18 28%, #d43800 50%, transparent 72%),
     linear-gradient(
-      185deg,
-      #1a0604 0%,
-      #6b1208 20%,
-      #e44500 44%,
-      #ff8a1a 68%,
-      #ffe08a 90%,
-      #fff6d8 100%
+      to bottom,
+      #ffffff 0%,
+      #ffffff 46%,
+      #ffe0b0 51%,
+      #ff8a1a 62%,
+      #c43000 82%,
+      #3a0c04 100%
     );
-  background-size: 170% 170%, 190% 190%, 160% 180%, 36px 220%, 100% 240%;
-  background-position: 16% 88%, 50% 100%, 86% 92%, 0 80%, 50% 110%;
+  background-repeat: no-repeat;
+  background-size: 130% 100%, 140% 100%, 130% 100%, 100% 100%;
+  background-position: 18% 100%, 50% 100%, 82% 100%, 50% 0%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   animation: crucible-flame 5.2s ease-in-out infinite;
-  filter:
-    drop-shadow(0 0 8px rgba(255, 80, 16, 0.42))
-    drop-shadow(0 2px 12px rgba(255, 50, 0, 0.22));
+  filter: drop-shadow(0 8px 10px rgba(255, 70, 10, 0.28));
 }
 
 @keyframes crucible-flame {
   0%,
   100% {
-    background-position: 14% 95%, 48% 105%, 88% 98%, 0 90%, 50% 118%;
+    background-position: 16% 100%, 50% 102%, 84% 100%, 50% 0%;
   }
-  35% {
-    background-position: 28% 55%, 62% 58%, 72% 48%, 18px 40%, 50% 72%;
+  40% {
+    background-position: 26% 100%, 42% 100%, 76% 104%, 50% 0%;
   }
-  65% {
-    background-position: 6% 72%, 38% 42%, 94% 62%, -12px 60%, 50% 88%;
+  70% {
+    background-position: 8% 104%, 58% 100%, 90% 100%, 50% 0%;
   }
 }
 
