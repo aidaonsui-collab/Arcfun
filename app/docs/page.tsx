@@ -352,8 +352,8 @@ export default function DocsPage() {
                 color chip.
               </li>
               <li>
-                Profile also lists coins you launched, creator LP-fee positions, followers,
-                and trading PnL.
+                Profile also lists coins you launched, creator LP-fee pending and collected
+                USDC, followers, and trading PnL.
               </li>
             </ul>
             <Link
