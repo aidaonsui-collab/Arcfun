@@ -214,7 +214,7 @@ function botPrivateKey(): Hex | null {
 async function claim(key: string, ttl: number): Promise<boolean> {
   try {
     const set = await kv.set(key, '1', { nx: true, ex: ttl })
-    return set === 'OK' || set === true
+    return set != null
   } catch {
     return true
   }
