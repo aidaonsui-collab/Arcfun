@@ -10,7 +10,7 @@
  *   BLITZ_BOT_HANDLE         bot @handle (no @ required)
  *   BLITZ_BOT_KEY            0x private key for Instant mint (omit → prefill /create? reply)
  *   BLITZ_FIRST_BUY_USDC     first-buy USDC amount, default 0
- *   NEXT_PUBLIC_BLITZ_BOT_HANDLE  UI copy (@handle, default arcfun_pad)
+ *   NEXT_PUBLIC_BLITZ_BOT_HANDLE  UI copy (@handle, default watch_eve)
  *
  * Never log keys. Never commit secrets.
  */
@@ -74,7 +74,7 @@ function env(name: string): string {
 }
 
 function botHandle(): string {
-  const h = env('BLITZ_BOT_HANDLE') || env('NEXT_PUBLIC_BLITZ_BOT_HANDLE') || 'arcfun_pad'
+  const h = env('BLITZ_BOT_HANDLE') || env('NEXT_PUBLIC_BLITZ_BOT_HANDLE') || 'watch_eve'
   return h.replace(/^@/, '')
 }
 
