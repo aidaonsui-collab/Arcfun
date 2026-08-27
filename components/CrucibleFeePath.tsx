@@ -110,16 +110,43 @@ export function FeeDonut({
   )
 }
 
+function withReferrerSlice(legs: FeeSplitLeg[]): FeeSplitLeg[] {
+  if (legs.some((l) => l.id === 'referrer')) return legs
+  const crucible = legs.find((l) => l.id === 'crucible')
+  const feeUsdc = legs.reduce((n, l) => n + l.usdc, 0)
+  const refUsdc = feeUsdc * 0.05
+  const ref: FeeSplitLeg = {
+    id: 'referrer',
+    label: 'Referrer',
+    bps: 500,
+    swatch: 'bg-amber-500',
+    color: '#f5b942',
+    usdc: refUsdc,
+    pct: 5,
+  }
+  if (!crucible) return [...legs, ref]
+  return [
+    ...legs.map((l) =>
+      l.id === 'crucible'
+        ? { ...l, bps: l.bps - 500, usdc: l.usdc - refUsdc, pct: l.pct - 5 }
+        : l,
+    ),
+    ref,
+  ]
+}
+
 function BuyPanel({ kind, legs }: {
   kind: LaunchKind
   legs: FeeSplitLeg[]
 }) {
+  const shown = withReferrerSlice(legs)
   return (
     <>
-      <FeeDonut key={kind} legs={legs} />
+      <FeeDonut key={kind} legs={shown} />
       <p className="m-0 mt-4 text-[12px] text-t3 leading-snug">
-        This donut is the collected 1% USDC fee. Referrals are a separate 0.05% on Arcfun buys
-        (share a link anytime). $ARCFUN holders do not get pad-wide USDC — Crucible is their reward.
+        Referrer 5% is the same $ as 0.05% of the buy, paid on the Arcfun swap (share a link
+        anytime). Collect keeps that slice in Crucible when the buy has no code. $ARCFUN holders
+        do not get pad-wide USDC — Crucible is their reward.
       </p>
     </>
   )
