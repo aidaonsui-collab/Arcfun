@@ -9,10 +9,11 @@ import nextDynamic from 'next/dynamic'
 import { type Address } from 'viem'
 import Link from 'next/link'
 import { Loader2, ExternalLink, Copy, Check, Globe } from 'lucide-react'
-import type { PoolToken } from '@/lib/tokens'
+import { isReflectionToken, type PoolToken } from '@/lib/tokens'
 import type { EvmTrade, EvmTradesResult } from '@/lib/evm-trades'
 import type { EvmHoldersResult } from '@/lib/evm-holders'
 import { ArcDexTradePanel } from '@/components/ArcDexTradePanel'
+import { CrucibleFeePath } from '@/components/CrucibleFeePath'
 import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import type { TraderMeta } from '@/lib/arc-trader-meta'
 import { ARC_EXPLORER } from '@/lib/contracts-arc'
@@ -231,6 +232,10 @@ export default function TokenPage() {
 
   const buyPct = vol > 0 ? (buyUsd / vol) * 100 : 0
   const sellPct = vol > 0 ? 100 - buyPct : 0
+  const lastBuyUsd = useMemo(() => {
+    const buy = tape.find((x) => x.isBuy && x.valueUsd > 0)
+    return buy && buy.valueUsd > 0 ? buy.valueUsd : 100
+  }, [tape])
 
   const explorer = ARC_EXPLORER || 'https://arc-scan.org'
   const seed = token || pool?.symbol || 'arc'
@@ -479,6 +484,11 @@ export default function TokenPage() {
             <div className="border border-hair rounded-[28px] bg-[#131313] overflow-hidden">
               <TradingViewChart token={token} symbol={pool.symbol} height={420} />
             </div>
+
+            <CrucibleFeePath
+              kind={isReflectionToken(pool) ? 'reflect' : 'meme'}
+              notionalUsdc={lastBuyUsd}
+            />
 
             {/* Volume */}
             <div id="activity" className="border border-hair rounded-[28px] bg-s1 p-[22px] px-6">

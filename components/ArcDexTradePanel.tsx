@@ -29,6 +29,7 @@ import {
   withRecipient,
 } from '@/lib/arc-swap'
 import { formatToken, parseToken } from '@/lib/token-format'
+import { getIncomingReferralCode } from '@/lib/crucible'
 import { tileGradient } from '@/lib/ui-format'
 
 const SLIPPAGE_BPS = 500 // 5% — thin Instant single-sided ranges
@@ -88,7 +89,8 @@ export function ArcDexTradePanel({
   const { isSuccess: mined } = useWaitForTransactionReceipt({ hash: txHash })
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
   const swapOn = arcSwapConfigured()
-  const spender = arcSwapSpender()
+  const spender = arcSwapSpender(mode)
+  const refCode = mode === 'buy' ? getIncomingReferralCode() : ''
   const { tile, mono } = tileGradient(token)
   const initial = (symbol || '?').charAt(0).toUpperCase()
 
@@ -149,7 +151,7 @@ export function ArcDexTradePanel({
         if (mode === 'buy') {
           const inAmt = parseUsdc(amount)
           if (inAmt <= 0n) return
-          const q = await quoteArcBuy(token, inAmt)
+          const q = await quoteArcBuy(token, inAmt, getIncomingReferralCode())
           if (!cancelled) setEstOut(q)
         } else {
           const inAmt = parseToken(amount, tokDec)
@@ -186,7 +188,7 @@ export function ArcDexTradePanel({
     try {
       if (mode === 'buy') {
         const inAmt = parseUsdc(amount)
-        const quoted = estOut ?? (await quoteArcBuy(token, inAmt)) ?? 0n
+        const quoted = estOut ?? (await quoteArcBuy(token, inAmt, refCode)) ?? 0n
         const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
         if (needApprove) {
           setStatusMsg('Approve USDC…')
@@ -202,7 +204,7 @@ export function ArcDexTradePanel({
         setStatusMsg('Buying…')
         // Same tier the quote resolved — cached, so this is not an extra RPC round trip.
         const poolFee = (await findArcPoolFee(token)) ?? undefined
-        let call = buildArcBuy(token, inAmt, minOut, poolFee)
+        let call = buildArcBuy(token, inAmt, minOut, poolFee, refCode)
         call = withRecipient(call, address)
         const hash = await writeContractAsync({
           address: call.address,
@@ -439,6 +441,13 @@ export function ArcDexTradePanel({
               {statusMsg}
             </p>
           )}
+
+          {mode === 'buy' && refCode ? (
+            <p className="mt-3 mb-0 px-1 text-[12px] text-white/45">
+              Buying through <span className="text-white/80 font-semibold">{refCode}</span>
+              {' · '}0.05% of this buy goes to that link
+            </p>
+          ) : null}
 
           <button
             type="button"

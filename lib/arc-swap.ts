@@ -196,6 +196,34 @@ const FEE_ROUTER_ABI = [
   },
 ] as const
 
+const REFERRAL_ROUTER_ABI = [
+  {
+    type: 'function',
+    name: 'buy',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'tokenOut', type: 'address' },
+      { name: 'poolFee', type: 'uint24' },
+      { name: 'amountIn', type: 'uint256' },
+      { name: 'amountOutMinimum', type: 'uint256' },
+      { name: 'code', type: 'string' },
+    ],
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+  },
+] as const
+
+/** 5 bps of buy notional — matches ReferralRouter.REF_BPS. */
+export const REF_BUY_BPS = 5
+
+export function useReferralRouter(): boolean {
+  return ARC.REFERRAL_ROUTER !== ZERO
+}
+
+function netAfterReferral(amountIn: bigint, code: string): bigint {
+  if (!code || !useReferralRouter()) return amountIn
+  return amountIn - (amountIn * BigInt(REF_BUY_BPS)) / 10_000n
+}
+
 export function arcSwapConfigured(): boolean {
   return arcRobinSwapEnabled()
 }
@@ -240,10 +268,15 @@ function netAfterFee(amountIn: bigint, bps: number): bigint {
   return amountIn - (amountIn * BigInt(bps)) / 10_000n
 }
 
-export async function quoteArcBuy(token: Address, usdcIn: bigint): Promise<bigint | null> {
+export async function quoteArcBuy(
+  token: Address,
+  usdcIn: bigint,
+  referralCode = '',
+): Promise<bigint | null> {
   if (usdcIn <= 0n || !arcSwapConfigured()) return null
   const bps = await feeBps()
-  const swapIn = netAfterFee(usdcIn, bps)
+  const afterRef = netAfterReferral(usdcIn, referralCode)
+  const swapIn = netAfterFee(afterRef, bps)
   if (swapIn <= 0n) return null
   const fee = (await findArcPoolFee(token)) ?? POOL_FEE
   try {
@@ -302,8 +335,9 @@ export type ArcSwapWrite = {
   chainId: number
 }
 
-/** Spender to approve for the given side (FeeRouter or Uni router). */
-export function arcSwapSpender(): Address {
+/** Spender to approve for the given side (referral router on buys when deployed). */
+export function arcSwapSpender(side: 'buy' | 'sell' = 'buy'): Address {
+  if (side === 'buy' && useReferralRouter()) return ARC.REFERRAL_ROUTER
   return useFeeRouter() ? ARC.FEE_ROUTER : ARC.UNI_ROUTER
 }
 
@@ -317,7 +351,17 @@ export function buildArcBuy(
   usdcIn: bigint,
   amountOutMin: bigint,
   fee: number = POOL_FEE,
+  referralCode = '',
 ): ArcSwapWrite {
+  if (useReferralRouter()) {
+    return {
+      address: ARC.REFERRAL_ROUTER,
+      abi: REFERRAL_ROUTER_ABI,
+      functionName: 'buy',
+      args: [token, fee, usdcIn, amountOutMin, referralCode],
+      chainId: ARC_CHAIN_ID,
+    }
+  }
   if (useFeeRouter()) {
     return {
       address: ARC.FEE_ROUTER,

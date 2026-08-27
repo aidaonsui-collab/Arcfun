@@ -30,6 +30,7 @@ import {
 } from '@/lib/arc-reflection-launchpad'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
 import { tileGradient } from '@/lib/ui-format'
+import { CrucibleFeePath } from '@/components/CrucibleFeePath'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
 
 type Step = 'idle' | 'uploading' | 'approving' | 'creating' | 'confirming' | 'registering' | 'done'
@@ -49,7 +50,7 @@ const LAUNCH_TYPES: {
     tagline: 'Tradable from block one',
     points: [
       'Full supply onto Uniswap V3 at creation',
-      'Quote LP fees: 70% creator · 30% platform',
+      'Crucible buys and burns $ARCFUN from quote fees',
       'Launch-token LP fees auto-burned',
     ],
   },
@@ -59,8 +60,8 @@ const LAUNCH_TYPES: {
     title: 'Reflection token',
     tagline: 'LP fees pay your holders',
     points: [
-      '50% of quote LP fees → holders via reflect()',
-      '25% creator · 25% platform · launch fees burn',
+      'Holders earn a 20% quote-fee leg via reflect()',
+      'Crucible is the $ARCFUN holder reward — not pad-wide USDC',
       'Instant TOKEN/USDC pool from block one',
     ],
   },
@@ -416,8 +417,8 @@ export function ArcCreateForm({
     {
       k: 'LP fees',
       v: isReflection
-        ? '25% creator · 50% holders · 25% platform'
-        : '70% creator · 30% platform · launch side burns',
+        ? 'Holders 20 · Crucible 35 · Creator 20 · burn 15 · platform 10'
+        : 'Creator 50 · Crucible 30 · burn 10 · platform 10',
     },
     { k: 'Rewards to', v: rewardsPreview },
   ]
@@ -590,6 +591,14 @@ export function ArcCreateForm({
           </div>
         </div>
 
+        <div className="mt-4">
+          <CrucibleFeePath
+            kind={isReflection ? 'reflect' : 'meme'}
+            notionalUsdc={100}
+            showSideToggle={false}
+          />
+        </div>
+
         {!launchesLive ? (
           <div className="mt-6 rounded-[22px] border border-hair bg-s2 px-5 py-6 text-center">
             <p className="m-0 text-[15px] font-semibold tracking-tightish text-white">
@@ -607,9 +616,12 @@ export function ArcCreateForm({
             <div className="flex flex-col gap-1">
               <span className="text-[15px] font-semibold tracking-tightish">LP fee split</span>
               <span className="text-[13px] text-t2 leading-snug">
-                Quote-side LP fees: <strong className="text-white">25% creator</strong> ·{' '}
-                <strong className="text-white">50% holders</strong> (via reflect) ·{' '}
-                <strong className="text-white">25% platform</strong>. Launch-token fees burn.
+                Quote-side LP fees: <strong className="text-white">20% holders</strong> ·{' '}
+                <strong className="text-white">35% Crucible</strong> ·{' '}
+                <strong className="text-white">20% creator</strong> ·{' '}
+                <strong className="text-white">15% project burn</strong> ·{' '}
+                <strong className="text-white">10% platform</strong>. Referrals pay 0.05% on
+                Arcfun buys, not from this collect. Launch-token fees burn.
               </span>
               {!reflectionLive ? (
                 <span className="text-[12px] text-coral mt-1">
