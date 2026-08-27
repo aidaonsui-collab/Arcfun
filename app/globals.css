@@ -187,16 +187,15 @@
   .crucible-in,
   .tape-row,
   .crucible-bar,
-  .live-dot,
-  .crucible-title {
+  .live-dot {
     animation: none;
   }
   .crucible-xfade {
     transition: none;
   }
-  .crucible-title {
+  .crucible-title::after {
     animation: none;
-    background-position: 18% 100%, 50% 100%, 82% 100%, 50% 0%;
+    background-image: url('/crucible-flames.png');
   }
 }
 
@@ -254,44 +253,35 @@
   transition: opacity 320ms ease;
 }
 
-/* Flame fill in the lower half of the Crucible h1 — tops stay type-white. */
+/* Real flame strip clipped into the lower half of the letters. Tops stay white. */
 .crucible-title {
+  position: relative;
   display: inline-block;
   color: #fff;
-  background-color: #fff;
-  background-image:
-    radial-gradient(80% 70% at 18% 100%, #fff6c8 0%, #ffb03a 26%, #e03a00 48%, transparent 72%),
-    radial-gradient(90% 58% at 50% 100%, #ffe7a0 0%, #ff8a1a 30%, #c43000 52%, transparent 70%),
-    radial-gradient(75% 64% at 82% 100%, #ffd36a 0%, #ff7a18 28%, #d43800 50%, transparent 72%),
-    linear-gradient(
-      to bottom,
-      #ffffff 0%,
-      #ffffff 46%,
-      #ffe0b0 51%,
-      #ff8a1a 62%,
-      #c43000 82%,
-      #3a0c04 100%
-    );
+}
+.crucible-title::after {
+  content: attr(data-text);
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: inherit;
+  background-image: url('/crucible-flames.webp');
   background-repeat: no-repeat;
-  background-size: 130% 100%, 140% 100%, 130% 100%, 100% 100%;
-  background-position: 18% 100%, 50% 100%, 82% 100%, 50% 0%;
+  background-size: 135% 88%;
+  background-position: 0% 112%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: crucible-flame 5.2s ease-in-out infinite;
-  filter: drop-shadow(0 8px 10px rgba(255, 70, 10, 0.28));
+  pointer-events: none;
+  filter: drop-shadow(0 7px 9px rgba(255, 80, 16, 0.32));
+  animation: crucible-flame-pan 2.6s ease-in-out infinite alternate;
 }
-
-@keyframes crucible-flame {
-  0%,
-  100% {
-    background-position: 16% 100%, 50% 102%, 84% 100%, 50% 0%;
+@keyframes crucible-flame-pan {
+  from {
+    background-position: 0% 114%;
   }
-  40% {
-    background-position: 26% 100%, 42% 100%, 76% 104%, 50% 0%;
-  }
-  70% {
-    background-position: 8% 104%, 58% 100%, 90% 100%, 50% 0%;
+  to {
+    background-position: 100% 108%;
   }
 }
 
