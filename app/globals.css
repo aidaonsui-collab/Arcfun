@@ -193,6 +193,10 @@
   .crucible-xfade {
     transition: none;
   }
+  .crucible-title::after {
+    animation: none;
+    background-image: url('/crucible-flames.png');
+  }
 }
 
 .live-dot {
@@ -247,6 +251,38 @@
 
 .crucible-xfade {
   transition: opacity 320ms ease;
+}
+
+/* Real flame strip clipped into the lower half of the letters. Tops stay white. */
+.crucible-title {
+  position: relative;
+  display: inline-block;
+  color: #fff;
+}
+.crucible-title::after {
+  content: attr(data-text);
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: inherit;
+  background-image: url('/crucible-flames.webp');
+  background-repeat: no-repeat;
+  background-size: 135% 88%;
+  background-position: 0% 112%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  pointer-events: none;
+  filter: drop-shadow(0 7px 9px rgba(255, 80, 16, 0.32));
+  animation: crucible-flame-pan 2.6s ease-in-out infinite alternate;
+}
+@keyframes crucible-flame-pan {
+  from {
+    background-position: 0% 114%;
+  }
+  to {
+    background-position: 100% 108%;
+  }
 }
 
 /* Hero backdrop: concentric arcs radiating from above the fold, fading out toward the

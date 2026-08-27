@@ -93,7 +93,10 @@ export default async function CruciblePage() {
           ‹ Home
         </Link>
 
-        <h1 className="m-0 text-[32px] sm:text-[40px] font-semibold tracking-display leading-[1.12]">
+        <h1
+          className="crucible-title m-0 text-[32px] sm:text-[40px] font-semibold tracking-display leading-[1.12]"
+          data-text="The Crucible"
+        >
           The Crucible
         </h1>
         <p className="m-0 mt-3 text-[18px] font-semibold tracking-tightish text-white">
