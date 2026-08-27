@@ -18,9 +18,9 @@ import { CrucibleCountUp } from '@/components/CrucibleChip'
 export const revalidate = 20
 
 export const metadata: Metadata = {
-  title: 'Crucible — Arcfun',
+  title: 'The Crucible — Arcfun',
   description:
-    'Crucible buys $ARCFUN from quote-side USDC fees and burns it.',
+    'A buy/burn no one has to click. You trade. Fees accrue. When it cooks, Crucible buys $ARCFUN and burns it.',
 }
 
 async function liveBurnedPct(): Promise<number | null> {
@@ -93,15 +93,15 @@ export default async function CruciblePage() {
           ‹ Home
         </Link>
 
-        <p className="m-0 text-[12px] font-semibold uppercase tracking-[0.08em] text-lime-t">
-          Crucible
-        </p>
-        <h1 className="m-0 mt-2 text-[32px] sm:text-[40px] font-semibold tracking-display leading-[1.12]">
-          Buy $ARCFUN. Burn it.
+        <h1 className="m-0 text-[32px] sm:text-[40px] font-semibold tracking-display leading-[1.12]">
+          The Crucible
         </h1>
+        <p className="m-0 mt-3 text-[18px] font-semibold tracking-tightish text-white">
+          A buy/burn no one has to click.
+        </p>
         <p className="mt-3 mb-0 max-w-2xl text-[16px] text-t2 leading-relaxed">
-          Quote-side 1% USDC fees feed Crucible. It buys $ARCFUN and sends it to the dead wallet.
-          Share a referral link anytime after a launch. Buys through Arcfun pay 0.05% of the USDC in.
+          You trade. Fees accrue. When it cooks, Crucible buys $ARCFUN and burns it. Referrals on
+          Arcfun buys are extra, and instant.
         </p>
 
         {preview ? (
