@@ -43,29 +43,87 @@ function conicFromLegs(legs: FeeSplitLeg[], hoverId: string | null): string {
   return `conic-gradient(${stops.join(', ')})`
 }
 
+function hitLegId(
+  e: { currentTarget: HTMLElement; clientX: number; clientY: number },
+  legs: FeeSplitLeg[],
+): string | null {
+  const rect = e.currentTarget.getBoundingClientRect()
+  const cx = rect.left + rect.width / 2
+  const cy = rect.top + rect.height / 2
+  const dx = e.clientX - cx
+  const dy = e.clientY - cy
+  const r = Math.hypot(dx, dy)
+  const outer = rect.width / 2
+  const inner = outer * 0.48
+  if (r < inner || r > outer) return null
+  let deg = (Math.atan2(dy, dx) * 180) / Math.PI + 90
+  if (deg < 0) deg += 360
+  const pct = (deg / 360) * 100
+  let acc = 0
+  for (const leg of legs) {
+    acc += leg.pct
+    if (pct <= acc + 1e-6) return leg.id
+  }
+  return legs[legs.length - 1]?.id ?? null
+}
+
+function feeLegBlurb(leg: FeeSplitLeg): string {
+  switch (leg.id) {
+    case 'creator':
+      return 'Paid in USDC to the rewards wallet set at launch. Defaults to the wallet that signed the create.'
+    case 'crucible':
+      return 'Quote USDC sits here. When it cooks, Crucible buys $ARCFUN and burns it. A buy/burn no one has to click.'
+    case 'projectBurn':
+      return 'This USDC buys the launch token and sends it to the dead wallet.'
+    case 'platform':
+      return "Arcfun's cut. Keeps the pad running."
+    case 'referrer':
+      return 'Instant payout on Arcfun buys through your link. Extra to the 1% pool fee. Direct Uni swaps skip this.'
+    case 'holders':
+      return 'USDC for people holding this token. Claim from Portfolio after the keeper calls reflect().'
+    default:
+      return `${fmtBpsPct(leg.bps)} of the quote-side 1% USDC fee.`
+  }
+}
+
 export function FeeDonut({
   legs,
   center = '1%',
   centerLabel = 'Fee',
+  hoverId = null,
+  onHoverId,
+  onPinId,
 }: {
   legs: FeeSplitLeg[]
   center?: string
   centerLabel?: string
+  hoverId?: string | null
+  onHoverId?: (id: string | null) => void
+  onPinId?: (id: string) => void
 }) {
-  const [hoverId, setHoverId] = useState<string | null>(null)
   const pieKey = legs.map((l) => `${l.id}:${l.bps}`).join('|')
   const hovering = hoverId != null
+  const setHover = (id: string | null) => onHoverId?.(id)
+  const pin = (id: string) => onPinId?.(id)
 
   return (
     <div className="flex flex-col items-center sm:flex-row sm:items-center gap-5 sm:gap-8 min-w-0 w-full">
       <div
         key={pieKey}
-        className="relative w-[220px] h-[220px] sm:w-[184px] sm:h-[184px] rounded-full shrink-0 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] crucible-in"
+        className="relative w-[220px] h-[220px] sm:w-[184px] sm:h-[184px] rounded-full shrink-0 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] crucible-in cursor-pointer"
         style={{ background: conicFromLegs(legs, hoverId) }}
         role="img"
         aria-label={legs.map((l) => `${l.label} ${fmtBpsPct(l.bps)}`).join(', ')}
+        onMouseMove={(e) => {
+          const id = hitLegId(e, legs)
+          if (id) setHover(id)
+        }}
+        onClick={(e) => {
+          const id = hitLegId(e, legs)
+          if (id) pin(id)
+        }}
       >
-        <div className="absolute inset-[26%] rounded-full bg-s1 border border-hair flex flex-col items-center justify-center">
+        <div className="absolute inset-[26%] rounded-full bg-s1 border border-hair flex flex-col items-center justify-center pointer-events-none">
           <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-t3">
             {centerLabel}
           </span>
@@ -81,15 +139,14 @@ export function FeeDonut({
           return (
             <li
               key={leg.id}
-              className="flex items-center justify-between gap-3 min-w-0 rounded-xl px-3 py-2.5 sm:py-1.5 -mx-1 transition-[background,opacity,filter] duration-200"
+              className="flex items-center justify-between gap-3 min-w-0 rounded-xl px-3 py-2.5 sm:py-1.5 -mx-1 cursor-pointer transition-[background,opacity,filter] duration-200"
               style={{
                 background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
                 opacity: dim ? 0.45 : 1,
                 filter: active ? 'brightness(1.12)' : undefined,
               }}
-              onMouseEnter={() => setHoverId(leg.id)}
-              onMouseLeave={() => setHoverId(null)}
-              onClick={() => setHoverId((cur) => (cur === leg.id ? null : leg.id))}
+              onMouseEnter={() => setHover(leg.id)}
+              onClick={() => pin(leg.id)}
             >
               <span className="inline-flex items-center gap-2 min-w-0 text-[13px] font-semibold text-t2">
                 <span
@@ -135,18 +192,50 @@ function withReferrerSlice(legs: FeeSplitLeg[]): FeeSplitLeg[] {
   ]
 }
 
+const IDLE_FEE_NOTE = 'Refer and earn 5% of trading fees from buys through your link.'
+
 function BuyPanel({ kind, legs }: {
   kind: LaunchKind
   legs: FeeSplitLeg[]
 }) {
   const shown = withReferrerSlice(legs)
+  const [hoverId, setHoverId] = useState<string | null>(null)
+  const [pinnedId, setPinnedId] = useState<string | null>(null)
+  const activeId = hoverId ?? pinnedId
+  const active = shown.find((l) => l.id === activeId) ?? null
+
   return (
-    <>
-      <FeeDonut key={kind} legs={shown} />
-      <p className="m-0 mt-4 text-[12px] text-t3 leading-snug">
-        Refer and earn 5% of trading fees from buys through your link.
+    <div
+      onMouseLeave={() => setHoverId(null)}
+    >
+      <FeeDonut
+        key={kind}
+        legs={shown}
+        hoverId={activeId}
+        onHoverId={setHoverId}
+        onPinId={(id) => setPinnedId((cur) => (cur === id ? null : id))}
+      />
+      <p
+        className="m-0 mt-4 min-h-[2.6em] text-[12px] text-t3 leading-snug"
+        aria-live="polite"
+      >
+        {active ? (
+          <>
+            <span className="inline-flex items-center gap-1.5 font-semibold text-t2">
+              <span
+                className="inline-block w-2 h-2 rounded-full shrink-0"
+                style={{ background: active.color }}
+              />
+              {active.label}
+            </span>
+            {' · '}
+            {feeLegBlurb(active)}
+          </>
+        ) : (
+          IDLE_FEE_NOTE
+        )}
       </p>
-    </>
+    </div>
   )
 }
 
@@ -169,7 +258,7 @@ export function CrucibleFeePath({
   const kindLabel = kind === 'reflect' ? 'Reflect' : 'Meme'
 
   const buyBody = (
-    <BuyPanel kind={kind} legs={legs} />
+    <BuyPanel key={kind} kind={kind} legs={legs} />
   )
 
   const sellBody = (
