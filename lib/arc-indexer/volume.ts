@@ -6,6 +6,7 @@ import type { Address } from 'viem'
 import type { EvmTrade } from '@/lib/evm-trades'
 import { priceChangeFromTrades, sparkClosesFromTrades } from '@/lib/candles'
 import type { IndexedVolume } from './types'
+import { getVolume } from './store'
 import { summarizeRpcError } from '@/lib/rpc-error'
 
 const tradesKvKey = (token: string) => `arcfun:trades:${token.toLowerCase()}`
@@ -26,6 +27,7 @@ export async function computeVolumeWindows(token: Address | string): Promise<Ind
   let volume6h = 0
   let volume12h = 0
   let volume24h = 0
+  let tapeSum = 0
   let lastTradeAt = 0
 
   for (const t of trades) {
@@ -33,6 +35,7 @@ export async function computeVolumeWindows(token: Address | string): Promise<Ind
     const usd = t.valueUsd || 0
     if (ts > lastTradeAt) lastTradeAt = ts
     if (ts <= 0 || usd <= 0) continue
+    tapeSum += usd
     const age = now - ts
     if (age <= 24 * HOUR) volume24h += usd
     if (age <= 12 * HOUR) volume12h += usd
@@ -40,11 +43,15 @@ export async function computeVolumeWindows(token: Address | string): Promise<Ind
     if (age <= HOUR) volume1h += usd
   }
 
+  const prev = await getVolume(token)
+  const volumeAll = Math.max(prev?.volumeAll ?? 0, tapeSum)
+
   return {
     volume1h,
     volume6h,
     volume12h,
     volume24h,
+    volumeAll,
     lastTradeAt,
     updatedAt: Date.now(),
     priceChange24h: priceChangeFromTrades(trades),

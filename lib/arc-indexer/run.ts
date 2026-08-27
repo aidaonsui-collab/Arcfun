@@ -499,6 +499,7 @@ export async function enrichTokensWithIndexVolume<
       volume6h: v.volume6h,
       volume12h: v.volume12h,
       volume24h: v.volume24h,
+      volumeAll: v.volumeAll,
       lastTradeAt: v.lastTradeAt || (t as { lastTradeAt?: number }).lastTradeAt,
       priceChange24h: v.priceChange24h ?? t.priceChange24h ?? 0,
       sparkCloses: v.sparkCloses,

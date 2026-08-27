@@ -6,6 +6,7 @@ import { Loader2 } from 'lucide-react'
 import type { PoolToken, VolumeWindow } from '@/lib/tokens'
 import { volumeForWindow } from '@/lib/tokens'
 import { TokenCard, TokenRailCard } from '@/components/TokenCard'
+import { PadVolumeTile } from '@/components/PadVolumeTile'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
 
 type SortKey = 'Top volume' | 'New' | 'Top MC'
@@ -94,6 +95,17 @@ export function HomeClient({
     return [...tokens].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 3)
   }, [tokens])
 
+  const padVolume = useMemo(() => {
+    let volume24h = 0
+    let volumeAll = 0
+    for (const t of tokens) {
+      volume24h += t.volume24h ?? 0
+      volumeAll += t.volumeAll ?? 0
+    }
+    if (volumeAll < volume24h) volumeAll = volume24h
+    return { volume24h, volumeAll }
+  }, [tokens])
+
   const sortTabs: SortKey[] = ['Top volume', 'New', 'Top MC']
 
   return (
@@ -105,6 +117,7 @@ export function HomeClient({
             <h1 className="m-0 text-[26px] sm:text-[32px] leading-[1.15] font-bold tracking-display text-pretty text-white">
               The best way to launch and trade tokens on Arc.
             </h1>
+            <PadVolumeTile volume24h={padVolume.volume24h} volumeAll={padVolume.volumeAll} />
             <div className="flex flex-wrap gap-3 pt-1 lg:hidden">
               <Link
                 href="/create"
