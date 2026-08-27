@@ -10,6 +10,7 @@ export const metadata: Metadata = {
 const TOC = [
   { href: '#pairs', label: 'Pairs' },
   { href: '#launches', label: 'Launch types' },
+  { href: '#blitz', label: 'Blitz launch' },
   { href: '#fees', label: 'LP fees' },
   { href: '#portfolio', label: 'Portfolio' },
   { href: '#studio', label: 'ArcStudio' },
@@ -144,6 +145,26 @@ export default function DocsPage() {
               </ul>
             </article>
           </div>
+        </section>
+
+        <section id="blitz" className="scroll-mt-24 mt-14">
+          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">Blitz launch</h2>
+          <p className="mt-2 mb-4 max-w-2xl text-[15px] text-t2 leading-relaxed">
+            Watch an X account or paste a post. Arcfun fills name, ticker, art, and the tweet
+            link. You confirm. The mint is the same Instant TOKEN/USDC create as{' '}
+            <Link href="/create" className="text-lime-t font-semibold hover:text-white">
+              /create
+            </Link>
+            . Nothing deploys until you sign.{' '}
+            <Link href="/blitz" className="text-lime-t font-semibold hover:text-white">
+              Open Blitz
+            </Link>
+            .
+          </p>
+          <ul className="m-0 pl-4 text-[14px] text-t2 space-y-2 leading-relaxed max-w-2xl">
+            <li>Paste an x.com/status URL anytime. Live watch of followed accounts needs an X bearer token on the server.</li>
+            <li>Pair stays TOKEN/USDC. This is a faster fill, not a different market.</li>
+          </ul>
         </section>
 
         {/* Fees */}
