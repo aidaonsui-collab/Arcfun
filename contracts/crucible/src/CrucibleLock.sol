@@ -4,7 +4,6 @@ pragma solidity ^0.8.26;
 import {IERC20Minimal} from "./interfaces/IERC20Minimal.sol";
 import {ISwapRouter02} from "./interfaces/ISwapRouter02.sol";
 import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionManager.sol";
-import {IReferralRegistry} from "./interfaces/IReferralRegistry.sol";
 
 /// @title CrucibleLock
 /// @notice Holds Uniswap V3 LP NFTs for NEW launches. Permissionless `collectFees(tokenId)`
@@ -12,16 +11,16 @@ import {IReferralRegistry} from "./interfaces/IReferralRegistry.sol";
 ///         There is no NFT withdraw — owner cannot rug LP.
 ///
 /// Quote USDC split of the collected 1% (10_000 = 100% of that USDC fee):
-///   Meme:    Creator 5000, Crucible 2500, Project burn 1000, Platform 1000, Referrer 500
-///   Reflect: Holders 2000, Crucible 3000, Creator 2000, Project burn 1500, Platform 1000, Referrer 500
+///   Meme:    Creator 5000, Crucible 3000 (2500+500), Project burn 1000, Platform 1000
+///   Reflect: Holders 2000, Crucible 3500 (3000+500), Creator 2000, Project burn 1500, Platform 1000
 ///
 /// Sell path: collected launch token is 100% sent to dead. No USDC from sells.
 /// Project burn: that USDC slice is accrued, then `projectBurn(tokenId, minOut)` buys the launch
 /// token on the same pool and sends it to dead. Collect does not swap.
 ///
-/// Referrer is bound at lock (code hash). Collect cannot name a payout. Rotate on the registry
-/// still flows through. Unknown / empty / unregistered code → Crucible takes 500 bps.
-/// Uni V3 collect is still batched: this is one referrer per launch, not per trade.
+/// Referrer 500 bps of the LP fee is folded into Crucible on collect. Per-trade referral is
+/// ReferralRouter (5 bps of buy notional when a live code is passed). Collect cannot attribute
+/// per-trade; do not pay a stamped code from this path or we double-pay.
 contract CrucibleLock {
     enum Kind {
         Meme,
@@ -382,11 +381,10 @@ contract CrucibleLock {
         // Sell path: 100% of collected launch token is burned. Nobody is paid.
         if (c.launchGot > 0) _pay(c.launch, DEAD, c.launchGot);
 
-        if (c.referrerCodeHash != bytes32(0)) {
-            c.paidReferrer = IReferralRegistry(referralRegistry).payoutOfHash(c.referrerCodeHash);
-        }
-        c.payReferrer = c.paidReferrer != address(0);
-        Split memory s = quoteSplit(c.usdcGot, c.kind, c.payReferrer);
+        // Referrer is paid at swap time by ReferralRouter, not from the batched LP collect.
+        c.paidReferrer = address(0);
+        c.payReferrer = false;
+        Split memory s = quoteSplit(c.usdcGot, c.kind, false);
         _payoutLegs(tokenId, c, s);
 
         emit FeesCollected(tokenId, c.usdcGot, c.launchGot, c.paidReferrer, s.referrer, s.crucible);

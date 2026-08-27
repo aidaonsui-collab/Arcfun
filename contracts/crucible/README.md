@@ -12,8 +12,9 @@ Fee engine for **new** ArcFun launches. Live Instant / Reflection lockers are **
 | Contract | Role |
 |---|---|
 | `Crucible` | Holds quote-side Crucible USDC. `setArcfun(address)` is **one-shot**. `cook(amountIn, minOut)` swaps USDC→ARCFUN on SwapRouter02 and sends ARCFUN to `0x…dead`. No zero-slippage overload, and **keeper-gated** (see Swap execution). |
-| `CrucibleLock` | Holds the Uni V3 LP NFT. Permissionless `collectFees(tokenId)` (MonLock-compatible) pays USDC legs and burns sell-side token. **Does not swap. Does not cook.** `projectBurn(tokenId, minOut)` does the launch-token buy/burn and is **keeper-gated**. Referrer code is stamped at `lock`. **No NFT withdraw.** |
+| `CrucibleLock` | Holds the Uni V3 LP NFT. Permissionless `collectFees(tokenId)` (MonLock-compatible) pays USDC legs and burns sell-side token. **Does not swap. Does not cook.** Referrer 500 bps of the LP fee is folded into Crucible. `projectBurn` is **keeper-gated**. **No NFT withdraw.** |
 | `ReferralRegistry` | Public first-come `code → payout` wallet. Owner of a code can `rotatePayout`. Codes are opaque strings, never `0x` addresses. Links: `https://www.arcfun.co/r/{code}`. |
+| `ReferralRouter` | Buy-side wrapper. If a live code is passed (and not self), skims **5 bps** of USDC in to the payout wallet, then swaps the rest through FeeRouter / SwapRouter02. Sells stay on the existing path. |
 
 Optional minimal interfaces: `ISwapRouter02`, `INonfungiblePositionManager`, `ICrucible`, `IReferralRegistry`.
 
@@ -53,29 +54,30 @@ Collect does **not** call cook. Owner can `setCookPaused(true)` to stop cooking 
 
 Uniswap V3 pool fee on Instant launches is 1% (`fee = 10000`).
 
-**Meme:** Creator 5000, Crucible 2500, Project burn 1000, Platform 1000, Referrer 500
+**Meme:** Creator 5000, Crucible 3000, Project burn 1000, Platform 1000
 
-**Reflect:** Holders 2000, Crucible 3000, Creator 2000, Project burn 1500, Platform 1000, Referrer 500
+**Reflect:** Holders 2000, Crucible 3500, Creator 2000, Project burn 1500, Platform 1000
 
 - **Sell path:** collected launch token is 100% sent to dead. Nobody is paid. No USDC from sells.
 - **Project burn:** that USDC slice is accrued on collect. A keeper calls `projectBurn(tokenId, minLaunchOut)`, which buys the **launch** token on the same pool and sends it to dead. Collapsed price reverts instead of burning dust.
-- **Missing / unknown referrer:** referrer 500 bps falls into Crucible (held until cook).
+- **Referrer:** not paid from collect. See ReferralRouter.
 - Rounding dust goes to Crucible.
 - A blacklisted payee (Circle USDC) accrues to `owed[token][account]` instead of reverting the whole collect. `withdrawOwed(token, to)` pulls it later.
 
 Old lockers stay as they are (70/30 Meme, 50/25/25 Reflection). This lock is for **new** launches only.
 
-## Honest referrer limitation (do not fake per-trade attribution)
+## Per-trade referrals (ReferralRouter)
 
-Uniswap V3 LP fees accrue on the NFT. `collectFees(tokenId)` is **batched**, so this contract **cannot** know which trader's referral code applied to which dollars at collect time without a custom swap router.
+Uniswap V3 LP fees accrue on the NFT, so `collectFees` cannot see who referred a given buy. Collect always folds the old 500 bps referrer leg into Crucible.
 
-Implemented behavior:
+Anyone with a registered code can share `https://www.arcfun.co/r/{code}` at any time after launch. A buy through Arcfun's `ReferralRouter.buy(token, fee, amountIn, minOut, code)`:
 
-- Referrer is bound at `lock(..., referrerCode)`. One code per launch, not per trade.
-- `collectFees(uint256 tokenId)` — MonLock ABI. No referrer argument. Pays the current registry payout for that stamped code, or folds 500 bps into Crucible if the code is empty / unregistered.
-- There is **no** `collectFees(tokenId, address)` — that let any registered wallet claim the leg.
+- Resolves `payoutOf(code)`. Empty, unknown, or self → no skim, full amount swaps.
+- Live payout (not the buyer) → **5 bps of the USDC in** to that wallet (same dollars as 5% of the 1% pool fee), rest swaps through the live FeeRouter (or SwapRouter02).
+- Pays immediately. Rotate on the registry is live on the next buy.
+- Direct Uni / aggregator swaps have no code and pay nobody.
 
-A keeper (or anyone) can collect. Rotate on the registry still flows through because collect resolves `payoutOfHash` live.
+Sells are not referred. This PR does not deploy the router to mainnet.
 
 ## Frontend ABI to match (live, do not break)
 

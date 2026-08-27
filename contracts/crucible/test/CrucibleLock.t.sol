@@ -131,7 +131,7 @@ contract CrucibleLockTest is Test {
         assertEq(usdc.balanceOf(creator), 5_000e6);
     }
 
-    function test_registeredReferrerGetsFiveHundredBps() public {
+    function test_collectFoldsReferrerIntoCrucible() public {
         uint256 id = 11;
         vm.prank(referrer);
         registry.register("texxas", referrer);
@@ -142,13 +142,14 @@ contract CrucibleLockTest is Test {
 
         locker.collectFees(id);
 
-        assertEq(usdc.balanceOf(referrer), 500e6);
-        assertEq(usdc.balanceOf(address(crucible)), 2_500e6);
+        // Per-trade path is ReferralRouter. Collect never pays the stamped code.
+        assertEq(usdc.balanceOf(referrer), 0);
+        assertEq(usdc.balanceOf(address(crucible)), 3_000e6);
         assertEq(usdc.balanceOf(creator), 5_000e6);
         assertEq(usdc.balanceOf(platform), 1_000e6);
     }
 
-    function test_rotatedPayoutReceivesFees() public {
+    function test_rotatedPayoutDoesNotCollectFromLock() public {
         uint256 id = 12;
         address payout = makeAddr("payout");
         vm.prank(referrer);
@@ -161,11 +162,9 @@ contract CrucibleLockTest is Test {
         nfpm.setOwed(id, 10_000e6, 0);
         locker.collectFees(id);
 
-        assertEq(usdc.balanceOf(payout), 500e6);
+        assertEq(usdc.balanceOf(payout), 0);
         assertEq(usdc.balanceOf(referrer), 0);
-        assertEq(usdc.balanceOf(address(crucible)), 2_500e6);
-        assertFalse(registry.isRegisteredPayout(referrer));
-        assertTrue(registry.isRegisteredPayout(payout));
+        assertEq(usdc.balanceOf(address(crucible)), 3_000e6);
     }
 
     function test_attackerCannotSelfAssignReferrer() public {
@@ -183,7 +182,8 @@ contract CrucibleLockTest is Test {
         locker.collectFees(id);
 
         assertEq(usdc.balanceOf(attacker), 0);
-        assertEq(usdc.balanceOf(referrer), 500e6);
+        assertEq(usdc.balanceOf(referrer), 0);
+        assertEq(usdc.balanceOf(address(crucible)), 3_000e6);
     }
 
     function test_reflectHoldersLeg() public {
