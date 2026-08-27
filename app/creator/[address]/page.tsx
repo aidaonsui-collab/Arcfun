@@ -385,7 +385,7 @@ export default function CreatorPage() {
         <section className="border border-hair rounded-[24px] bg-s1 p-5 sm:p-6 mb-5">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-t3">
-              Profit / Loss
+              Trading P&L
             </p>
             <div className="flex gap-1 p-0.5 rounded-lg bg-s2 border border-hair">
               {(['1D', '1W', '1M', 'ALL'] as PnlRange[]).map((r) => (
@@ -459,10 +459,36 @@ export default function CreatorPage() {
             <div>
               <h2 className="m-0 text-[17px] font-semibold tracking-tightish">Creator LP fees</h2>
               <p className="m-0 mt-1 text-[13px] text-t3 max-w-lg">
-                Collect is permissionless — quote fees split to the creator wallet stamped at launch.
-                Uncollected NFT fees are an indicator only (not exact post-split USDC).
+                Quote-side USDC split to the rewards wallet stamped at launch. Collect is
+                permissionless. Pending is still in the LP NFT. Collected already landed in
+                that wallet.
               </p>
             </div>
+            {profile.feePositions.length > 0 ? (
+              <div className="text-left sm:text-right shrink-0">
+                <p className="m-0 text-[22px] font-semibold tabular-nums tracking-tightish text-lime-t">
+                  {fmtUsd(
+                    profile.feePositions.reduce(
+                      (n, p) => n + (p.pendingCreatorUsdc ?? 0) + (p.collectedCreatorUsdc ?? 0),
+                      0,
+                    ),
+                  )}
+                </p>
+                <p className="m-0 mt-0.5 text-[12px] text-t3 tabular-nums">
+                  earned
+                  {' · '}
+                  {fmtUsd(
+                    profile.feePositions.reduce((n, p) => n + (p.pendingCreatorUsdc ?? 0), 0),
+                  )}{' '}
+                  pending
+                  {' · '}
+                  {fmtUsd(
+                    profile.feePositions.reduce((n, p) => n + (p.collectedCreatorUsdc ?? 0), 0),
+                  )}{' '}
+                  collected
+                </p>
+              </div>
+            ) : null}
           </div>
           {profile.feePositions.length === 0 ? (
             <p className="m-0 text-sm text-t3">No locked LP positions found for this creator.</p>
@@ -471,6 +497,8 @@ export default function CreatorPage() {
               {profile.feePositions.map((pos) => {
                 const busy =
                   (claimPending || claimConfirming) && claimPosId === pos.positionId
+                const pending = pos.pendingCreatorUsdc ?? 0
+                const collected = pos.collectedCreatorUsdc ?? 0
                 return (
                   <li
                     key={`${pos.locker}-${pos.positionId}`}
@@ -487,7 +515,9 @@ export default function CreatorPage() {
                       <p className="m-0 mt-0.5 text-[12px] text-t3 tabular-nums">
                         Position #{pos.positionId}
                         {pos.creatorBps > 0 ? ` · creator ${pos.creatorBps / 100}%` : ''}
-                        {pos.hasOwed ? ' · fees pending in NFT' : ''}
+                        {pending > 0 ? ` · ${fmtUsd(pending)} pending` : ''}
+                        {collected > 0 ? ` · ${fmtUsd(collected)} collected` : ''}
+                        {pending <= 0 && collected <= 0 ? ' · no fees yet' : ''}
                       </p>
                     </div>
                     <button
@@ -500,6 +530,8 @@ export default function CreatorPage() {
                         <>
                           <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> Collecting…
                         </>
+                      ) : pending > 0.001 ? (
+                        `Collect ${fmtUsd(pending)}`
                       ) : (
                         'Collect fees'
                       )}
