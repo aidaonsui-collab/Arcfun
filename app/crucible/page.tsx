@@ -101,8 +101,8 @@ export default async function CruciblePage() {
         </h1>
         <p className="mt-3 mb-0 max-w-2xl text-[16px] text-t2 leading-relaxed">
           Quote-side 1% USDC fees feed Crucible. It buys $ARCFUN and sends it to the dead wallet.
-          $ARCFUN holders do not get pad-wide USDC — this burn path is their reward. Missing
-          referrer on a buy falls into Crucible.
+          $ARCFUN holders do not get pad-wide USDC — this burn path is their reward. Share a
+          referral link anytime after a launch. Buys through Arcfun pay 0.05% of the USDC in.
         </p>
 
         {preview ? (
@@ -255,8 +255,9 @@ export default async function CruciblePage() {
         <section className="mt-5 border border-hair rounded-[24px] bg-s1 p-5 sm:p-6">
           <h2 className="m-0 text-[17px] font-semibold tracking-tightish">Payout trail</h2>
           <p className="mt-2 mb-0 text-[14px] text-t2 leading-relaxed">
-            Referral payouts may be public once the keeper ships. No payouts yet — earned USDC
-            reads $0 on Portfolio.
+            Referrals pay at swap time, on-chain, to the code&apos;s payout wallet. Anyone who
+            bought can share their link later. Direct Uni or aggregator swaps have no code and
+            pay nobody.
           </p>
           {usesLegacyOnChainSplits() ? (
             <p className="mt-3 mb-0 text-[13px] text-t3 leading-snug">{CRUCIBLE_CONTRACTS_NOTE}</p>

@@ -118,8 +118,8 @@ function BuyPanel({ kind, legs }: {
     <>
       <FeeDonut key={kind} legs={legs} />
       <p className="m-0 mt-4 text-[12px] text-t3 leading-snug">
-        Referrer is paid on the buy, not from this collect split. $ARCFUN holders do not get pad-wide USDC — Crucible
-        is their reward.
+        This donut is the collected 1% USDC fee. Referrals are a separate 0.05% on Arcfun buys
+        (share a link anytime). $ARCFUN holders do not get pad-wide USDC — Crucible is their reward.
       </p>
     </>
   )

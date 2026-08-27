@@ -367,8 +367,8 @@ export function ArcCreateForm() {
     {
       k: 'LP fees',
       v: isReflection
-        ? 'Holders 20 · Crucible 30 · Creator 20 · burn 15 · platform 10 · referrer 5'
-        : 'Creator 50 · Crucible 25 · burn 10 · platform 10 · referrer 5',
+        ? 'Holders 20 · Crucible 35 · Creator 20 · burn 15 · platform 10'
+        : 'Creator 50 · Crucible 30 · burn 10 · platform 10',
     },
     { k: 'Rewards to', v: rewardsPreview },
   ]
@@ -550,11 +550,11 @@ export function ArcCreateForm() {
               <span className="text-[15px] font-semibold tracking-tightish">LP fee split</span>
               <span className="text-[13px] text-t2 leading-snug">
                 Quote-side LP fees: <strong className="text-white">20% holders</strong> ·{' '}
-                <strong className="text-white">30% Crucible</strong> ·{' '}
+                <strong className="text-white">35% Crucible</strong> ·{' '}
                 <strong className="text-white">20% creator</strong> ·{' '}
                 <strong className="text-white">15% project burn</strong> ·{' '}
-                <strong className="text-white">10% platform</strong> ·{' '}
-                <strong className="text-white">5% referrer</strong>. Launch-token fees burn.
+                <strong className="text-white">10% platform</strong>. Referrals pay 0.05% on
+                Arcfun buys, not from this collect. Launch-token fees burn.
               </span>
               {!reflectionLive ? (
                 <span className="text-[12px] text-coral mt-1">

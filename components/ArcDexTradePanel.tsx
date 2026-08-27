@@ -442,6 +442,13 @@ export function ArcDexTradePanel({
             </p>
           )}
 
+          {mode === 'buy' && refCode ? (
+            <p className="mt-3 mb-0 px-1 text-[12px] text-white/45">
+              Buying through <span className="text-white/80 font-semibold">{refCode}</span>
+              {' · '}0.05% of this buy goes to that link
+            </p>
+          ) : null}
+
           <button
             type="button"
             disabled={busy || !amount || Number(amount) <= 0}

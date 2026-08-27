@@ -172,11 +172,10 @@ export default function DocsPage() {
                     ['Pair', 'TOKEN / USDC', 'TOKEN / USDC'],
                     ['Pool fee', '1%', '1%'],
                     ['Creator', '50%', '20%'],
-                    ['Crucible', '25%', '30%'],
+                    ['Crucible', '30%', '35%'],
                     ['Holders', '—', '20% via reflect()'],
                     ['Project burn', '10%', '15%'],
                     ['Platform', '10%', '10%'],
-                    ['Referrer', '5%', '5%'],
                     ['Launch-token fees', 'Burned', 'Burned'],
                     ['Supply', '1,000,000,000', '1,000,000,000'],
                   ].map(([k, a, b]) => (
@@ -211,8 +210,12 @@ export default function DocsPage() {
               balances become claimable.
             </li>
             <li>
-              Share a link anytime after launch. Buys through Arcfun pay the code 0.05% of USDC in. Sell: 100% of the launch-token fee
-              is burned. Nobody is paid — not even the creator.
+              Sell: 100% of the launch-token fee is burned. Nobody is paid — not even the creator.
+            </li>
+            <li>
+              Referrals are per buy, not stamped at launch. Share <code className="text-t2">/r/&#123;code&#125;</code> anytime.
+              Buys through Arcfun pay that code <strong className="text-white font-semibold">0.05%</strong> of the USDC in,
+              instantly. Direct Uni swaps do not.
             </li>
           </ul>
           <p className="mt-4 mb-0 max-w-2xl text-[13px] text-t3 leading-relaxed">
