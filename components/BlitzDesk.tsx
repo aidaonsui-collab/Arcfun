@@ -194,7 +194,8 @@ export function BlitzDesk() {
         </p>
         <p className="mt-2 mb-0 max-w-xl text-[14px] text-t2 leading-relaxed">
           Mention @{(process.env.NEXT_PUBLIC_BLITZ_BOT_HANDLE || 'watch_eve').replace(/^@/, '')} with
-          “launch a token NAME ticker TICKER” and we Instant-create on Arc.
+          “launch a token NAME ticker TICKER” and we Instant-create on Arc. Creator LP fees buy
+          and burn $EVE.
         </p>
 
         <form
