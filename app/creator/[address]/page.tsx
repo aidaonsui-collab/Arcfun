@@ -623,7 +623,7 @@ function CoinRow({ token }: { token: PoolToken }) {
   const { tile, mono } = tileGradient(seed)
   const initial = (token.symbol || token.name || '?').charAt(0).toUpperCase()
   const img = token.imageUrl || token.logoUrl
-  const age = ageLabel(token.createdAt ?? token.lastTradeAt)
+  const age = ageLabel(token.createdAt)
 
   return (
     <tr className="border-b border-hair2 last:border-0 hover:bg-white/[0.02]">

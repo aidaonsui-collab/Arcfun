@@ -57,8 +57,8 @@ export function filterTokensByCreator(tokens: PoolToken[], wallet: string): Pool
 
 function sortForProfile(tokens: PoolToken[]): PoolToken[] {
   return [...tokens].sort((a, b) => {
-    const ta = a.createdAt ?? a.lastTradeAt ?? 0
-    const tb = b.createdAt ?? b.lastTradeAt ?? 0
+    const ta = a.createdAt ?? 0
+    const tb = b.createdAt ?? 0
     if (tb !== ta) return tb - ta
     return (b.marketCap ?? 0) - (a.marketCap ?? 0)
   })
@@ -110,7 +110,7 @@ export async function buildCreatorProfile(
       address: addr,
       name: t.name,
       symbol: t.symbol,
-      createdAt: t.createdAt ?? t.lastTradeAt,
+      createdAt: t.createdAt,
       ageHint: t.age || '',
     }
   }

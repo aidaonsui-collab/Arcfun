@@ -68,10 +68,12 @@ export function HomeClient({
       })
     }
     if (sort === 'New') {
-      list.sort(
-        (a, b) =>
-          (b.createdAt ?? b.lastTradeAt ?? 0) - (a.createdAt ?? a.lastTradeAt ?? 0),
-      )
+      list.sort((a, b) => {
+        const ta = a.createdAt ?? 0
+        const tb = b.createdAt ?? 0
+        if (tb !== ta) return tb - ta
+        return (a.symbol || a.name || '').localeCompare(b.symbol || b.name || '')
+      })
     } else if (sort === 'Top MC') {
       list.sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0))
     } else {

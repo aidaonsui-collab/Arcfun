@@ -18,7 +18,7 @@ export function TokenCard({
   const img = token.imageUrl || token.logoUrl
   const rankLabel =
     rank != null ? (rank + 1 < 10 ? `0${rank + 1}` : String(rank + 1)) : null
-  const age = ageLabel(token.createdAt ?? token.lastTradeAt)
+  const age = ageLabel(token.createdAt)
 
   return (
     <div className="group relative text-left border border-hair rounded-[20px] overflow-hidden bg-s1 flex flex-col transition-colors hover:border-lime-line">
@@ -82,7 +82,7 @@ export function TokenRailCard({ token }: { token: PoolToken }) {
   const spark = sparkPathFromValues(token.sparkCloses ?? [])
   const initial = (token.symbol || token.name || '?').charAt(0).toUpperCase()
   const img = token.imageUrl || token.logoUrl
-  const age = ageLabel(token.createdAt ?? token.lastTradeAt)
+  const age = ageLabel(token.createdAt)
 
   return (
     <Link
