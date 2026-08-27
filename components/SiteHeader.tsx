@@ -2,14 +2,14 @@
 
 /**
  * Sticky nav — brand mark, search, ArcStudio, wallet chip.
- * Mobile: Home, Blitz, ArcStudio, Create collection, Portfolio, Profile, Docs.
+ * Mobile: Home, Blitz, ArcStudio, Create collection, Profile, Docs.
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { FormEvent, useEffect, useState } from 'react'
 import { useAccount, useBalance, useConnect, useDisconnect } from 'wagmi'
 import { formatUnits } from 'viem'
-import { BookOpen, CircleUser, Flame, Home, LayoutGrid, Menu, PlusCircle, Wallet, X, Zap, type LucideIcon } from 'lucide-react'
+import { BookOpen, CircleUser, Flame, Home, LayoutGrid, Menu, PlusCircle, X, Zap, type LucideIcon } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
 import { CrucibleChip } from '@/components/CrucibleChip'
 import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
@@ -175,20 +175,18 @@ export function SiteHeader() {
         {isConnected && address ? (
           <div className="flex items-center gap-2">
             {!wrongChain && (
-              <>
-                <Link
-                  href="/portfolio"
-                  className="hidden sm:inline-flex h-9 items-center px-3 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
-                >
-                  Portfolio
-                </Link>
-                <Link
-                  href={onStudio ? '/studio/me' : `/creator/${address}`}
-                  className="hidden sm:inline-flex h-9 items-center px-3 rounded-xl border border-hair bg-s2 text-sm font-semibold text-t2 hover:text-white hover:border-lime-line transition-colors"
-                >
-                  Profile
-                </Link>
-              </>
+              <Link
+                href={onStudio ? '/studio/me' : `/creator/${address}`}
+                className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
+                  pathname.startsWith('/portfolio') ||
+                  pathname.toLowerCase() === `/creator/${address.toLowerCase()}` ||
+                  (onStudio && pathname.startsWith('/studio/me'))
+                    ? 'border-lime-line bg-s2 text-white'
+                    : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
+                }`}
+              >
+                Profile
+              </Link>
             )}
             <button
               type="button"
@@ -290,7 +288,6 @@ export function SiteHeader() {
               {/* Account group, separated by a heavier rule like OpenSea's */}
               <div className="h-2 bg-black/30 border-y border-hair2" aria-hidden />
 
-              {navRow('/portfolio', 'Portfolio', Wallet)}
               {isConnected && address ? (
                 navRow(onStudio ? '/studio/me' : `/creator/${address}`, 'Profile', CircleUser)
               ) : (

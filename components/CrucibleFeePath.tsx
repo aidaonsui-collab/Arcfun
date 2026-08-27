@@ -80,7 +80,7 @@ function feeLegBlurb(leg: FeeSplitLeg): string {
     case 'referrer':
       return 'Instant payout on Arcfun buys through your link. Extra to the 1% pool fee. Direct Uni swaps skip this.'
     case 'holders':
-      return 'USDC for people holding this token. Claim from Portfolio after the keeper calls reflect().'
+      return 'USDC for people holding this token. Claim from Profile after the keeper calls reflect().'
     default:
       return `${fmtBpsPct(leg.bps)} of the quote-side 1% USDC fee.`
   }
