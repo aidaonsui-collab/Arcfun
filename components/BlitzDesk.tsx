@@ -193,7 +193,7 @@ export function BlitzDesk() {
           . Nothing deploys until you sign.
         </p>
         <p className="mt-2 mb-0 max-w-xl text-[14px] text-t2 leading-relaxed">
-          Mention @{(process.env.NEXT_PUBLIC_BLITZ_BOT_HANDLE || 'arcfun').replace(/^@/, '')} with
+          Mention @{(process.env.NEXT_PUBLIC_BLITZ_BOT_HANDLE || 'arcfun_pad').replace(/^@/, '')} with
           “launch a token NAME ticker TICKER” and we Instant-create on Arc.
         </p>
 
