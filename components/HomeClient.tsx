@@ -102,7 +102,6 @@ export function HomeClient({
       volume24h += t.volume24h ?? 0
       volumeAll += t.volumeAll ?? 0
     }
-    if (volumeAll < volume24h) volumeAll = volume24h
     return { volume24h, volumeAll }
   }, [tokens])
 
@@ -117,7 +116,11 @@ export function HomeClient({
             <h1 className="m-0 text-[26px] sm:text-[32px] leading-[1.15] font-bold tracking-display text-pretty text-white">
               The best way to launch and trade tokens on Arc.
             </h1>
-            <PadVolumeTile volume24h={padVolume.volume24h} volumeAll={padVolume.volumeAll} />
+            <PadVolumeTile
+              className="self-start"
+              volume24h={padVolume.volume24h}
+              volumeAll={padVolume.volumeAll}
+            />
             <div className="flex flex-wrap gap-3 pt-1 lg:hidden">
               <Link
                 href="/create"

@@ -66,6 +66,8 @@ async function rebuild(): Promise<CatalogSnapshot> {
       const { enrichTokensWithIndexVolume } = await import('@/lib/arc-indexer/run')
       tokens = await enrichTokensWithIndexVolume(tokens)
       source = `${source}+idx`
+      const { seedLifetimeVolume } = await import('@/lib/arc-indexer/volume')
+      tokens = await seedLifetimeVolume(tokens, 3)
     } catch {
       /* indexer optional */
     }
