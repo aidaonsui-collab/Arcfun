@@ -82,7 +82,7 @@ export function CrucibleChip({
     >
       <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot shrink-0" />
       <span className="whitespace-nowrap tracking-tightish tabular-nums">
-        {stats ? (compact ? `Burn tape · ${age}` : full) : 'Crucible'}
+        {compact ? 'Crucible' : stats ? full : 'Crucible'}
       </span>
     </Link>
   )

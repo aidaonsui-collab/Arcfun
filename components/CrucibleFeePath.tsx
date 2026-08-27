@@ -198,6 +198,7 @@ export function CrucibleFeePath({
         <div className="min-w-0 flex-1">
           <p className="m-0 text-[11px] font-semibold tracking-[0.06em] uppercase text-t3">
             Fee path · {kindLabel}
+            <span className="normal-case tracking-normal font-semibold text-t3"> (coming soon)</span>
           </p>
           {showSideToggle ? (
             <div className="grid mt-1">
