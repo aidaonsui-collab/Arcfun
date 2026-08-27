@@ -144,9 +144,7 @@ function BuyPanel({ kind, legs }: {
     <>
       <FeeDonut key={kind} legs={shown} />
       <p className="m-0 mt-4 text-[12px] text-t3 leading-snug">
-        Referrer 5% is the same $ as 0.05% of the buy, paid on the Arcfun swap (share a link
-        anytime). Collect keeps that slice in Crucible when the buy has no code. $ARCFUN holders
-        do not get pad-wide USDC — Crucible is their reward.
+        Refer and earn 5% of trading fees from buys through your link.
       </p>
     </>
   )
