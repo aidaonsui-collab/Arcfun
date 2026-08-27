@@ -5,7 +5,7 @@ import { CrucibleFeePath } from '@/components/CrucibleFeePath'
 export const metadata: Metadata = {
   title: 'Docs — Arcfun',
   description:
-    'Arcfun pair types, LP fee splits, ArcStudio NFT launchpad, Portfolio reflection claims, and how Instant launches work on Arc.',
+    'Arcfun pair types, LP fee splits, ArcStudio NFT launchpad, Profile reflection claims, and how Instant launches work on Arc.',
 }
 
 const TOC = [
@@ -14,7 +14,7 @@ const TOC = [
   { href: '#blitz', label: 'Blitz launch' },
   { href: '#fees', label: 'LP fees' },
   { href: '#crucible', label: 'Crucible' },
-  { href: '#portfolio', label: 'Portfolio' },
+  { href: '#portfolio', label: 'Profile' },
   { href: '#studio', label: 'ArcStudio' },
   { href: '#agents', label: 'Agents' },
 ] as const
@@ -136,7 +136,7 @@ export default function DocsPage() {
                 Same Instant pool, but 20% of quote-side LP fees are distributed to holders of
                 the token. Claim from{' '}
                 <Link href="/portfolio" className="text-lime-t font-semibold hover:text-white">
-                  Portfolio
+                  Profile
                 </Link>
                 .
               </p>
@@ -261,17 +261,17 @@ export default function DocsPage() {
           </p>
         </section>
 
-        {/* Portfolio */}
+        {/* Profile (was Portfolio + Profile in the header) */}
         <section id="portfolio" className="scroll-mt-24 mt-14">
-          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">Portfolio</h2>
+          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">Profile</h2>
           <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
             Connect a wallet and open{' '}
             <Link href="/portfolio" className="text-lime-t font-semibold hover:text-white">
-              Portfolio
+              Profile
             </Link>{' '}
-            from the header. It is the claim surface for Instant Reflection — USDC (or a custom
-            reward token) earned from tokens you hold. Profile is next to it: that is where you
-            set the avatar that shows on token activity.
+            in the header. One page: coins you launched, creator LP fees, Instant Reflection
+            claims, referral link, and avatar. <code className="text-t2">/portfolio</code> still
+            works. It forwards to your creator page.
           </p>
 
           <h3 className="m-0 mb-3 text-[16px] font-semibold tracking-tightish">Rewards</h3>
@@ -353,14 +353,14 @@ export default function DocsPage() {
               </li>
               <li>
                 Profile also lists coins you launched, creator LP-fee pending and collected
-                USDC, followers, and trading PnL.
+                USDC, holder rewards, followers, and trading PnL.
               </li>
             </ul>
             <Link
               href="/portfolio"
               className="inline-flex mt-5 h-10 items-center px-4 rounded-xl bg-lime text-white text-sm font-semibold hover:bg-lime-2"
             >
-              Open Portfolio
+              Open Profile
             </Link>
           </div>
         </section>

@@ -24,6 +24,7 @@ import { profileEditMessage, followMessage } from '@/lib/arc-auth'
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
 import { ARC_EXPLORER, ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { ageLabel, fmtUsd, tileGradient } from '@/lib/ui-format'
+import { PortfolioDesk } from '@/components/PortfolioDesk'
 import type { Address } from 'viem'
 
 type PnlRange = CreatorPnl['range']
@@ -380,6 +381,8 @@ export default function CreatorPage() {
             </div>
           </div>
         </section>
+
+        {isSelf ? <PortfolioDesk wallet={profile.address} /> : null}
 
         {/* PnL */}
         <section className="border border-hair rounded-[24px] bg-s1 p-5 sm:p-6 mb-5">
