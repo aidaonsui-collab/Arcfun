@@ -70,10 +70,12 @@ export function HomeClient({
       })
     }
     if (sort === 'New') {
-      list.sort(
-        (a, b) =>
-          (b.createdAt ?? b.lastTradeAt ?? 0) - (a.createdAt ?? a.lastTradeAt ?? 0),
-      )
+      list.sort((a, b) => {
+        const ta = a.createdAt ?? 0
+        const tb = b.createdAt ?? 0
+        if (tb !== ta) return tb - ta
+        return (a.symbol || a.name || '').localeCompare(b.symbol || b.name || '')
+      })
     } else if (sort === 'Top MC') {
       list.sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0))
     } else {
@@ -101,7 +103,6 @@ export function HomeClient({
       volume24h += t.volume24h ?? 0
       volumeAll += t.volumeAll ?? 0
     }
-    if (volumeAll < volume24h) volumeAll = volume24h
     return { volume24h, volumeAll }
   }, [tokens])
 
@@ -118,7 +119,11 @@ export function HomeClient({
             </h1>
             <div className="flex flex-wrap items-center gap-2.5 pt-1">
               <CrucibleChip className="self-start" />
-              <PadVolumeTile volume24h={padVolume.volume24h} volumeAll={padVolume.volumeAll} />
+              <PadVolumeTile
+                className="self-start"
+                volume24h={padVolume.volume24h}
+                volumeAll={padVolume.volumeAll}
+              />
             </div>
             <div className="flex flex-wrap gap-3 pt-1 lg:hidden">
               <Link
@@ -128,6 +133,12 @@ export function HomeClient({
                 Launch a token
               </Link>
               <Link
+                href="/blitz"
+                className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
+              >
+                Blitz launch
+              </Link>
+              <Link
                 href="/docs"
                 className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
               >
@@ -135,6 +146,12 @@ export function HomeClient({
               </Link>
             </div>
             <div className="hidden lg:flex flex-wrap gap-3 pt-1">
+              <Link
+                href="/blitz"
+                className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
+              >
+                Blitz launch
+              </Link>
               <Link
                 href="/docs"
                 className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"

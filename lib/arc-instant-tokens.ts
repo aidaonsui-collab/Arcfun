@@ -8,6 +8,7 @@ import { erc20Abi as ERC20_ABI } from 'viem'
 import { getArcTokenMeta, getArcTokenMetas } from './arc-token-meta'
 import { type PoolToken } from './tokens'
 import { summarizeRpcError } from './rpc-error'
+import { attachLaunchCreatedAt } from './arc-launch-created'
 
 /** InstantReflectionUsdcFactory.pools(token) — same shape the keeper reads (arc-reflection-keeper.ts). */
 const REFLECTION_POOL_ABI = [
@@ -392,7 +393,10 @@ export async function fetchArcInstantPoolToken(token: Address): Promise<PoolToke
   // this single-lookup path used to check only ARC.INSTANT_FACTORY.
   for (const factory of [ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_LEGACY]) {
     const row = await fetchArcInstantPoolTokenFromFactory(token, factory)
-    if (row) return row
+    if (row) {
+      const [withAge] = await attachLaunchCreatedAt([row])
+      return withAge
+    }
   }
   return null
 }
@@ -868,7 +872,10 @@ export async function fetchArcPoolToken(token: Address): Promise<PoolToken | nul
   const instant = await fetchArcInstantPoolToken(token)
   if (instant) return instant
   const reflection = await fetchArcReflectionPoolToken(token)
-  if (reflection) return reflection
+  if (reflection) {
+    const [withAge] = await attachLaunchCreatedAt([reflection])
+    return withAge
+  }
   return fetchArcCurvePoolToken(token)
 }
 
@@ -921,8 +928,9 @@ export async function buildArcCatalog(): Promise<{ tokens: PoolToken[]; source: 
   const sources = ['arc-instant', reflection.length ? 'reflection' : '', curve.length ? 'curve' : '']
     .filter(Boolean)
     .join('+')
+  const tokens = await attachLaunchCreatedAt([...byId.values()])
   return {
-    tokens: [...byId.values()],
+    tokens,
     source: sources || 'arc-instant-factory',
   }
 }

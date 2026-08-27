@@ -3,7 +3,7 @@
 /**
  * Launch on Arc — Instant or Instant Reflection (both TOKEN/USDC + holder rewards path).
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount, useConnect, useSwitchChain, useWriteContract, usePublicClient, useSignMessage } from 'wagmi'
 import { erc20Abi, getAddress, parseEventLogs, isAddress, type Address } from 'viem'
@@ -31,6 +31,7 @@ import {
 import { uploadImageToCloudinary } from '@/lib/cloudinary'
 import { tileGradient } from '@/lib/ui-format'
 import { CrucibleFeePath } from '@/components/CrucibleFeePath'
+import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
 
 type Step = 'idle' | 'uploading' | 'approving' | 'creating' | 'confirming' | 'registering' | 'done'
 type LaunchType = 'instant' | 'reflection'
@@ -68,7 +69,13 @@ const LAUNCH_TYPES: {
 
 const FIRST_BUY_PRESETS = ['100', '250', '1000']
 
-export function ArcCreateForm() {
+export function ArcCreateForm({
+  initial,
+  compact = false,
+}: {
+  initial?: BlitzPrefill
+  compact?: boolean
+} = {}) {
   const router = useRouter()
   const { address, isConnected, chainId } = useAccount()
   const { connect, connectors, isPending: connecting } = useConnect()
@@ -83,6 +90,7 @@ export function ArcCreateForm() {
   const [description, setDescription] = useState('')
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string>('')
+  const [imageRemote, setImageRemote] = useState<string>('')
   const [twitter, setTwitter] = useState('')
   const [telegram, setTelegram] = useState('')
   const [website, setWebsite] = useState('')
@@ -122,8 +130,43 @@ export function ArcCreateForm() {
 
   const onPickImage = (f: File | null) => {
     setImageFile(f)
+    setImageRemote('')
     setImagePreview(f ? URL.createObjectURL(f) : '')
   }
+
+  const applyPrefill = (p: BlitzPrefill) => {
+    if (p.name) setName(p.name)
+    if (p.symbol) setSymbol(p.symbol)
+    if (p.description) setDescription(p.description)
+    if (p.twitter) setTwitter(p.twitter)
+    if (p.website) setWebsite(p.website)
+    if (p.imageUrl) {
+      setImageFile(null)
+      setImageRemote(p.imageUrl)
+      setImagePreview(`/api/arc/blitz/media?u=${encodeURIComponent(p.imageUrl)}`)
+    } else {
+      setImageFile(null)
+      setImageRemote('')
+      setImagePreview('')
+    }
+    setLaunchType('instant')
+  }
+
+  useEffect(() => {
+    if (initial) {
+      applyPrefill(initial)
+      return
+    }
+    if (compact) return
+    try {
+      const p = prefillFromSearch(new URLSearchParams(window.location.search))
+      if (p) applyPrefill(p)
+    } catch {
+      /* ignore */
+    }
+    // Blitz desk passes a new `initial` when the picked tweet changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial, compact])
 
   /** Signs + POSTs the off-chain name/image/socials record. Returns false rather than throwing —
    *  callers decide what "the creator never got to sign, or the write failed" means for the UI. */
@@ -189,6 +232,13 @@ export function ArcCreateForm() {
       if (imageFile) {
         setStep('uploading')
         imageUrl = await uploadImageToCloudinary(imageFile, 'arcfun')
+      } else if (imageRemote) {
+        setStep('uploading')
+        const imgRes = await fetch(`/api/arc/blitz/media?u=${encodeURIComponent(imageRemote)}`)
+        if (!imgRes.ok) throw new Error('Could not pull the tweet image')
+        const blob = await imgRes.blob()
+        const file = new File([blob], 'blitz.jpg', { type: blob.type || 'image/jpeg' })
+        imageUrl = await uploadImageToCloudinary(file, 'arcfun')
       }
 
       const feeWei = arcCreationFeeWeiFor(address)
@@ -376,22 +426,39 @@ export function ArcCreateForm() {
   return (
     <div
       className={
-        launchesLive
-          ? 'grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-7 items-start'
-          : 'grid grid-cols-1 gap-7 items-start max-w-3xl'
+        compact
+          ? 'grid grid-cols-1 gap-0'
+          : launchesLive
+            ? 'grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-7 items-start'
+            : 'grid grid-cols-1 gap-7 items-start max-w-3xl'
       }
     >
       {/* Main form card */}
       <div className="border border-hair rounded-[28px] bg-s1 p-6 sm:p-8">
-        <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em]">Launch your token</h1>
+        <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em]">
+          {compact ? 'Launch this' : 'Launch your token'}
+        </h1>
         <p className="mt-2.5 mb-0 text-[15px] text-t2 leading-relaxed">
-          {launchesLive
-            ? 'Fixed supply of 1B. One transaction, straight onto Uniswap V3. Launch-token LP fees auto-burn.'
-            : 'Fixed supply of 1B · Uniswap V3 Instant + Reflection paths. Public launches opening soon.'}
+          {compact
+            ? 'Instant TOKEN/USDC. 1B supply, LP locked. Confirm to mint. We do not send the tx for you.'
+            : launchesLive
+              ? 'Fixed supply of 1B. One transaction, straight onto Uniswap V3. Launch-token LP fees auto-burn.'
+              : 'Fixed supply of 1B · Uniswap V3 Instant + Reflection paths. Public launches opening soon.'}
         </p>
+        {!compact ? (
+          <p className="mt-2 mb-0 text-[13px] text-t3">
+            Have a tweet?{' '}
+            <a href="/blitz" className="text-lime-t font-semibold hover:text-white">
+              Blitz launch
+            </a>{' '}
+            fills this form from a post.
+          </p>
+        ) : initial?.handle ? (
+          <p className="mt-2 mb-0 text-[13px] text-lime-t font-semibold">From @{initial.handle}</p>
+        ) : null}
 
         {/* Launch type cards — Meme + Reflection live; set LAUNCHES_ENABLED=0 to gate */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-[26px]">
+        <div className={`grid grid-cols-1 sm:grid-cols-3 gap-3 mt-[26px] ${compact ? 'hidden' : ''}`}>
           {LAUNCH_TYPES.map((lt) => {
             if (!launchesLive) {
               return (
@@ -814,7 +881,7 @@ export function ArcCreateForm() {
       </div>
 
       {/* Sticky preview — only when launches are open */}
-      {launchesLive && (
+      {launchesLive && !compact && (
       <div className="lg:sticky lg:top-[88px] flex flex-col gap-4">
         <div className="border border-hair rounded-[28px] bg-s1 p-5">
           <span className="text-[11px] font-semibold tracking-[0.06em] uppercase text-t3">

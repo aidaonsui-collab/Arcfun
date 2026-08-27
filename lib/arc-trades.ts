@@ -232,6 +232,29 @@ async function scanSwapRange(
   return out
 }
 
+/** USD swapped in [fromBlock, toBlock] (USDC ≈ $1). Used for lifetime pad volume. */
+export async function sumSwapUsd(
+  token: Address,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<number> {
+  if (fromBlock > toBlock) return 0
+  const orient = await resolvePool(token)
+  if (!orient) return 0
+  const client = arcPublicClient()
+  const trades = await scanSwapRange(
+    client,
+    orient.pool,
+    orient.tokenIs0,
+    orient.tokenDecimals,
+    fromBlock,
+    toBlock,
+  )
+  let usd = 0
+  for (const t of trades) usd += t.valueUsd || 0
+  return usd
+}
+
 /**
  * Best-effort persist — a KV outage degrades to "scan fresh every request" (the old behaviour),
  * never a hard failure of the trades endpoint.

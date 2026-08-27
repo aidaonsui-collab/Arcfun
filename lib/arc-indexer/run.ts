@@ -17,6 +17,7 @@ import {
   loadState,
   saveState,
   upsertToken,
+  getToken,
   listIndexedTokens,
   listTokenAddresses,
   setVolume,
@@ -95,14 +96,16 @@ async function seedTokensFromFactories(): Promise<number> {
           args: [BigInt(i)],
         })) as Address
         if (!token || token === ZERO) continue
-        // Pool/creator resolved lazily via fetchArcTrades / fetchArcPoolToken.
+        const existing = await getToken(token)
+        if (existing) continue
+        // Do not stamp Date.now() as createdAt — that made "New" mean "first indexed".
         await upsertToken({
           token,
           creator: ZERO,
           pool: ZERO,
           factory,
           kind,
-          createdAt: Math.floor(Date.now() / 1000),
+          createdAt: 0,
         })
         added++
       }
@@ -145,14 +148,24 @@ async function scanFactoryEvents(
         pool?: Address
       }
       if (!args?.token) continue
+      const createdBlock = Number(log.blockNumber ?? 0n)
+      let createdAt = 0
+      try {
+        if (log.blockNumber != null) {
+          const block = await client.getBlock({ blockNumber: log.blockNumber })
+          createdAt = Number(block.timestamp)
+        }
+      } catch {
+        /* attachLaunchCreatedAt backfills */
+      }
       await upsertToken({
         token: args.token,
         creator: args.creator || ZERO,
         pool: args.pool || ZERO,
         factory: ARC.INSTANT_FACTORY,
         kind: 'instant',
-        createdAt: Math.floor(Date.now() / 1000),
-        createdBlock: Number(log.blockNumber ?? 0n),
+        createdAt,
+        createdBlock,
       })
       found++
     }
@@ -176,14 +189,24 @@ async function scanFactoryEvents(
         pool?: Address
       }
       if (!args?.token) continue
+      const createdBlock = Number(log.blockNumber ?? 0n)
+      let createdAt = 0
+      try {
+        if (log.blockNumber != null) {
+          const block = await client.getBlock({ blockNumber: log.blockNumber })
+          createdAt = Number(block.timestamp)
+        }
+      } catch {
+        /* attachLaunchCreatedAt backfills */
+      }
       await upsertToken({
         token: args.token,
         creator: args.creator || ZERO,
         pool: args.pool || ZERO,
         factory: ARC.REFLECTION_FACTORY,
         kind: 'reflection',
-        createdAt: Math.floor(Date.now() / 1000),
-        createdBlock: Number(log.blockNumber ?? 0n),
+        createdAt,
+        createdBlock,
       })
       found++
     }

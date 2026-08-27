@@ -18,8 +18,12 @@ export type IndexedVolume = {
   volume6h: number
   volume12h: number
   volume24h: number
-  /** Lifetime USD on the indexed tape. Monotonic; never use a 24h window as a stand-in. */
+  /** Lifetime USD from pool Swap logs. Monotonic. */
   volumeAll?: number
+  /** Inclusive lowest block already folded into volumeAll. */
+  volumeAllDownTo?: string
+  /** Inclusive highest block already folded into volumeAll. */
+  volumeAllUpTo?: string
   /** last swap ts seen */
   lastTradeAt: number
   updatedAt: number

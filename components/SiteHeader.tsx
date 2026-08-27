@@ -2,14 +2,14 @@
 
 /**
  * Sticky nav — brand mark, search, ArcStudio, wallet chip.
- * Mobile: Home, ArcStudio, Create collection, Portfolio, Profile, Docs.
+ * Mobile: Home, Blitz, ArcStudio, Create collection, Portfolio, Profile, Docs.
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { FormEvent, useEffect, useState } from 'react'
 import { useAccount, useBalance, useConnect, useDisconnect } from 'wagmi'
 import { formatUnits } from 'viem'
-import { BookOpen, CircleUser, Flame, Home, LayoutGrid, Menu, PlusCircle, Wallet, X, type LucideIcon } from 'lucide-react'
+import { BookOpen, CircleUser, Flame, Home, LayoutGrid, Menu, PlusCircle, Wallet, X, Zap, type LucideIcon } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
 import { CrucibleChip } from '@/components/CrucibleChip'
 import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
@@ -151,6 +151,17 @@ export function SiteHeader() {
         <CrucibleChip compact className="hidden lg:inline-flex" />
 
         <Link
+          href="/blitz"
+          className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
+            pathname.startsWith('/blitz')
+              ? 'border-lime-line bg-s2 text-white'
+              : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
+          }`}
+        >
+          Blitz
+        </Link>
+
+        <Link
           href="/studio"
           className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
             onStudio
@@ -271,6 +282,7 @@ export function SiteHeader() {
               </form>
 
               {navRow('/', 'Home', Home)}
+              {navRow('/blitz', 'Blitz launch', Zap)}
               {navRow('/crucible', 'Crucible', Flame)}
               {navRow('/studio', 'Studio', LayoutGrid)}
               {navRow('/studio/create', 'Create collection', PlusCircle)}

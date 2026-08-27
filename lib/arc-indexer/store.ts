@@ -90,12 +90,24 @@ export async function saveState(state: IndexerState): Promise<void> {
 
 export async function upsertToken(row: IndexedToken): Promise<void> {
   const id = row.token.toLowerCase()
+  const prev = await getToken(id)
+  const next: IndexedToken = { ...prev, ...row, token: row.token }
+  if (prev?.createdBlock && prev.createdAt) {
+    next.createdAt = prev.createdAt
+    next.createdBlock = prev.createdBlock
+  } else if (row.createdBlock && row.createdAt) {
+    next.createdAt = row.createdAt
+    next.createdBlock = row.createdBlock
+  } else if (prev?.createdAt) {
+    next.createdAt = prev.createdAt
+    next.createdBlock = prev.createdBlock
+  }
   try {
     await kv.sadd(TOKEN_SET, id)
   } catch (e) {
     console.warn('[arc-indexer] sadd token', summarizeRpcError(e))
   }
-  await safeSet(tokenKey(id), row)
+  await safeSet(tokenKey(id), next)
 }
 
 export async function getToken(token: Address | string): Promise<IndexedToken | null> {
@@ -135,6 +147,27 @@ export async function getVolume(token: Address | string): Promise<IndexedVolume 
 }
 
 /** Batch volume for catalog enrichment — one mget, not N sequential reads. */
+export async function getIndexedTokensMap(
+  tokens: string[],
+): Promise<Record<string, IndexedToken>> {
+  const out: Record<string, IndexedToken> = {}
+  const ids = Array.from(new Set(tokens.map((t) => t.toLowerCase()).filter(Boolean)))
+  if (ids.length === 0) return out
+  try {
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50)
+      const vals = (await kv.mget(...chunk.map(tokenKey))) as (IndexedToken | null)[]
+      chunk.forEach((id, j) => {
+        const v = vals[j]
+        if (v?.token) out[id] = v
+      })
+    }
+  } catch (e) {
+    console.warn('[arc-indexer] mget tokens', summarizeRpcError(e))
+  }
+  return out
+}
+
 export async function getVolumesMap(
   tokens: string[],
 ): Promise<Record<string, IndexedVolume>> {
