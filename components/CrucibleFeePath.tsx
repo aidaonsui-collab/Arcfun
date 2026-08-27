@@ -118,7 +118,7 @@ function BuyPanel({ kind, legs }: {
     <>
       <FeeDonut key={kind} legs={legs} />
       <p className="m-0 mt-4 text-[12px] text-t3 leading-snug">
-        Missing referrer falls into Crucible. $ARCFUN holders do not get pad-wide USDC — Crucible
+        Referrer is paid on the buy, not from this collect split. $ARCFUN holders do not get pad-wide USDC — Crucible
         is their reward.
       </p>
     </>

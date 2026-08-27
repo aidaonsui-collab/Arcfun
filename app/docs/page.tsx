@@ -116,12 +116,12 @@ export default function DocsPage() {
                 Instant
               </h3>
               <p className="mt-2 mb-4 text-[14px] text-t2 leading-relaxed">
-                Tradable from block one. Quote-side LP fees split across creator, Crucible, project burn, platform, and referrer.
+                Tradable from block one. Quote-side LP fees split across creator, Crucible, project burn, and platform. Referrals pay on the buy, not from this collect.
                 Launch-token fees are burned.
               </p>
               <ul className="m-0 pl-4 text-[13px] text-t2 space-y-1.5 leading-snug">
                 <li>Full float on Uniswap V3 at creation</li>
-                <li>Creator 50 · Crucible 25 · project burn 10 · platform 10 · referrer 5</li>
+                <li>Creator 50 · Crucible 30 · project burn 10 · platform 10</li>
                 <li>Optional USDC first buy in the create tx</li>
               </ul>
             </article>
@@ -140,7 +140,7 @@ export default function DocsPage() {
                 .
               </p>
               <ul className="m-0 pl-4 text-[13px] text-t2 space-y-1.5 leading-snug">
-                <li>Holders 20 · Crucible 30 · Creator 20 · project burn 15 · platform 10 · referrer 5</li>
+                <li>Holders 20 · Crucible 35 · Creator 20 · project burn 15 · platform 10</li>
                 <li>Default reward is Arc USDC. Protocol-token holders earn via Crucible, not pad-wide USDC</li>
                 <li>Share scales with how much of the token you hold</li>
               </ul>
@@ -211,13 +211,13 @@ export default function DocsPage() {
               balances become claimable.
             </li>
             <li>
-              Missing referrer on a buy falls into Crucible. Sell: 100% of the launch-token fee
+              Share a link anytime after launch. Buys through Arcfun pay the code 0.05% of USDC in. Sell: 100% of the launch-token fee
               is burned. Nobody is paid — not even the creator.
             </li>
           </ul>
           <p className="mt-4 mb-0 max-w-2xl text-[13px] text-t3 leading-relaxed">
             Next — live pools still use 70/30 (Meme) or 50/25/25 (Reflection). Contracts still
-            need to ship before Crucible, project-burn, and referrer legs pay on-chain.
+            need to ship before Crucible and project-burn legs pay on-chain. ReferralRouter pays the 0.05% buy skim once deployed.
           </p>
         </section>
 

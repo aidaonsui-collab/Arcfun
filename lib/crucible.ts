@@ -7,6 +7,8 @@
 export const FEE_BPS_DENOM = 10_000
 /** Uniswap V3 pool fee on Instant launches (1%). */
 export const SWAP_FEE_BPS = 100
+/** Per-trade referral skim of buy USDC (5 bps = 5% of the 1% pool fee). */
+export const REF_BUY_BPS = 5
 
 export const BURN_ADDRESS = '0x000000000000000000000000000000000000dead' as const
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const
@@ -58,23 +60,21 @@ export type FeeLeg = {
 
 export type FeeSplitLeg = FeeLeg & { usdc: number; pct: number }
 
-/** Product Meme split of the 1% USDC (quote) fee. Missing referrer falls into Crucible. */
+/** Product Meme split of the collected 1% USDC fee. Referrer is paid at swap, not collect. */
 export const MEME_FEE_LEGS: FeeLeg[] = [
   { id: 'creator', label: 'Creator', bps: 5_000, swatch: 'bg-lime', color: '#2f84db' },
-  { id: 'crucible', label: 'Crucible', bps: 2_500, swatch: 'bg-lime-t', color: '#7ec0f7' },
+  { id: 'crucible', label: 'Crucible', bps: 3_000, swatch: 'bg-lime-t', color: '#7ec0f7' },
   { id: 'projectBurn', label: 'Project burn', bps: 1_000, swatch: 'bg-coral', color: '#ff7a62' },
   { id: 'platform', label: 'Platform', bps: 1_000, swatch: 'bg-s3', color: '#9aa3b5' },
-  { id: 'referrer', label: 'Referrer', bps: 500, swatch: 'bg-amber-500', color: '#f5b942' },
 ]
 
-/** Product Reflect split of the 1% USDC (quote) fee. */
+/** Product Reflect split of the collected 1% USDC fee. Referrer is paid at swap, not collect. */
 export const REFLECT_FEE_LEGS: FeeLeg[] = [
   { id: 'holders', label: 'Holders', bps: 2_000, swatch: 'bg-violet-500', color: '#a78bfa' },
-  { id: 'crucible', label: 'Crucible', bps: 3_000, swatch: 'bg-lime-t', color: '#7ec0f7' },
+  { id: 'crucible', label: 'Crucible', bps: 3_500, swatch: 'bg-lime-t', color: '#7ec0f7' },
   { id: 'creator', label: 'Creator', bps: 2_000, swatch: 'bg-lime', color: '#2f84db' },
   { id: 'projectBurn', label: 'Project burn', bps: 1_500, swatch: 'bg-coral', color: '#ff7a62' },
   { id: 'platform', label: 'Platform', bps: 1_000, swatch: 'bg-s3', color: '#9aa3b5' },
-  { id: 'referrer', label: 'Referrer', bps: 500, swatch: 'bg-amber-500', color: '#f5b942' },
 ]
 
 /** On-chain today (MonLock) — shown only as a "next" footnote, never as the product bar. */
@@ -175,6 +175,25 @@ export function sanitizeReferralCode(raw: string): string {
     .replace(/^0x[a-fA-F0-9]{40}$/, '')
     .replace(/[^a-zA-Z0-9_-]/g, '')
     .slice(0, 32)
+}
+
+const REF_TTL_MS = 30 * 24 * 3600 * 1000
+
+/** Incoming code from /r/{code} — used on the next buy. Not your own share link. */
+export function getIncomingReferralCode(): string {
+  try {
+    const cleaned = sanitizeReferralCode(
+      (typeof localStorage !== 'undefined' && localStorage.getItem(REF_STORAGE_KEY)) || '',
+    )
+    if (!cleaned) return ''
+    const at = Number(
+      (typeof localStorage !== 'undefined' && localStorage.getItem(REF_STORAGE_AT_KEY)) || 0,
+    )
+    if (at && Date.now() - at > REF_TTL_MS) return ''
+    return cleaned
+  } catch {
+    return ''
+  }
 }
 
 export function persistReferralCode(code: string): string | null {

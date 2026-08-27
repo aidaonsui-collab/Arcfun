@@ -357,6 +357,11 @@ export const ARC = {
     '0x6795d7Ee7A83EfeDE1dedD96B86f0f6Efdabf088') as Address,
   /** Platform skim on RobinSwap path (bps). Contract is source of truth after deploy. */
   FEE_BPS: Number(process.env.NEXT_PUBLIC_ARC_FEE_BPS ?? 100),
+  /**
+   * Per-trade referral buy wrapper. ZERO until deployed (preview lock PR). When set, Instant
+   * buys approve this and call `buy(token, fee, amountIn, minOut, code)`.
+   */
+  REFERRAL_ROUTER: (process.env.NEXT_PUBLIC_ARC_REFERRAL_ROUTER ?? ZERO) as Address,
 
   /**
    * @deprecated Private RobinSwap V3 fork — not the Arc product path.
