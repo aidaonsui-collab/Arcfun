@@ -11,6 +11,11 @@
  *   BLITZ_BOT_KEY            0x private key for Instant mint (omit → prefill /create? reply)
  *   BLITZ_FIRST_BUY_USDC     first-buy USDC amount, default 0
  *   BLITZ_EVE_BURN           EveBurn sink; Instant creator USDC stamps here (no tweet 0x)
+ *   BLITZ_MIN_ACCOUNT_DAYS   default 30; 0 disables
+ *   BLITZ_MIN_FOLLOWERS      default 50; 0 disables
+ *   BLITZ_DAILY_CAP          default 20 Instant creates / UTC day; 0 disables
+ *   BLITZ_TICKER_DENY        extra comma-separated tickers
+ *   BLITZ_X402_PRICE_ATOMIC  nanogas USDC 6dp, default 10000 ($0.01)
  *   NEXT_PUBLIC_BLITZ_BOT_HANDLE  UI copy (@handle, default watch_eve)
  *   NEXT_PUBLIC_EVE_BURN     same sink, public
  *
@@ -18,22 +23,21 @@
  */
 import { createHmac, randomBytes } from 'node:crypto'
 import { kv } from '@vercel/kv'
-import {
-  erc20Abi,
-  parseEventLogs,
-  type Address,
-  type Hex,
-} from 'viem'
+import { erc20Abi, type Address, type Hex } from 'viem'
 import { draftFromTweet, prefillQuery, type BlitzTweet } from './arc-blitz'
 import { parseBlitzLaunchCommand } from './arc-blitz-command'
-import { buildCreateTokenMemeInstantArc, parseArcUsdc } from './arc-instant-launchpad'
-import { invalidateArcHomeCatalog } from './arc-catalog-cache'
-import { setArcTokenMeta } from './arc-token-meta'
-import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
+import {
+  BLITZ_AUTHOR_TTL_SEC,
+  blitzAuthorKey,
+  xAccountTooNew,
+  xFollowersTooLow,
+  takeDailyMintSlot,
+} from './arc-blitz-guards'
+import { saveBlitzInvoice } from './arc-blitz-invoice'
+import { blitzBotPrivateKey, mintOnArc } from './arc-blitz-mint'
+import { blitzLaunchUsdLabel, blitzPayEnabled } from './arc-blitz-pay'
 import {
   ARC,
-  ARC_INSTANT_CREATE_GAS,
-  arcCreationFeeWeiFor,
   arcPublicClient,
   arcServerWalletClient,
 } from './contracts-arc'
@@ -41,13 +45,13 @@ import { EVE_BURN_ABI, EVE_POOL_FEE, EVE_TOKEN, eveBurnAddress } from './eve'
 
 const X_API = 'https://api.twitter.com/2'
 const TWEET_TTL_SEC = 7 * 24 * 60 * 60
-const AUTHOR_TTL_SEC = 24 * 60 * 60
 const MAX_AGE_SEC = 15 * 60
 const USER_ID_TTL_SEC = 7 * 24 * 60 * 60
 const FETCH_MS = 12_000
 
 const TWEET_KEY = (id: string) => `arcfun:blitz:bot:tweet:${id}`
-const AUTHOR_KEY = (id: string) => `arcfun:blitz:bot:author:${id}`
+const AUTHOR_KEY = blitzAuthorKey
+const AUTHOR_TTL_SEC = BLITZ_AUTHOR_TTL_SEC
 const USER_ID_KEY = (handle: string) => `arcfun:blitz:bot:userid:${handle.toLowerCase()}`
 
 type TickResult = {
@@ -56,6 +60,7 @@ type TickResult = {
   scanned?: number
   launched?: number
   prefills?: number
+  invoiced?: number
   ignored?: number
   cooked?: string
 }
@@ -90,7 +95,14 @@ const QUOTER_ABI = [
   },
 ] as const
 
-type XUser = { id: string; username: string; name: string; profile_image_url?: string }
+type XUser = {
+  id: string
+  username: string
+  name: string
+  profile_image_url?: string
+  created_at?: string
+  public_metrics?: { followers_count?: number }
+}
 type XMedia = { media_key: string; type: string; url?: string; preview_image_url?: string }
 type XTweet = {
   id: string
@@ -228,11 +240,6 @@ function toBlitzTweet(tw: XTweet, user: XUser, mediaByKey: Map<string, XMedia>):
   }
 }
 
-/** Instant creator LP slice. Never a tweet 0x — that would let a mention steal fees. */
-function creatorRewardsWallet(): Address | null {
-  return eveBurnAddress()
-}
-
 async function cookEveBurn(pk: Hex): Promise<string | undefined> {
   const sink = eveBurnAddress()
   if (!sink) return undefined
@@ -292,14 +299,6 @@ async function cookEveBurn(pk: Hex): Promise<string | undefined> {
   }
 }
 
-function botPrivateKey(): Hex | null {
-  const raw = env('BLITZ_BOT_KEY')
-  if (!raw) return null
-  const pk = raw.startsWith('0x') ? raw : `0x${raw}`
-  if (!/^0x[0-9a-fA-F]{64}$/.test(pk)) return null
-  return pk as Hex
-}
-
 async function claim(key: string, ttl: number): Promise<boolean> {
   try {
     const set = await kv.set(key, '1', { nx: true, ex: ttl })
@@ -350,95 +349,31 @@ function deployedReply(name: string, symbol: string, token: Address, tx: Hex): s
   ].join('\n')
 }
 
-async function mintOnArc(args: {
-  name: string
-  symbol: string
-  tweet: BlitzTweet
-  rewards: Address | null
-  pk: Hex
-}): Promise<{ token: Address; tx: Hex; pool?: Address }> {
-  const wallet = arcServerWalletClient(args.pk)
-  const client = arcPublicClient()
-  const account = wallet.account
-  const firstBuy = parseArcUsdc(env('BLITZ_FIRST_BUY_USDC') || '0')
-  const feeWei = arcCreationFeeWeiFor(account.address)
-
-  if (firstBuy > 0n) {
-    const approveHash = await wallet.writeContract({
-      address: ARC.USDC,
-      abi: erc20Abi,
-      functionName: 'approve',
-      args: [ARC.INSTANT_FACTORY, firstBuy],
-      chain: wallet.chain,
-    })
-    await client.waitForTransactionReceipt({ hash: approveHash, timeout: 60_000 })
-  }
-
-  const call = buildCreateTokenMemeInstantArc(args.name, args.symbol, firstBuy, feeWei, args.rewards)
-  const hash = await wallet.writeContract({
-    address: call.address,
-    abi: call.abi,
-    functionName: call.functionName as never,
-    args: call.args as never,
-    value: call.value,
-    gas: ARC_INSTANT_CREATE_GAS,
-    chain: wallet.chain,
-  })
-  const rcpt = await client.waitForTransactionReceipt({ hash, timeout: 90_000 })
-  const [created] = parseEventLogs({
-    abi: INSTANT_QUOTE_FACTORY_ABI,
-    eventName: 'InstantQuoteTokenCreated',
-    logs: rcpt.logs,
-  })
-  const token = created?.args?.token as Address | undefined
-  const pool = created?.args?.pool as Address | undefined
-  if (!token) throw new Error('minted but InstantQuoteTokenCreated missing')
-
-  try {
-    await setArcTokenMeta(token, {
-      name: args.name,
-      symbol: args.symbol,
-      twitter: args.tweet.handle,
-      website: args.tweet.url,
-      imageUrl: args.tweet.imageUrl || args.tweet.avatarUrl || undefined,
-      description: args.tweet.text,
-      creator: account.address,
-      pool: pool || undefined,
-      instantLaunch: true,
-    })
-  } catch (e) {
-    console.error('[blitz-bot] meta', e instanceof Error ? e.message : 'meta failed')
-  }
-  try {
-    await invalidateArcHomeCatalog()
-  } catch {
-    /* best-effort */
-  }
-  return { token, tx: hash, pool }
-}
-
 async function handleMention(
   tw: XTweet,
   user: XUser,
   mediaByKey: Map<string, XMedia>,
   pk: Hex | null,
   allowMint: boolean,
-): Promise<'launched' | 'prefill' | 'ignored'> {
+): Promise<'launched' | 'prefill' | 'invoiced' | 'ignored'> {
   if (!user.id) return 'ignored'
-  if (tw.referenced_tweets?.some((r) => r.type === 'retweeted')) return 'ignored'
+  if (tw.referenced_tweets?.some((r) => r.type === 'retweeted' || r.type === 'quoted')) return 'ignored'
   const createdAt = tw.created_at ? Math.floor(new Date(tw.created_at).getTime() / 1000) : 0
   if (createdAt && Date.now() / 1000 - createdAt > MAX_AGE_SEC) return 'ignored'
 
   const parsed = parseBlitzLaunchCommand(tw.text || '')
   if (!parsed) return 'ignored'
-  // One Instant create per tick (receipt wait is ~90s; Vercel max is 300s).
-  if (pk && !allowMint) return 'ignored'
+  if (xAccountTooNew(user.created_at)) return 'ignored'
+  if (xFollowersTooLow(user.public_metrics?.followers_count)) return 'ignored'
+
+  const pay = blitzPayEnabled()
+  // One Instant create per tick when we auto-mint. Invoices are cheap.
+  if (pk && !allowMint && !pay) return 'ignored'
 
   if (await seen(TWEET_KEY(tw.id))) return 'ignored'
   if (!(await claim(TWEET_KEY(tw.id), TWEET_TTL_SEC))) return 'ignored'
 
   const tweet = toBlitzTweet(tw, user, mediaByKey)
-  const rewards = creatorRewardsWallet()
 
   try {
     if (!pk) {
@@ -450,17 +385,40 @@ async function handleMention(
       return 'prefill'
     }
 
-    if (await seen(AUTHOR_KEY(user.id))) {
+    if (await seen(AUTHOR_KEY(user.id))) return 'ignored'
+
+    if (pay) {
+      await saveBlitzInvoice({
+        tweetId: tw.id,
+        authorId: user.id,
+        handle: user.username,
+        name: parsed.name,
+        symbol: parsed.symbol,
+        tweet,
+      })
+      const url = `${siteOrigin()}/blitz/pay?tweet=${encodeURIComponent(tw.id)}`
+      await replyTo(
+        tw.id,
+        [
+          `you're clear to launch ${parsed.name} (${parsed.symbol}).`,
+          `pay ${blitzLaunchUsdLabel()} USDC nanogas on Arc:`,
+          url,
+        ].join('\n'),
+      )
+      return 'invoiced'
+    }
+
+    if (!(await claim(AUTHOR_KEY(user.id), AUTHOR_TTL_SEC))) return 'ignored'
+    if (!(await takeDailyMintSlot())) {
+      await release(AUTHOR_KEY(user.id))
       return 'ignored'
     }
-    if (!(await claim(AUTHOR_KEY(user.id), AUTHOR_TTL_SEC))) return 'ignored'
 
     try {
       const minted = await mintOnArc({
         name: parsed.name,
         symbol: parsed.symbol,
         tweet,
-        rewards,
         pk,
       })
       await mark(AUTHOR_KEY(user.id), minted.token, AUTHOR_TTL_SEC)
@@ -501,7 +459,7 @@ export async function runBlitzBotTick(): Promise<TickResult> {
     start_time: startTime,
     'tweet.fields': 'created_at,author_id,text,referenced_tweets,attachments',
     expansions: 'author_id,attachments.media_keys',
-    'user.fields': 'username,name,profile_image_url',
+    'user.fields': 'username,name,profile_image_url,created_at,public_metrics',
     'media.fields': 'url,preview_image_url,type',
   }
   const body = (await xFetch('GET', `/users/${botId}/mentions`, query)) as {
@@ -515,10 +473,11 @@ export async function runBlitzBotTick(): Promise<TickResult> {
   })
   const users = new Map((body.includes?.users || []).map((u) => [u.id, u]))
   const mediaByKey = new Map((body.includes?.media || []).map((m) => [m.media_key, m]))
-  const pk = botPrivateKey()
+  const pk = blitzBotPrivateKey()
 
   let launched = 0
   let prefills = 0
+  let invoiced = 0
   let ignored = 0
   for (const tw of tweets) {
     if (!tw?.id) {
@@ -537,11 +496,12 @@ export async function runBlitzBotTick(): Promise<TickResult> {
     const result = await handleMention(tw, user, mediaByKey, pk, launched === 0)
     if (result === 'launched') launched++
     else if (result === 'prefill') prefills++
+    else if (result === 'invoiced') invoiced++
     else ignored++
   }
 
   let cooked: string | undefined
   if (pk) cooked = await cookEveBurn(pk)
 
-  return { ok: true, scanned: tweets.length, launched, prefills, ignored, cooked }
+  return { ok: true, scanned: tweets.length, launched, prefills, invoiced, ignored, cooked }
 }

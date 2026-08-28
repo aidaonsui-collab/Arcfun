@@ -122,9 +122,18 @@ export function x402PriceAtomic(): bigint {
   }
 }
 
+export function x402FacilitatorKey(): Hex | null {
+  for (const name of ['ARC_OTC_KEEPER_KEY', 'ROBIN_OTC_KEEPER_KEY', 'BLITZ_BOT_KEY']) {
+    const raw = (process.env[name] || '').trim()
+    if (!raw) continue
+    const k = raw.startsWith('0x') ? raw : `0x${raw}`
+    if (/^0x[0-9a-fA-F]{64}$/.test(k)) return k as Hex
+  }
+  return null
+}
+
 function x402KeeperKey(): Hex | null {
-  const k = (process.env.ARC_OTC_KEEPER_KEY || process.env.ROBIN_OTC_KEEPER_KEY || '').trim()
-  return /^0x[0-9a-fA-F]{64}$/.test(k) ? (k as Hex) : null
+  return x402FacilitatorKey()
 }
 
 function readClient() {
