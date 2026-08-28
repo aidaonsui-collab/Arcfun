@@ -77,8 +77,8 @@ export async function mintOnArc(args: {
     await setArcTokenMeta(token, {
       name: args.name,
       symbol: args.symbol,
-      twitter: args.tweet.handle,
-      website: args.tweet.url,
+      twitter: args.tweet.sourceUrl || args.tweet.sourceHandle || args.tweet.handle,
+      website: args.tweet.sourceUrl || args.tweet.url,
       imageUrl: blitzTokenImageUrl(args.tweet.imageUrl),
       description: args.tweet.text,
       creator: account.address,

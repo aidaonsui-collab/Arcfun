@@ -25,7 +25,7 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { kv } from '@vercel/kv'
 import { erc20Abi, type Address, type Hex } from 'viem'
 import { draftFromTweet, prefillQuery, type BlitzTweet } from './arc-blitz'
-import { firstTweetPhotoFromKeys, parentTweetId } from './arc-blitz-image'
+import { firstTweetPhotoFromKeys, parentTweetId, tweetStatusUrl } from './arc-blitz-image'
 import { parseBlitzLaunchCommand } from './arc-blitz-command'
 import {
   BLITZ_AUTHOR_TTL_SEC,
@@ -107,6 +107,7 @@ type XTweet = {
   text: string
   created_at?: string
   author_id?: string
+  in_reply_to_user_id?: string
   referenced_tweets?: { type: string; id: string }[]
   attachments?: { media_keys?: string[] }
 }
@@ -236,6 +237,21 @@ function toBlitzTweet(
     // Token art is tweet / parent-tweet media only. Never the author's X pfp.
     imageUrl: image,
   }
+}
+
+function attachSource(
+  tweet: BlitzTweet,
+  tw: XTweet,
+  tweetsById: Map<string, XTweet>,
+  users: Map<string, XUser>,
+): void {
+  const pid = parentTweetId(tw.referenced_tweets)
+  if (!pid) return
+  const parent = tweetsById.get(pid)
+  const authorId = parent?.author_id || tw.in_reply_to_user_id
+  const handle = (authorId && users.get(authorId)?.username) || ''
+  tweet.sourceHandle = handle || null
+  tweet.sourceUrl = tweetStatusUrl(handle, pid)
 }
 
 async function fetchTweetPhoto(id: string): Promise<string | null> {
@@ -388,6 +404,7 @@ async function handleMention(
   user: XUser,
   mediaByKey: Map<string, XMedia>,
   tweetsById: Map<string, XTweet>,
+  users: Map<string, XUser>,
   pk: Hex | null,
   allowMint: boolean,
 ): Promise<'launched' | 'prefill' | 'ignored'> {
@@ -408,6 +425,7 @@ async function handleMention(
   if (!(await claim(TWEET_KEY(tw.id), TWEET_TTL_SEC))) return 'ignored'
 
   const tweet = toBlitzTweet(tw, user, mediaByKey, tweetsById)
+  attachSource(tweet, tw, tweetsById, users)
   if (!tweet.imageUrl) {
     const pid = parentTweetId(tw.referenced_tweets)
     if (pid) tweet.imageUrl = await fetchTweetPhoto(pid)
@@ -473,8 +491,8 @@ export async function runBlitzBotTick(): Promise<TickResult> {
   const query: Record<string, string> = {
     max_results: '25',
     start_time: startTime,
-    'tweet.fields': 'created_at,author_id,text,referenced_tweets,attachments',
-    expansions: 'author_id,attachments.media_keys,referenced_tweets.id',
+    'tweet.fields': 'created_at,author_id,in_reply_to_user_id,text,referenced_tweets,attachments',
+    expansions: 'author_id,in_reply_to_user_id,attachments.media_keys,referenced_tweets.id,referenced_tweets.id.author_id',
     'user.fields': 'username,name,profile_image_url,created_at,public_metrics',
     'media.fields': 'url,preview_image_url,type',
   }
@@ -509,7 +527,7 @@ export async function runBlitzBotTick(): Promise<TickResult> {
       username: 'user',
       name: 'user',
     }
-    const result = await handleMention(tw, user, mediaByKey, tweetsById, pk, launched === 0)
+    const result = await handleMention(tw, user, mediaByKey, tweetsById, users, pk, launched === 0)
     if (result === 'launched') launched++
     else if (result === 'prefill') prefills++
     else ignored++

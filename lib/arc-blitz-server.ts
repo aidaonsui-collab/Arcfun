@@ -4,7 +4,7 @@
  */
 import { kv } from '@vercel/kv'
 import { draftFromTweet, parseTweetUrl, sanitizeHandle, type BlitzTweet } from './arc-blitz'
-import { firstTweetPhotoFromKeys } from './arc-blitz-image'
+import { firstTweetPhotoFromKeys, tweetStatusUrl } from './arc-blitz-image'
 
 const FX = 'https://api.fxtwitter.com'
 const X_API = 'https://api.twitter.com/2'
@@ -55,6 +55,7 @@ type FxTweet = {
   author?: { screen_name?: string; name?: string; avatar_url?: string }
   media?: unknown
   quote?: { media?: unknown }
+  replying_to?: string
   replying_to_status?: string
 }
 
@@ -85,9 +86,12 @@ export async function fetchTweetByUrl(raw: string): Promise<BlitzTweet> {
   const body = (await getJson(`${FX}/${path}`)) as { tweet?: FxTweet; code?: number }
   const tweet = fromFx(body.tweet || {})
   if (!tweet) throw new Error('Tweet not found')
-  if (!tweet.imageUrl) {
-    const parentId = String(body.tweet?.replying_to_status || '')
-    if (/^\d{10,22}$/.test(parentId)) {
+  const parentId = String(body.tweet?.replying_to_status || '')
+  if (/^\d{10,22}$/.test(parentId)) {
+    const parentHandle = sanitizeHandle(body.tweet?.replying_to || '')
+    tweet.sourceHandle = parentHandle || null
+    tweet.sourceUrl = tweetStatusUrl(parentHandle, parentId)
+    if (!tweet.imageUrl) {
       try {
         const parent = (await getJson(`${FX}/status/${encodeURIComponent(parentId)}`)) as { tweet?: FxTweet }
         tweet.imageUrl = firstPhoto(parent.tweet?.media) || firstPhoto(parent.tweet?.quote?.media)

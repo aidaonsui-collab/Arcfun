@@ -70,7 +70,29 @@ export function sanitizeWebsite(raw: string): string {
 }
 
 export function twitterHref(raw: string): string {
-  const handle = sanitizeTwitter(raw)
+  const t = raw.trim()
+  if (!t) return ''
+  try {
+    const u = new URL(/^https?:\/\//i.test(t) ? t : `https://${t}`)
+    const host = u.hostname.replace(/^www\./i, '').toLowerCase()
+    if (host === 'x.com' || host === 'twitter.com') {
+      const parts = u.pathname.split('/').filter(Boolean)
+      const statusAt = parts.findIndex((p) => p.toLowerCase() === 'status')
+      if (statusAt >= 0 && parts[statusAt + 1] && /^\d{10,22}$/.test(parts[statusAt + 1].split(/[?#]/)[0])) {
+        const id = parts[statusAt + 1].split(/[?#]/)[0]
+        const handle = (parts[0] && parts[0].toLowerCase() !== 'i' && parts[0].toLowerCase() !== 'status'
+          ? parts[0]
+          : ''
+        ).replace(/^@/, '')
+        return /^[A-Za-z0-9_]{1,32}$/.test(handle)
+          ? `https://x.com/${handle}/status/${id}`
+          : `https://x.com/i/status/${id}`
+      }
+    }
+  } catch {
+    /* handle path */
+  }
+  const handle = sanitizeTwitter(t)
   return handle ? `https://x.com/${handle}` : ''
 }
 
