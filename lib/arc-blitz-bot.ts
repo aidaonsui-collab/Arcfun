@@ -383,19 +383,16 @@ async function announce(tweetId: string, handle: string, text: string): Promise<
   }
 }
 
-function deployedReply(name: string, symbol: string, token: Address, tx: Hex): string {
+function deployedReply(name: string, symbol: string): string {
+  // X blocks 0x contract/tx in API tweets for 7 days after app auth.
   return [
     'your token has been deployed on arc.',
     '',
     `token: ${name} (${symbol})`,
-    'contract:',
-    token,
-    'tx:',
-    tx,
     '',
     'creator LP fees buy and burn $EVE.',
     '',
-    `trade: https://arcfun.co/token/${token}`,
+    'trade: https://arcfun.co',
   ].join('\n')
 }
 
@@ -458,7 +455,7 @@ async function handleMention(
       })
       await mark(AUTHOR_KEY(user.id), minted.token, AUTHOR_TTL_SEC)
       try {
-        await announce(tw.id, user.username, deployedReply(parsed.name, parsed.symbol, minted.token, minted.tx))
+        await announce(tw.id, user.username, deployedReply(parsed.name, parsed.symbol))
       } catch (e) {
         console.error('[blitz-bot] announce', tw.id, e instanceof Error ? e.message : 'announce failed')
       }
