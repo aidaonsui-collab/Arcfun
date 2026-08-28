@@ -10,7 +10,7 @@
  *   BLITZ_BOT_HANDLE         bot @handle (no @ required)
  *   BLITZ_BOT_KEY            0x private key for Instant mint (omit → prefill /create? reply)
  *   BLITZ_FIRST_BUY_USDC     first-buy USDC amount, default 0
- *   BLITZ_EVE_BURN           EveBurn sink; Instant creator USDC stamps here (tweet 0x ignored)
+ *   BLITZ_EVE_BURN           EveBurn sink; Instant creator USDC stamps here (no tweet 0x)
  *   NEXT_PUBLIC_BLITZ_BOT_HANDLE  UI copy (@handle, default watch_eve)
  *   NEXT_PUBLIC_EVE_BURN     same sink, public
  *
@@ -20,8 +20,6 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { kv } from '@vercel/kv'
 import {
   erc20Abi,
-  getAddress,
-  isAddress,
   parseEventLogs,
   type Address,
   type Hex,
@@ -230,17 +228,9 @@ function toBlitzTweet(tw: XTweet, user: XUser, mediaByKey: Map<string, XMedia>):
   }
 }
 
-function extractRewardsWallet(text: string): Address | null {
-  const m = text.match(/0x[a-fA-F0-9]{40}/)
-  if (!m || !isAddress(m[0])) return null
-  const addr = getAddress(m[0])
-  if (addr === '0x0000000000000000000000000000000000000000') return null
-  return addr
-}
-
-/** Sink wins. Tweet 0x cannot steal the $EVE buy/burn slice. */
-function creatorRewardsForTweet(text: string): Address | null {
-  return eveBurnAddress() ?? extractRewardsWallet(text)
+/** Instant creator LP slice. Never a tweet 0x — that would let a mention steal fees. */
+function creatorRewardsWallet(): Address | null {
+  return eveBurnAddress()
 }
 
 async function cookEveBurn(pk: Hex): Promise<string | undefined> {
@@ -256,6 +246,19 @@ async function cookEveBurn(pk: Hex): Promise<string | undefined> {
       args: [sink],
     })) as bigint
     if (bal < COOK_DUST) return undefined
+    let fee: number = EVE_POOL_FEE
+    try {
+      fee = Number(
+        await client.readContract({
+          address: sink,
+          abi: EVE_BURN_ABI,
+          functionName: 'evePoolFee',
+        }),
+      )
+      if (!Number.isFinite(fee) || fee <= 0) fee = EVE_POOL_FEE
+    } catch {
+      /* use default 1% */
+    }
     const quoted = (await client.readContract({
       address: ARC.UNI_QUOTER,
       abi: QUOTER_ABI,
@@ -265,7 +268,7 @@ async function cookEveBurn(pk: Hex): Promise<string | undefined> {
           tokenIn: ARC.USDC,
           tokenOut: EVE_TOKEN,
           amountIn: bal,
-          fee: EVE_POOL_FEE,
+          fee,
           sqrtPriceLimitX96: 0n,
         },
       ],
@@ -302,7 +305,8 @@ async function claim(key: string, ttl: number): Promise<boolean> {
     const set = await kv.set(key, '1', { nx: true, ex: ttl })
     return set != null
   } catch {
-    return true
+    // Fail closed: never mint if we cannot lock the tweet/author.
+    return false
   }
 }
 
@@ -310,7 +314,8 @@ async function seen(key: string): Promise<boolean> {
   try {
     return Boolean(await kv.get(key))
   } catch {
-    return false
+    // Fail closed: treat as already handled.
+    return true
   }
 }
 
@@ -417,19 +422,23 @@ async function handleMention(
   user: XUser,
   mediaByKey: Map<string, XMedia>,
   pk: Hex | null,
+  allowMint: boolean,
 ): Promise<'launched' | 'prefill' | 'ignored'> {
+  if (!user.id) return 'ignored'
   if (tw.referenced_tweets?.some((r) => r.type === 'retweeted')) return 'ignored'
   const createdAt = tw.created_at ? Math.floor(new Date(tw.created_at).getTime() / 1000) : 0
   if (createdAt && Date.now() / 1000 - createdAt > MAX_AGE_SEC) return 'ignored'
 
   const parsed = parseBlitzLaunchCommand(tw.text || '')
   if (!parsed) return 'ignored'
+  // One Instant create per tick (receipt wait is ~90s; Vercel max is 300s).
+  if (pk && !allowMint) return 'ignored'
 
   if (await seen(TWEET_KEY(tw.id))) return 'ignored'
   if (!(await claim(TWEET_KEY(tw.id), TWEET_TTL_SEC))) return 'ignored'
 
   const tweet = toBlitzTweet(tw, user, mediaByKey)
-  const rewards = creatorRewardsForTweet(tw.text || '')
+  const rewards = creatorRewardsWallet()
 
   try {
     if (!pk) {
@@ -499,7 +508,11 @@ export async function runBlitzBotTick(): Promise<TickResult> {
     data?: XTweet[]
     includes?: { users?: XUser[]; media?: XMedia[] }
   }
-  const tweets = body.data || []
+  const tweets = [...(body.data || [])].sort((a, b) => {
+    const ta = a.created_at ? Date.parse(a.created_at) : 0
+    const tb = b.created_at ? Date.parse(b.created_at) : 0
+    return ta - tb
+  })
   const users = new Map((body.includes?.users || []).map((u) => [u.id, u]))
   const mediaByKey = new Map((body.includes?.media || []).map((m) => [m.media_key, m]))
   const pk = botPrivateKey()
@@ -521,7 +534,7 @@ export async function runBlitzBotTick(): Promise<TickResult> {
       username: 'user',
       name: 'user',
     }
-    const result = await handleMention(tw, user, mediaByKey, pk)
+    const result = await handleMention(tw, user, mediaByKey, pk, launched === 0)
     if (result === 'launched') launched++
     else if (result === 'prefill') prefills++
     else ignored++

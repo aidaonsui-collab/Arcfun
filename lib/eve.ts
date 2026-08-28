@@ -37,4 +37,11 @@ export const EVE_BURN_ABI = [
     inputs: [],
     outputs: [{ name: '', type: 'address' }],
   },
+  {
+    type: 'function',
+    name: 'evePoolFee',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint24' }],
+  },
 ] as const satisfies Abi

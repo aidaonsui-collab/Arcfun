@@ -1,6 +1,7 @@
 # EveBurn
 
 Sink for Instant-creator USDC on `@watch_eve` Blitz launches. Cooks USDC → `$EVE` → `0xdead`.
+The mention bot never stamps a tweet `0x` as creatorRewardsWallet.
 
 `$EVE` `0x19209E55049bc613c5cC8b66B7DF7824096e78CF` (18dp). Uni V3 USDC pool fee **10000**.
 

@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { runBlitzBotTick } from '@/lib/arc-blitz-bot'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+export const maxDuration = 300
 
 async function handle(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET

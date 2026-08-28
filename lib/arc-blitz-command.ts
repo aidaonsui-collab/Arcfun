@@ -24,6 +24,7 @@ export function parseBlitzLaunchCommand(text: string): BlitzLaunchCommand | null
   let name = m[2].trim()
   name = name.replace(/\s+on\s+(arc|base)\b/gi, ' ').replace(/\s+/g, ' ').trim()
   if (!name || name.length > 48) return null
+  if (/[\u0000-\u001f]/.test(name)) return null
   const symbol = m[3].toUpperCase()
   if (!/^[A-Z0-9]{2,12}$/.test(symbol)) return null
   return { name, symbol }
