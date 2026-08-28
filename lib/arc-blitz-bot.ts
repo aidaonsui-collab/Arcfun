@@ -335,6 +335,23 @@ async function replyTo(tweetId: string, text: string): Promise<void> {
   await xFetch('POST', '/tweets', {}, { text, reply: { in_reply_to_tweet_id: tweetId } })
 }
 
+/** Standalone tweet when X blocks a thread reply (replying under someone else's post). */
+async function postStatus(text: string): Promise<void> {
+  await xFetch('POST', '/tweets', {}, { text })
+}
+
+async function announce(tweetId: string, handle: string, text: string): Promise<void> {
+  try {
+    await replyTo(tweetId, text)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[blitz-bot] reply', tweetId, msg)
+    const who = handle.replace(/^@/, '')
+    const body = who ? `@${who}\n${text}` : text
+    await postStatus(body)
+  }
+}
+
 function deployedReply(name: string, symbol: string, token: Address, tx: Hex): string {
   return [
     'your token has been deployed on arc.',
@@ -382,7 +399,7 @@ async function handleMention(
       draft.name = parsed.name
       draft.symbol = parsed.symbol
       const url = `${siteOrigin()}/create?${prefillQuery(draft)}`
-      await replyTo(tw.id, url)
+      await announce(tw.id, user.username, url)
       return 'prefill'
     }
 
@@ -402,9 +419,9 @@ async function handleMention(
       })
       await mark(AUTHOR_KEY(user.id), minted.token, AUTHOR_TTL_SEC)
       try {
-        await replyTo(tw.id, deployedReply(parsed.name, parsed.symbol, minted.token, minted.tx))
+        await announce(tw.id, user.username, deployedReply(parsed.name, parsed.symbol, minted.token, minted.tx))
       } catch (e) {
-        console.error('[blitz-bot] reply', tw.id, e instanceof Error ? e.message : 'reply failed')
+        console.error('[blitz-bot] announce', tw.id, e instanceof Error ? e.message : 'announce failed')
       }
       return 'launched'
     } catch (e) {
