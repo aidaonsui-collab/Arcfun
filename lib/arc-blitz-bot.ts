@@ -15,7 +15,7 @@
  *   BLITZ_MIN_FOLLOWERS      default 50; 0 disables
  *   BLITZ_DAILY_CAP          default 20 Instant creates / UTC day; 0 disables
  *   BLITZ_TICKER_DENY        extra comma-separated tickers
- *   BLITZ_X402_PRICE_ATOMIC  nanogas USDC 6dp, default 10000 ($0.01)
+
  *   NEXT_PUBLIC_BLITZ_BOT_HANDLE  UI copy (@handle, default watch_eve)
  *   NEXT_PUBLIC_EVE_BURN     same sink, public
  *
@@ -33,9 +33,7 @@ import {
   xFollowersTooLow,
   takeDailyMintSlot,
 } from './arc-blitz-guards'
-import { saveBlitzInvoice } from './arc-blitz-invoice'
 import { blitzBotPrivateKey, mintOnArc } from './arc-blitz-mint'
-import { blitzLaunchUsdLabel, blitzPayEnabled } from './arc-blitz-pay'
 import {
   ARC,
   arcPublicClient,
@@ -60,7 +58,6 @@ type TickResult = {
   scanned?: number
   launched?: number
   prefills?: number
-  invoiced?: number
   ignored?: number
   cooked?: string
 }
@@ -343,8 +340,13 @@ function deployedReply(name: string, symbol: string, token: Address, tx: Hex): s
     'your token has been deployed on arc.',
     '',
     `token: ${name} (${symbol})`,
-    `contract: ${token}`,
-    `tx: ${tx}`,
+    'contract:',
+    token,
+    'tx:',
+    tx,
+    '',
+    'creator LP fees buy and burn $EVE.',
+    '',
     `trade: https://arcfun.co/token/${token}`,
   ].join('\n')
 }
@@ -355,7 +357,7 @@ async function handleMention(
   mediaByKey: Map<string, XMedia>,
   pk: Hex | null,
   allowMint: boolean,
-): Promise<'launched' | 'prefill' | 'invoiced' | 'ignored'> {
+): Promise<'launched' | 'prefill' | 'ignored'> {
   if (!user.id) return 'ignored'
   if (tw.referenced_tweets?.some((r) => r.type === 'retweeted' || r.type === 'quoted')) return 'ignored'
   const createdAt = tw.created_at ? Math.floor(new Date(tw.created_at).getTime() / 1000) : 0
@@ -366,9 +368,8 @@ async function handleMention(
   if (xAccountTooNew(user.created_at)) return 'ignored'
   if (xFollowersTooLow(user.public_metrics?.followers_count)) return 'ignored'
 
-  const pay = blitzPayEnabled()
-  // One Instant create per tick when we auto-mint. Invoices are cheap.
-  if (pk && !allowMint && !pay) return 'ignored'
+  // One Instant create per tick (receipt wait is ~90s; Vercel max is 300s).
+  if (pk && !allowMint) return 'ignored'
 
   if (await seen(TWEET_KEY(tw.id))) return 'ignored'
   if (!(await claim(TWEET_KEY(tw.id), TWEET_TTL_SEC))) return 'ignored'
@@ -386,28 +387,6 @@ async function handleMention(
     }
 
     if (await seen(AUTHOR_KEY(user.id))) return 'ignored'
-
-    if (pay) {
-      await saveBlitzInvoice({
-        tweetId: tw.id,
-        authorId: user.id,
-        handle: user.username,
-        name: parsed.name,
-        symbol: parsed.symbol,
-        tweet,
-      })
-      const url = `${siteOrigin()}/blitz/pay?tweet=${encodeURIComponent(tw.id)}`
-      await replyTo(
-        tw.id,
-        [
-          `you're clear to launch ${parsed.name} (${parsed.symbol}).`,
-          `pay ${blitzLaunchUsdLabel()} USDC nanogas on Arc:`,
-          url,
-        ].join('\n'),
-      )
-      return 'invoiced'
-    }
-
     if (!(await claim(AUTHOR_KEY(user.id), AUTHOR_TTL_SEC))) return 'ignored'
     if (!(await takeDailyMintSlot())) {
       await release(AUTHOR_KEY(user.id))
@@ -477,7 +456,6 @@ export async function runBlitzBotTick(): Promise<TickResult> {
 
   let launched = 0
   let prefills = 0
-  let invoiced = 0
   let ignored = 0
   for (const tw of tweets) {
     if (!tw?.id) {
@@ -496,12 +474,11 @@ export async function runBlitzBotTick(): Promise<TickResult> {
     const result = await handleMention(tw, user, mediaByKey, pk, launched === 0)
     if (result === 'launched') launched++
     else if (result === 'prefill') prefills++
-    else if (result === 'invoiced') invoiced++
     else ignored++
   }
 
   let cooked: string | undefined
   if (pk) cooked = await cookEveBurn(pk)
 
-  return { ok: true, scanned: tweets.length, launched, prefills, invoiced, ignored, cooked }
+  return { ok: true, scanned: tweets.length, launched, prefills, ignored, cooked }
 }
