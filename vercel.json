@@ -9,14 +9,6 @@
       "schedule": "*/2 * * * *"
     },
     {
-      "path": "/api/arc/indexer/otc",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/arc/keeper/otc",
-      "schedule": "* * * * *"
-    },
-    {
       "path": "/api/arc/blitz/bot",
       "schedule": "*/1 * * * *"
     }
