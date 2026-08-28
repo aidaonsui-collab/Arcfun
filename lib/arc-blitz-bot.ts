@@ -25,6 +25,7 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { kv } from '@vercel/kv'
 import { erc20Abi, type Address, type Hex } from 'viem'
 import { draftFromTweet, prefillQuery, type BlitzTweet } from './arc-blitz'
+import { firstTweetPhotoFromKeys, parentTweetId } from './arc-blitz-image'
 import { parseBlitzLaunchCommand } from './arc-blitz-command'
 import {
   BLITZ_AUTHOR_TTL_SEC,
@@ -211,17 +212,16 @@ function bumpAvatar(url: string): string {
   return url.replace(/_normal\.(jpg|png|webp)$/i, '_400x400.$1')
 }
 
-function toBlitzTweet(tw: XTweet, user: XUser, mediaByKey: Map<string, XMedia>): BlitzTweet {
-  const keys = tw.attachments?.media_keys || []
-  let image: string | null = null
-  for (const k of keys) {
-    const m = mediaByKey.get(k)
-    const url = m?.url || m?.preview_image_url
-    if (url && (m?.type === 'photo' || m?.type === 'animated_gif')) {
-      image = url
-      break
-    }
-    if (!image && url) image = url
+function toBlitzTweet(
+  tw: XTweet,
+  user: XUser,
+  mediaByKey: Map<string, XMedia>,
+  tweetsById: Map<string, XTweet>,
+): BlitzTweet {
+  let image = firstTweetPhotoFromKeys(tw.attachments?.media_keys, mediaByKey)
+  if (!image) {
+    const parent = tweetsById.get(parentTweetId(tw.referenced_tweets) || '')
+    if (parent) image = firstTweetPhotoFromKeys(parent.attachments?.media_keys, mediaByKey)
   }
   const avatar = user.profile_image_url ? bumpAvatar(user.profile_image_url) : ''
   const createdAt = tw.created_at ? Math.floor(new Date(tw.created_at).getTime() / 1000) : Math.floor(Date.now() / 1000)
@@ -233,7 +233,22 @@ function toBlitzTweet(tw: XTweet, user: XUser, mediaByKey: Map<string, XMedia>):
     handle: user.username,
     displayName: user.name || user.username,
     avatarUrl: avatar,
-    imageUrl: image || avatar || null,
+    // Token art is tweet / parent-tweet media only. Never the author's X pfp.
+    imageUrl: image,
+  }
+}
+
+async function fetchTweetPhoto(id: string): Promise<string | null> {
+  try {
+    const body = (await xFetch('GET', `/tweets/${encodeURIComponent(id)}`, {
+      expansions: 'attachments.media_keys',
+      'tweet.fields': 'attachments',
+      'media.fields': 'url,preview_image_url,type',
+    })) as { data?: XTweet; includes?: { media?: XMedia[] } }
+    const mediaByKey = new Map((body.includes?.media || []).map((m) => [m.media_key, m]))
+    return firstTweetPhotoFromKeys(body.data?.attachments?.media_keys, mediaByKey)
+  } catch {
+    return null
   }
 }
 
@@ -372,6 +387,7 @@ async function handleMention(
   tw: XTweet,
   user: XUser,
   mediaByKey: Map<string, XMedia>,
+  tweetsById: Map<string, XTweet>,
   pk: Hex | null,
   allowMint: boolean,
 ): Promise<'launched' | 'prefill' | 'ignored'> {
@@ -391,7 +407,11 @@ async function handleMention(
   if (await seen(TWEET_KEY(tw.id))) return 'ignored'
   if (!(await claim(TWEET_KEY(tw.id), TWEET_TTL_SEC))) return 'ignored'
 
-  const tweet = toBlitzTweet(tw, user, mediaByKey)
+  const tweet = toBlitzTweet(tw, user, mediaByKey, tweetsById)
+  if (!tweet.imageUrl) {
+    const pid = parentTweetId(tw.referenced_tweets)
+    if (pid) tweet.imageUrl = await fetchTweetPhoto(pid)
+  }
 
   try {
     if (!pk) {
@@ -454,13 +474,13 @@ export async function runBlitzBotTick(): Promise<TickResult> {
     max_results: '25',
     start_time: startTime,
     'tweet.fields': 'created_at,author_id,text,referenced_tweets,attachments',
-    expansions: 'author_id,attachments.media_keys',
+    expansions: 'author_id,attachments.media_keys,referenced_tweets.id',
     'user.fields': 'username,name,profile_image_url,created_at,public_metrics',
     'media.fields': 'url,preview_image_url,type',
   }
   const body = (await xFetch('GET', `/users/${botId}/mentions`, query)) as {
     data?: XTweet[]
-    includes?: { users?: XUser[]; media?: XMedia[] }
+    includes?: { users?: XUser[]; media?: XMedia[]; tweets?: XTweet[] }
   }
   const tweets = [...(body.data || [])].sort((a, b) => {
     const ta = a.created_at ? Date.parse(a.created_at) : 0
@@ -469,6 +489,7 @@ export async function runBlitzBotTick(): Promise<TickResult> {
   })
   const users = new Map((body.includes?.users || []).map((u) => [u.id, u]))
   const mediaByKey = new Map((body.includes?.media || []).map((m) => [m.media_key, m]))
+  const tweetsById = new Map((body.includes?.tweets || []).map((t) => [t.id, t]))
   const pk = blitzBotPrivateKey()
 
   let launched = 0
@@ -488,7 +509,7 @@ export async function runBlitzBotTick(): Promise<TickResult> {
       username: 'user',
       name: 'user',
     }
-    const result = await handleMention(tw, user, mediaByKey, pk, launched === 0)
+    const result = await handleMention(tw, user, mediaByKey, tweetsById, pk, launched === 0)
     if (result === 'launched') launched++
     else if (result === 'prefill') prefills++
     else ignored++

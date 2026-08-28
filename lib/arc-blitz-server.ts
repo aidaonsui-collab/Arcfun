@@ -4,6 +4,7 @@
  */
 import { kv } from '@vercel/kv'
 import { draftFromTweet, parseTweetUrl, sanitizeHandle, type BlitzTweet } from './arc-blitz'
+import { firstTweetPhotoFromKeys } from './arc-blitz-image'
 
 const FX = 'https://api.fxtwitter.com'
 const X_API = 'https://api.twitter.com/2'
@@ -54,14 +55,15 @@ type FxTweet = {
   author?: { screen_name?: string; name?: string; avatar_url?: string }
   media?: unknown
   quote?: { media?: unknown }
+  replying_to_status?: string
 }
 
 function fromFx(raw: FxTweet): BlitzTweet | null {
   const id = String(raw.id || '')
   const handle = sanitizeHandle(raw.author?.screen_name || '')
   if (!id || !handle) return null
-  const image =
-    firstPhoto(raw.media) || firstPhoto(raw.quote?.media) || (raw.author?.avatar_url ? bumpAvatar(raw.author.avatar_url) : null)
+  // Token art is tweet / quoted media only. Never the author's X pfp.
+  const image = firstPhoto(raw.media) || firstPhoto(raw.quote?.media)
   return {
     id,
     url: raw.url || `https://x.com/${handle}/status/${id}`,
@@ -83,6 +85,17 @@ export async function fetchTweetByUrl(raw: string): Promise<BlitzTweet> {
   const body = (await getJson(`${FX}/${path}`)) as { tweet?: FxTweet; code?: number }
   const tweet = fromFx(body.tweet || {})
   if (!tweet) throw new Error('Tweet not found')
+  if (!tweet.imageUrl) {
+    const parentId = String(body.tweet?.replying_to_status || '')
+    if (/^\d{10,22}$/.test(parentId)) {
+      try {
+        const parent = (await getJson(`${FX}/status/${encodeURIComponent(parentId)}`)) as { tweet?: FxTweet }
+        tweet.imageUrl = firstPhoto(parent.tweet?.media) || firstPhoto(parent.tweet?.quote?.media)
+      } catch {
+        /* parent media optional */
+      }
+    }
+  }
   return tweet
 }
 
@@ -128,17 +141,7 @@ function fromX(
   user: XUser,
   mediaByKey: Map<string, XMedia>,
 ): BlitzTweet {
-  const keys = tw.attachments?.media_keys || []
-  let image: string | null = null
-  for (const k of keys) {
-    const m = mediaByKey.get(k)
-    const url = m?.url || m?.preview_image_url
-    if (url && (m?.type === 'photo' || m?.type === 'animated_gif')) {
-      image = url
-      break
-    }
-    if (!image && url) image = url
-  }
+  const image = firstTweetPhotoFromKeys(tw.attachments?.media_keys, mediaByKey)
   const avatar = user.profile_image_url ? bumpAvatar(user.profile_image_url) : ''
   const createdAt = tw.created_at ? Math.floor(new Date(tw.created_at).getTime() / 1000) : Math.floor(Date.now() / 1000)
   return {
@@ -149,7 +152,7 @@ function fromX(
     handle: user.username,
     displayName: user.name || user.username,
     avatarUrl: avatar,
-    imageUrl: image || avatar || null,
+    imageUrl: image,
   }
 }
 

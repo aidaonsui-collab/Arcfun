@@ -2,6 +2,7 @@
  * Blitz launch — tweet → Instant TOKEN/USDC create.
  * Same factory and pair as /create. This is only the fill path.
  */
+import { blitzTokenImageUrl } from './arc-blitz-image'
 
 export const BLITZ_WATCH_KEY = 'arcfun_blitz_watch'
 export const BLITZ_SEEN_KEY = 'arcfun_blitz_seen'
@@ -108,7 +109,7 @@ export function draftFromTweet(t: BlitzTweet): BlitzPrefill {
     description,
     twitter: t.handle,
     website: t.url,
-    imageUrl: t.imageUrl || t.avatarUrl || undefined,
+    imageUrl: blitzTokenImageUrl(t.imageUrl),
     tweetUrl: t.url,
     handle: t.handle,
   }
