@@ -25,7 +25,7 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { kv } from '@vercel/kv'
 import { erc20Abi, type Address, type Hex } from 'viem'
 import { draftFromTweet, prefillQuery, type BlitzTweet } from './arc-blitz'
-import { firstTweetPhotoFromKeys, parentTweetId, tweetStatusUrl } from './arc-blitz-image'
+import { firstTweetPhotoFromKeys, isRetweetRef, parentTweetId, tweetStatusUrl } from './arc-blitz-image'
 import { parseBlitzLaunchCommand } from './arc-blitz-command'
 import {
   BLITZ_AUTHOR_TTL_SEC,
@@ -409,7 +409,8 @@ async function handleMention(
   allowMint: boolean,
 ): Promise<'launched' | 'prefill' | 'ignored'> {
   if (!user.id) return 'ignored'
-  if (tw.referenced_tweets?.some((r) => r.type === 'retweeted' || r.type === 'quoted')) return 'ignored'
+  // Quote-reposts that tag Eve are new tweets she can reply in. Plain RTs are not.
+  if (isRetweetRef(tw.referenced_tweets)) return 'ignored'
   const createdAt = tw.created_at ? Math.floor(new Date(tw.created_at).getTime() / 1000) : 0
   if (createdAt && Date.now() / 1000 - createdAt > MAX_AGE_SEC) return 'ignored'
 

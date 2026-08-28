@@ -54,6 +54,11 @@ export function parentTweetId(refs: TweetRef[] | undefined): string | null {
   return null
 }
 
+/** Plain retweets cannot carry a launch command. Quote-reposts can. */
+export function isRetweetRef(refs: TweetRef[] | undefined): boolean {
+  return Boolean(refs?.some((r) => r.type === 'retweeted'))
+}
+
 /** Canonical x.com status URL. Handle is optional (`/i/status/id` still opens the post). */
 export function tweetStatusUrl(handle: string | undefined, id: string): string | null {
   const snowflake = (id || '').trim()
