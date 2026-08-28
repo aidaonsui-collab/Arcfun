@@ -3,6 +3,7 @@
  */
 import { erc20Abi, parseEventLogs, type Address, type Hex } from 'viem'
 import { type BlitzTweet } from './arc-blitz'
+import { blitzTokenImageUrl } from './arc-blitz-image'
 import { buildCreateTokenMemeInstantArc, parseArcUsdc } from './arc-instant-launchpad'
 import { invalidateArcHomeCatalog } from './arc-catalog-cache'
 import { setArcTokenMeta } from './arc-token-meta'
@@ -78,7 +79,7 @@ export async function mintOnArc(args: {
       symbol: args.symbol,
       twitter: args.tweet.handle,
       website: args.tweet.url,
-      imageUrl: args.tweet.imageUrl || args.tweet.avatarUrl || undefined,
+      imageUrl: blitzTokenImageUrl(args.tweet.imageUrl),
       description: args.tweet.text,
       creator: account.address,
       pool: pool || undefined,
