@@ -54,6 +54,14 @@ export function parentTweetId(refs: TweetRef[] | undefined): string | null {
   return null
 }
 
+/** Canonical x.com status URL. Handle is optional (`/i/status/id` still opens the post). */
+export function tweetStatusUrl(handle: string | undefined, id: string): string | null {
+  const snowflake = (id || '').trim()
+  if (!/^\d{10,22}$/.test(snowflake)) return null
+  const h = (handle || '').replace(/^@/, '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 32)
+  return h ? `https://x.com/${h}/status/${snowflake}` : `https://x.com/i/status/${snowflake}`
+}
+
 export function blitzTokenImageUrl(imageUrl: string | null | undefined): string | undefined {
   const u = httpsUrl(imageUrl || undefined)
   if (!u) return undefined

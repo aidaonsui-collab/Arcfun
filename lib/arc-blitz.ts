@@ -19,6 +19,9 @@ export type BlitzTweet = {
   displayName: string
   avatarUrl: string
   imageUrl: string | null
+  /** Parent tweet when this is a reply; used as token art + social. */
+  sourceUrl?: string | null
+  sourceHandle?: string | null
 }
 
 export type BlitzPrefill = {
@@ -102,16 +105,17 @@ export function draftFromTweet(t: BlitzTweet): BlitzPrefill {
     symbol = t.handle.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8) || 'TOKEN'
   }
   const name = (clean.split(/[.!?\n]/)[0] || clean).trim().slice(0, 48) || t.displayName || t.handle
-  const description = [t.text.trim(), t.url].filter(Boolean).join('\n\n').slice(0, 500)
+  const origin = t.sourceUrl || t.url
+  const description = [t.text.trim(), origin].filter(Boolean).join('\n\n').slice(0, 500)
   return {
     name,
     symbol,
     description,
-    twitter: t.handle,
-    website: t.url,
+    twitter: origin || t.handle,
+    website: origin,
     imageUrl: blitzTokenImageUrl(t.imageUrl),
-    tweetUrl: t.url,
-    handle: t.handle,
+    tweetUrl: origin || t.url,
+    handle: t.sourceHandle || t.handle,
   }
 }
 
