@@ -252,7 +252,7 @@ export default function DocsPage() {
           <h2 className="m-0 text-[24px] font-semibold tracking-tightish">Crucible</h2>
           <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
             Crucible is the buy/burn engine for the protocol token. A slice of quote-side USDC
-            fees buys $ARCFUN and sends it to the dead wallet. Protocol-token holders do not get
+            fees buys $EVE and sends it to the dead wallet. Protocol-token holders do not get
             pad-wide USDC — Crucible is their reward.{' '}
             <Link href="/crucible" className="text-lime-t font-semibold hover:text-white">
               Open Crucible

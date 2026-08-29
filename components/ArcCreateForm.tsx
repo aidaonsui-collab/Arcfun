@@ -50,7 +50,7 @@ const LAUNCH_TYPES: {
     tagline: 'Tradable from block one',
     points: [
       'Full supply onto Uniswap V3 at creation',
-      'Crucible buys and burns $ARCFUN from quote fees',
+      'Crucible buys and burns $EVE from quote fees',
       'Launch-token LP fees auto-burned',
     ],
   },
@@ -61,7 +61,7 @@ const LAUNCH_TYPES: {
     tagline: 'LP fees pay your holders',
     points: [
       'Holders earn a 20% quote-fee leg via reflect()',
-      'Crucible is the $ARCFUN holder reward — not pad-wide USDC',
+      'Crucible is the $EVE holder reward — not pad-wide USDC',
       'Instant TOKEN/USDC pool from block one',
     ],
   },
