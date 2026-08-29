@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useSignMessage } from 'wagmi'
 import { getAddress } from 'viem'
 import { prepareCollectionAuth } from '@/lib/arc-auth'
-import { uploadImageToCloudinary } from '@/lib/cloudinary'
+import { uploadImage } from '@/lib/upload-image'
 import { ImageUpload } from '@/components/port/ImageUpload'
 import type { Collection } from '@/lib/port/types'
 
@@ -58,7 +58,7 @@ export function EditBannerSheet({
     try {
       let bannerUrl = preview
       if (file) {
-        bannerUrl = await uploadImageToCloudinary(file, 'port')
+        bannerUrl = await uploadImage(file, 'port')
       }
       if (preview === '' && !file) bannerUrl = ''
       const payload = {

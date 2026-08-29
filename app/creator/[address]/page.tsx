@@ -21,7 +21,7 @@ import type { CreatorFeePosition } from '@/lib/arc-creator-fees'
 import type { CreatorPnl } from '@/lib/arc-creator-pnl'
 import { MONLOCK_COLLECT_ABI } from '@/lib/arc-creator-fees'
 import { profileEditMessage, followMessage } from '@/lib/arc-auth'
-import { uploadImageToCloudinary } from '@/lib/cloudinary'
+import { uploadImage } from '@/lib/upload-image'
 import { ARC_EXPLORER, ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { ageLabel, fmtUsd, tileGradient } from '@/lib/ui-format'
 import { PortfolioDesk } from '@/components/PortfolioDesk'
@@ -717,7 +717,7 @@ function EditProfileModal({
     setUploading(true)
     setErr(null)
     try {
-      const url = await uploadImageToCloudinary(file, 'creator-avatars')
+      const url = await uploadImage(file, 'creator-avatars')
       setAvatarUrl(url)
     } catch (e) {
       setErr((e as Error).message || 'Upload failed')

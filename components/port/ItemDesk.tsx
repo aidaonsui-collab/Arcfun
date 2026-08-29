@@ -19,7 +19,7 @@ import {
 import { PortSheet } from '@/components/port/PortSheet'
 import { getAddress, type Address } from 'viem'
 import { authQuery, prepareCollectionAuth } from '@/lib/arc-auth'
-import { uploadImageToCloudinary } from '@/lib/cloudinary'
+import { uploadImage } from '@/lib/upload-image'
 import { PORT_NFT_ABI } from '@/lib/port/abi'
 import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { cn } from '@/lib/cn'
@@ -121,7 +121,7 @@ export function ItemDesk({ collection }: { collection: Collection }) {
       if (assigned.length) {
         setProgress({ done: 0, total: assigned.length, phase: 'upload' })
         const uploaded = await mapPool(assigned, POOL, async ({ file, id }) => {
-          const imageUrl = await uploadImageToCloudinary(file, 'port-items')
+          const imageUrl = await uploadImage(file, 'port-items')
           setProgress((p) => ({ ...p, done: p.done + 1 }))
           const meta: PortItemMeta = { imageUrl, name: nameFromFile(file.name, `${collection.name} #${id}`) }
           return { id, meta }

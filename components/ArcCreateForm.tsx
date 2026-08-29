@@ -28,7 +28,7 @@ import {
   INSTANT_REFLECTION_FACTORY_ABI,
   ARC_REFLECTION_CREATE_GAS,
 } from '@/lib/arc-reflection-launchpad'
-import { uploadImageToCloudinary } from '@/lib/cloudinary'
+import { uploadImage } from '@/lib/upload-image'
 import { tileGradient } from '@/lib/ui-format'
 import { CrucibleFeePath } from '@/components/CrucibleFeePath'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
@@ -231,14 +231,14 @@ export function ArcCreateForm({
       let imageUrl = ''
       if (imageFile) {
         setStep('uploading')
-        imageUrl = await uploadImageToCloudinary(imageFile, 'arcfun')
+        imageUrl = await uploadImage(imageFile, 'arcfun')
       } else if (imageRemote) {
         setStep('uploading')
         const imgRes = await fetch(`/api/arc/blitz/media?u=${encodeURIComponent(imageRemote)}`)
         if (!imgRes.ok) throw new Error('Could not pull the tweet image')
         const blob = await imgRes.blob()
         const file = new File([blob], 'blitz.jpg', { type: blob.type || 'image/jpeg' })
-        imageUrl = await uploadImageToCloudinary(file, 'arcfun')
+        imageUrl = await uploadImage(file, 'arcfun')
       }
 
       const feeWei = arcCreationFeeWeiFor(address)
