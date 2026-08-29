@@ -92,9 +92,8 @@ Nothing below is done yet; this is the runbook for whoever has domain/Vercel acc
    `KV_REST_API_URL` / `KV_REST_API_TOKEN`, `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`.
 6. **Add the domain** in Vercel → Settings → Domains → `arcfun.lol` (+ `www`, redirect to apex),
    then point DNS at Vercel per its dashboard instructions.
-7. **Cloudinary**: this fork reuses Robinpad's unsigned upload preset (`lib/cloudinary.ts`) so
-   image upload works out of the box. Swap to your own cloud/preset before real launch if you
-   want uploads isolated from Robinpad's account.
+7. **Images**: new uploads go to the public Vercel Blob store `arcfun-images` via `POST /api/upload`.
+   Existing Cloudinary URLs already stamped on tokens stay as-is.
 8. **Smoke test**: connect wallet on Arc, launch a test token, confirm it shows on `/` and its
    `/token/[address]` page, confirm buy/sell works, confirm the image/socials you set on create
    show up (round-trips through `/api/arc/register` → KV).
@@ -105,7 +104,7 @@ Nothing below is done yet; this is the runbook for whoever has domain/Vercel acc
 ## What's NOT independent from Robinpad yet
 
 - Contracts (see above) — same factory/locker, same fee split.
-- Cloudinary account (see above).
+- Historic Cloudinary image URLs already stored in token/collection metadata.
 - No LP-fee-collection keeper. The source repo's `robinlock-keeper` cron only sweeps RH4663
   (chain 4663) locks, not Arc's — this fork carries none of it. Locked LP fees on Arc currently
   need a manual `collectFees` call on MonLock until someone builds an Arc-specific keeper cron

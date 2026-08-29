@@ -14,7 +14,7 @@ import { BrandMark } from '@/components/BrandMark'
 import { PORT_FACTORY_ABI, PORT_NFT_ABI } from '@/lib/port/abi'
 import { arcPortEnabled, arcPortFactory } from '@/lib/port/contracts'
 import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
-import { uploadImageToCloudinary } from '@/lib/cloudinary'
+import { uploadImage } from '@/lib/upload-image'
 import { buildAllowlist, parseWallets } from '@/lib/port/merkle'
 import { prepareCollectionAuth } from '@/lib/arc-auth'
 
@@ -321,11 +321,11 @@ export default function PortCreatePage() {
     try {
       let imageUrl = image
       if (imageFile) {
-        imageUrl = await uploadImageToCloudinary(imageFile, 'port')
+        imageUrl = await uploadImage(imageFile, 'port')
       }
       let bannerUrl = ''
       if (bannerFile) {
-        bannerUrl = await uploadImageToCloudinary(bannerFile, 'port')
+        bannerUrl = await uploadImage(bannerFile, 'port')
       }
       const start = publicStart
         ? Math.floor(new Date(publicStart).getTime() / 1000)
