@@ -20,7 +20,7 @@ export const revalidate = 20
 export const metadata: Metadata = {
   title: 'The Crucible — Arcfun',
   description:
-    'A buy/burn no one has to click. You trade. Fees accrue. When it cooks, Crucible buys $ARCFUN and burns it.',
+    'A buy/burn no one has to click. You trade. Fees accrue. When it cooks, Crucible buys $EVE and burns it.',
 }
 
 async function liveBurnedPct(): Promise<number | null> {
@@ -64,7 +64,7 @@ export default async function CruciblePage() {
       href: null as string | null,
     },
     {
-      label: 'ARCFUN bought',
+      label: 'EVE bought',
       value: <CrucibleCountUp value={stats.arcfunBought} kind="compact" />,
       sub: 'from USDC burns',
       subColor: 'var(--limeT)',
@@ -73,7 +73,7 @@ export default async function CruciblePage() {
       href: null,
     },
     {
-      label: 'ARCFUN removed',
+      label: 'EVE removed',
       value: <CrucibleCountUp value={stats.arcfunAtDead} kind="compact" />,
       sub: `${meltCount} burn${meltCount === 1 ? '' : 's'}`,
       subColor: 'var(--limeT)',
@@ -103,7 +103,7 @@ export default async function CruciblePage() {
           A buy/burn no one has to click.
         </p>
         <p className="mt-3 mb-0 max-w-2xl text-[16px] text-t2 leading-relaxed">
-          You trade. Fees accrue. When it cooks, Crucible buys $ARCFUN and burns it. Referrals on
+          You trade. Fees accrue. When it cooks, Crucible buys $EVE and burns it. Referrals on
           Arcfun buys are extra, and instant.
         </p>
 
@@ -215,7 +215,7 @@ export default async function CruciblePage() {
                   <tr className="text-[12px] font-semibold text-t3 border-b border-hair2">
                     <th className="px-5 py-3 font-semibold">When</th>
                     <th className="px-5 py-3 font-semibold text-right">USDC in</th>
-                    <th className="px-5 py-3 font-semibold text-right">ARCFUN bought</th>
+                    <th className="px-5 py-3 font-semibold text-right">EVE bought</th>
                     <th className="px-5 py-3 font-semibold text-right">Burned</th>
                   </tr>
                 </thead>

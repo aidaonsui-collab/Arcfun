@@ -72,7 +72,7 @@ function feeLegBlurb(leg: FeeSplitLeg): string {
     case 'creator':
       return 'Paid in USDC to the rewards wallet set at launch. Defaults to the wallet that signed the create.'
     case 'crucible':
-      return 'Quote USDC sits here. When it cooks, Crucible buys $ARCFUN and burns it. A buy/burn no one has to click.'
+      return 'Quote USDC sits here. When it cooks, Crucible buys $EVE and burns it. A buy/burn no one has to click.'
     case 'projectBurn':
       return 'This USDC buys the launch token and sends it to the dead wallet.'
     case 'platform':

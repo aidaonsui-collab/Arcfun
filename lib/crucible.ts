@@ -19,7 +19,7 @@ export const REF_STORAGE_KEY = 'arcfun_ref'
 export const REF_CODE_STORAGE_KEY = 'arcfun_ref_code'
 export const REF_STORAGE_AT_KEY = 'arcfun_ref_at'
 
-/** Optional protocol token. Empty until an $ARCFUN address is wired. */
+/** Optional protocol token. Empty until an $EVE address is wired. */
 export const ARCFUN_TOKEN = (process.env.NEXT_PUBLIC_ARCFUN_TOKEN || '').trim()
 
 /**

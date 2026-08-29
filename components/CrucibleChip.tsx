@@ -75,7 +75,7 @@ export function CrucibleChip({
   return (
     <Link
       href="/crucible"
-      title={stats ? full : 'Crucible — buy $ARCFUN from quote fees and burn it'}
+      title={stats ? full : 'Crucible — buy $EVE from quote fees and burn it'}
       className={`inline-flex items-center gap-2 rounded-xl border border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line transition-colors ${
         compact ? 'h-9 px-3 text-[12px] font-semibold' : 'h-9 px-3.5 text-[13px] font-semibold'
       } ${className}`}
