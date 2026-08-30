@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { PoolToken } from '@/lib/tokens'
 import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import { ageLabel, changeParts, fmtUsd, sparkPathFromValues, tileGradient } from '@/lib/ui-format'
+import { cdnImage } from '@/lib/cdn-image'
 
 export function TokenCard({
   token,
@@ -29,7 +30,7 @@ export function TokenCard({
       >
         {img ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" />
+          <img src={cdnImage(img, 320)} alt="" className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <span
             className="text-[64px] font-bold tracking-[-0.05em] leading-none"
@@ -95,7 +96,7 @@ export function TokenRailCard({ token }: { token: PoolToken }) {
       >
         {img ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" />
+          <img src={cdnImage(img, 96)} alt="" className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <span className="text-[34px] font-bold tracking-[-0.04em]" style={{ color: mono }}>
             {initial}

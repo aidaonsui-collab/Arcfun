@@ -5,6 +5,7 @@ import { collectionStatus, mintCta, publicMintLive, allowlistWindowLive, type Co
 import { formatInt, formatUsdc, timeUntil } from '@/lib/port/format'
 import { studioPath } from '@/lib/port/path'
 import { telegramHref, twitterHref, websiteHref } from '@/lib/social-href'
+import { cdnImage } from '@/lib/cdn-image'
 
 function stageState(start: number, end: number, fallbackLive: boolean) {
   const now = Date.now()
@@ -34,7 +35,7 @@ export function DropLanding({
     <div className="mt-6 flex flex-col gap-6 sm:mt-8 sm:flex-row sm:items-start sm:gap-8">
       <div className="w-[220px] shrink-0 overflow-hidden rounded-[22px] border border-hair bg-s1 sm:w-[260px]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={collection.image} alt="" className="aspect-square w-full object-cover" />
+        <img src={cdnImage(collection.image, 640)} alt="" className="aspect-square w-full object-cover" />
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-[13px] font-medium text-t3">Unrevealed drop</p>

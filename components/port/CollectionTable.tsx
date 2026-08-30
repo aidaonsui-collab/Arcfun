@@ -5,6 +5,7 @@ import { formatInt } from '@/lib/port/format'
 import { OfficialBadge } from './OfficialBadge'
 import { Price } from './Price'
 import { cn } from '@/lib/cn'
+import { cdnImage } from '@/lib/cdn-image'
 
 const COLS = [
   { key: 'collection', label: 'Collection', align: 'left' },
@@ -46,7 +47,7 @@ export function CollectionTable({ collections }: { collections: Collection[] }) 
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={c.image}
+                      src={cdnImage(c.image, 36)}
                       alt=""
                       className="h-9 w-9 shrink-0 rounded-xl object-cover shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
                     />

@@ -23,6 +23,7 @@ import { uploadImage } from '@/lib/upload-image'
 import { PORT_NFT_ABI } from '@/lib/port/abi'
 import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { cn } from '@/lib/cn'
+import { cdnImage } from '@/lib/cdn-image'
 
 const PAGE = 48
 const POOL = 4
@@ -507,7 +508,7 @@ export function ItemDesk({ collection }: { collection: Collection }) {
                 <div className="relative aspect-square bg-s2">
                   {meta?.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={meta.imageUrl} alt="" className="h-full w-full object-cover" />
+                    <img src={cdnImage(meta.imageUrl, 96)} alt="" className="h-full w-full object-cover" />
                   ) : (
                     <div className="grid h-full place-items-center text-[12px] text-t3">#{id}</div>
                   )}
@@ -627,7 +628,7 @@ function ItemEditSheet({
       {meta ? (
         <div className="pb-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={meta.imageUrl} alt="" className="mx-auto aspect-square w-40 rounded-2xl object-cover" />
+          <img src={cdnImage(meta.imageUrl, 160)} alt="" className="mx-auto aspect-square w-40 rounded-2xl object-cover" />
           <label className="mt-4 block text-[13px] text-t3">Name</label>
           <input
             value={name}

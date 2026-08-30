@@ -30,6 +30,7 @@ import { collectionStatus, mintCta, type Collection, type NftItem } from '@/lib/
 import { formatInt, formatUsdc } from '@/lib/port/format'
 import { DropLanding } from '@/components/port/DropLanding'
 import { DropSettingsSheet } from '@/components/port/DropSettingsSheet'
+import { cdnImage } from '@/lib/cdn-image'
 
 const EMPTY_LISTINGS: Listing[] = []
 
@@ -168,7 +169,7 @@ export function CollectionView({
         <div className="relative h-[200px] w-full overflow-hidden bg-s1 sm:mx-auto sm:mt-6 sm:h-[260px] sm:max-w-desk sm:rounded-[28px] lg:h-[300px]">
           {banner ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={banner} alt="" className="h-full w-full object-cover rise-in" />
+            <img src={cdnImage(banner, 1200, 'fit')} alt="" className="h-full w-full object-cover rise-in" />
           ) : (
             <div className="h-full w-full bg-[radial-gradient(ellipse_at_top,rgba(47,132,219,0.18),transparent_60%)]" />
           )}

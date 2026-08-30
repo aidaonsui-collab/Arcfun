@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import type { NftItem } from '@/lib/port/types'
 import { formatUsdc } from '@/lib/port/format'
+import { cdnImage } from '@/lib/cdn-image'
 
 export function NftCard({
   item,
@@ -17,7 +18,7 @@ export function NftCard({
       <div className="aspect-square overflow-hidden rounded-[24px] bg-s1 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={item.image}
+          src={cdnImage(item.image, 320)}
           alt=""
           className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]"
         />

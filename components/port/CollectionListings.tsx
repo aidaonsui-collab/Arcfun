@@ -8,6 +8,7 @@ import { atomicToUsdc } from '@/lib/port/market'
 import { formatUsdc, shortAddr, timeUntil } from '@/lib/port/format'
 import { studioPath } from '@/lib/port/path'
 import { CancelOrderButton } from './CancelOrderButton'
+import { cdnImage } from '@/lib/cdn-image'
 
 function itemFor(collection: Collection, items: NftItem[], tokenId: string): NftItem | undefined {
   const id = Number(tokenId)
@@ -70,7 +71,7 @@ export function CollectionListings({
             >
               <Link href={href} className="flex min-w-0 items-center gap-3 text-white hover:text-white">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={image} alt="" className="h-11 w-11 shrink-0 rounded-xl object-cover" />
+                <img src={cdnImage(image, 44)} alt="" className="h-11 w-11 shrink-0 rounded-xl object-cover" />
                 <span className="truncate text-[14px] font-semibold">{name}</span>
               </Link>
               <div className="text-right text-[14px] font-semibold tabular-nums sm:text-right">
@@ -151,7 +152,7 @@ export function CollectionOffers({
             >
               <Link href={href} className="flex min-w-0 items-center gap-3 text-white hover:text-white">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={image} alt="" className="h-11 w-11 shrink-0 rounded-xl object-cover" />
+                <img src={cdnImage(image, 44)} alt="" className="h-11 w-11 shrink-0 rounded-xl object-cover" />
                 <span className="truncate text-[14px] font-semibold">{name}</span>
               </Link>
               <div className="text-right text-[14px] font-semibold tabular-nums">
