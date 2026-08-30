@@ -75,3 +75,41 @@ uses — checked individually rather than assumed:
 No new deployment. No env var changes. `NEXT_PUBLIC_ARC_INSTANT_FACTORY` and friends still point
 at the existing live addresses. This is the source landing in this repo for the first time —
 deploying it is a separate, later decision.
+
+## Testnet self-contained deploy (Arc testnet 5042002 only)
+
+Throwaway Uniswap V3 + Instant stack for Arc **testnet** (chain id `5042002`). Deploys a fresh
+Uni V3 factory (testnet factories are spam — do not pick a "canonical" one), mock USDC (6dp),
+WETH9, NFPM, SwapRouter02, ArcBpsSource, MonLock, and InstantErc20QuoteFactory.
+
+This is **not** a mainnet deploy. It does **not** retarget live Instant
+(`NEXT_PUBLIC_ARC_INSTANT_*` / `lib/contracts-arc.ts` still point at 5042). PR #91 remains a
+source-only drop. Addresses printed by the script are throwaway testnet addresses.
+
+Uni V3 is deployed from official solc 0.7.6 creation bytecode (see `script/bytecode/`) so Instant's
+0.8.26 / via_ir profile never compiles Uni. Instant uses SwapRouter02 `exactInputSingle` without a
+deadline — not v3-periphery SwapRouter. Do not assume mainnet USDC `0x3600…0000` exists on testnet.
+
+### How to run
+
+From `contracts/arc-instant/`:
+
+```
+forge script script/DeployInstantArcTestnet.s.sol:DeployInstantArcTestnet \
+  --rpc-url $ARC_TESTNET_RPC \
+  --broadcast
+```
+
+Required env: `PRIVATE_KEY` (keep it in your environment — do not paste it into chat or logs).
+Optional: `TREASURY`, `OWNER`, `LP_RECIPIENT`, `STAKING_POOL`, `LOCK_DURATION`,
+`CREATION_FEE_WEI`, `LAUNCH_VIRTUAL_QUOTE`, `MEME_CREATOR_BPS`, `MEME_STAKER_BPS`,
+`SMOKE_CREATE=true` (mints mock USDC and creates Smoke/SMK with a 100 USDC first-buy).
+
+In-memory stack test (no RPC, no broadcast):
+
+```
+forge test --match-contract InstantTestnetStack
+```
+
+The helper `script/InstantTestnetStack.sol` is not a Script (no chain-id require) so tests can
+reuse it. The broadcast script is the only place that `require`s `5042002`.
