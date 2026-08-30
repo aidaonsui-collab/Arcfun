@@ -47,8 +47,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     if (burnedPct != null) {
       pool = { ...pool, burnedPct }
     }
+    // Widened from s-maxage=8 2026-08-30: at current platform volume most tokens go longer than
+    // 8s between viewers, so nearly every real visit was a CDN cache miss paying the route's own
+    // RPC chain (pool + liquidity + burnedPct) live — measured ~5.3s cold. This pool/liquidity
+    // data does not move meaningfully faster than that; syncTradesToHead's own SYNC_FRESH_MS
+    // (lib/arc-trades.ts) uses the same order of magnitude for the trade tape.
     return jsonSafe(pool, {
-      headers: { 'Cache-Control': 'public, s-maxage=8, stale-while-revalidate=15' },
+      headers: { 'Cache-Control': 'public, s-maxage=20, stale-while-revalidate=40' },
     })
   } catch (e) {
     console.error('[api/arc/token]', summarizeRpcError(e))

@@ -14,6 +14,7 @@ import { kv } from '@vercel/kv'
 import { erc20Abi as erc20DecimalsAbi, formatUnits, parseAbiItem, type Address, type Log } from 'viem'
 import { ARC, arcPublicClient } from './contracts-arc'
 import { fetchArcPoolToken } from './arc-instant-tokens'
+import { coalesceAsync } from './coalesce'
 import {
   type EvmTrade,
   type EvmTradesResult,
@@ -89,6 +90,15 @@ const empty: EvmTradesResult = {
 
 const abs = (x: bigint) => (x < 0n ? -x : x)
 const mem = new Map<string, { result: EvmTradesResult; at: number }>()
+
+/**
+ * How recently a token's cursor must have been synced to head to skip re-checking. Separate from
+ * FRESH_MS (which is keyed per page/limit/offset): this covers every page for a token with one
+ * timer, so a busy token doesn't pay getBlockNumber + a KV cursor read on every distinct
+ * limit/offset combination within the same few seconds.
+ */
+const SYNC_FRESH_MS = 6_000
+const lastSyncedAt = new Map<string, number>()
 
 /**
  * Resolve the Uni V3 pool for any Arc pool type (Instant, Reflection, or graduated bonding-curve)
@@ -288,6 +298,68 @@ async function persistTrades(key: string, ascendingNew: EvmTrade[], newCursor: b
   }
 }
 
+/**
+ * Catch a token's persisted trade history up to the current chain head: resolve its pool,
+ * read the KV cursor, and scan whatever gap remains (full DEEP_BACKFILL_BLOCKS on a cold token,
+ * a CATCHUP_MAX_BLOCKS-bounded gap on a warm one). Writes the new cursor via persistTrades.
+ *
+ * Coalesced by token (not by page/limit/offset) via coalesceAsync, and skipped entirely within
+ * SYNC_FRESH_MS of the last sync. Both matter together: a single token page fires three requests
+ * that all end up here (trades×2 at different limits, plus ohlcv's own fetchArcTrades call) —
+ * without this they each independently paid for resolvePool + getBlockNumber + a KV cursor read,
+ * and on a cold or stale-cursor token, an eth_getLogs catch-up scan too, racing each other to
+ * write the same cursor. Measured live before this fix: one page view, ~5s per request, four
+ * times over. Now the first caller pays it once and the rest await that same call.
+ */
+async function syncTradesToHead(token: Address): Promise<void> {
+  const key = token.toLowerCase()
+  const last = lastSyncedAt.get(key)
+  if (last != null && Date.now() - last < SYNC_FRESH_MS) return
+
+  await coalesceAsync(`sync:${key}`, async () => {
+    const orient = await resolvePool(token)
+    if (!orient) return
+    const { pool, tokenIs0, tokenDecimals } = orient
+    const client = arcPublicClient()
+    const head = await client.getBlockNumber()
+
+    let cursor: bigint | null = null
+    try {
+      const raw = await kv.get<string | number>(cursorKvKey(key))
+      cursor = raw != null ? BigInt(raw) : null
+    } catch (e) {
+      console.warn('[arc-trades] kv read cursor', summarizeRpcError(e))
+    }
+
+    const isColdStart = cursor === null
+
+    if (isColdStart) {
+      // First time this store has ever seen this token — scan the FULL DEEP_BACKFILL_BLOCKS
+      // window in one shot, all the way to `head`, not just a CATCHUP_MAX_BLOCKS-bounded slice of
+      // it. This used to seed the cursor 300k back and then only scan 200k forward from there —
+      // which left the most recent 100k blocks (DEEP_BACKFILL_BLOCKS - CATCHUP_MAX_BLOCKS)
+      // completely unscanned on a token's very first view. A brand-new, actively-traded token
+      // (all its history within the last 100k blocks) would show zero trades on its first ever
+      // page load, self-healing only on a second visit once the cursor caught up. One-time cost —
+      // ~34 chunked eth_getLogs calls worst case — is worth paying once per token to never miss
+      // recent activity on a cold view.
+      const from = head >= DEEP_BACKFILL_BLOCKS ? head - DEEP_BACKFILL_BLOCKS + 1n : 0n
+      const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, head)
+      await persistTrades(key, found, head)
+    } else if (cursor! < head) {
+      // Warm — only scan the gap since the last time anyone loaded this token, capped per
+      // request so a token idle a long time just catches up over however many page loads it takes.
+      const from = cursor! + 1n
+      const to = from + CATCHUP_MAX_BLOCKS - 1n > head ? head : from + CATCHUP_MAX_BLOCKS - 1n
+      const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, to)
+      await persistTrades(key, found, to)
+    }
+    // else: cursor >= head, already fully caught up — nothing to scan.
+  })
+
+  lastSyncedAt.set(key, Date.now())
+}
+
 export interface FetchArcTradesOpts {
   /** Page size. Defaults to MAX_TRADES (50). */
   limit?: number
@@ -307,45 +379,7 @@ export async function fetchArcTrades(
   if (hit && Date.now() - hit.at < FRESH_MS) return hit.result
 
   try {
-    const orient = await resolvePool(token)
-    if (!orient) return empty
-    const { pool, tokenIs0, tokenDecimals } = orient
-    const client = arcPublicClient()
-    const head = await client.getBlockNumber()
-
-    let cursor: bigint | null = null
-    try {
-      const raw = await kv.get<string | number>(cursorKvKey(key))
-      cursor = raw != null ? BigInt(raw) : null
-    } catch (e) {
-      console.warn('[arc-trades] kv read cursor', summarizeRpcError(e))
-    }
-
-    const isColdStart = cursor === null
-
-    let foundThisCall: EvmTrade[] | null = null
-    if (isColdStart) {
-      // First time this store has ever seen this token — scan the FULL DEEP_BACKFILL_BLOCKS
-      // window in one shot, all the way to `head`, not just a CATCHUP_MAX_BLOCKS-bounded slice of
-      // it. This used to seed the cursor 300k back and then only scan 200k forward from there —
-      // which left the most recent 100k blocks (DEEP_BACKFILL_BLOCKS - CATCHUP_MAX_BLOCKS)
-      // completely unscanned on a token's very first view. A brand-new, actively-traded token
-      // (all its history within the last 100k blocks) would show zero trades on its first ever
-      // page load, self-healing only on a second visit once the cursor caught up. One-time cost —
-      // ~34 chunked eth_getLogs calls worst case — is worth paying once per token to never miss
-      // recent activity on a cold view.
-      const from = head >= DEEP_BACKFILL_BLOCKS ? head - DEEP_BACKFILL_BLOCKS + 1n : 0n
-      foundThisCall = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, head)
-      await persistTrades(key, foundThisCall, head)
-    } else if (cursor! < head) {
-      // Warm — only scan the gap since the last time anyone loaded this token, capped per
-      // request so a token idle a long time just catches up over however many page loads it takes.
-      const from = cursor! + 1n
-      const to = from + CATCHUP_MAX_BLOCKS - 1n > head ? head : from + CATCHUP_MAX_BLOCKS - 1n
-      foundThisCall = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, to)
-      await persistTrades(key, foundThisCall, to)
-    }
-    // else: cursor >= head, already fully caught up — nothing to scan, read straight from KV.
+    await syncTradesToHead(token)
 
     // Stored ascending (oldest→newest); newest page (offset 0) is the tail of the list. Redis
     // LRANGE with negative indices counts from the end, so page N's ascending slice is
@@ -357,7 +391,10 @@ export async function fetchArcTrades(
     } catch (e) {
       console.warn('[arc-trades] kv read trades', summarizeRpcError(e))
     }
-    if (stored === null) stored = foundThisCall ?? []
+    // syncTradesToHead already persisted anything newly scanned; a failure here is this specific
+    // read failing right after that write succeeded, not a sign nothing was found. Empty rather
+    // than wrong — the next call (this freshness window or the next) reads the real list.
+    if (stored === null) stored = []
 
     const cleaned = dedupeTrades(stored)
     if (stored.length !== cleaned.length) {
