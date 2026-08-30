@@ -1,12 +1,13 @@
 /**
- * Creator LP fee positions — collect via MonLock.collectFees (permissionless; pays stamped wallets).
+ * Creator LP fee positions — collect via collectFees on the locker for that factory
+ * (MonLock for retired Instant factories, CrucibleLock for new Instant creates). Permissionless.
  *
  * Uniswap `tokensOwed` stays 0 until a collect checkpoints the NFT, so the profile used to look
  * empty even after the locker had already sent USDC to the rewards wallet. Pending uses live
  * feeGrowth. Collected sums USDC transfers from the locker to that wallet.
  */
 import { parseAbiItem, type Address, type Abi } from 'viem'
-import { ARC, arcPublicClient } from './contracts-arc'
+import { ARC, arcPublicClient, instantLockerForFactory } from './contracts-arc'
 import { quoteFeesOwedOnPosition } from './uni-v3-owed'
 import { scanLogsChunked } from './arc-indexer/logs'
 import type { PoolToken } from './tokens'
@@ -90,9 +91,7 @@ export type CreatorFeePosition = {
 }
 
 function lockerForToken(t: PoolToken): Address {
-  const factory = (t.moonbagsPackageId || '').toLowerCase()
-  if (factory === ARC.REFLECTION_FACTORY.toLowerCase()) return ARC.REFLECTION_LOCKER
-  return ARC.INSTANT_LOCKER
+  return instantLockerForFactory(t.moonbagsPackageId)
 }
 
 function usdc6(n: bigint): number {

@@ -7,7 +7,8 @@ import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { fetchEvmHolders } from '@/lib/evm-holders'
 import { fetchArcTrades } from '@/lib/arc-trades'
 import { fetchArcPoolToken } from '@/lib/arc-instant-tokens'
-import { ARC, arcInstantEnabled } from '@/lib/contracts-arc'
+import { ARC, arcInstantEnabled, instantLockerForFactory, instantProtocolAddresses } from '@/lib/contracts-arc'
+import { isReflectionToken } from '@/lib/tokens'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,9 +29,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     if (!pool) {
       return NextResponse.json({ error: 'not found', holders: [], total: 0 }, { status: 404 })
     }
-    const isReflection = pool.moonbagsPackageId?.toLowerCase() === ARC.REFLECTION_FACTORY.toLowerCase()
-    const factory = isReflection ? ARC.REFLECTION_FACTORY : ARC.INSTANT_FACTORY
-    const locker = isReflection ? ARC.REFLECTION_LOCKER : ARC.INSTANT_LOCKER
+    const factory = (pool.moonbagsPackageId ||
+      (isReflectionToken(pool) ? ARC.REFLECTION_FACTORY : ARC.INSTANT_FACTORY)) as Address
+    const locker = instantLockerForFactory(factory)
 
     // Seed candidates from recent swap traders so Transfer scan has somewhere to start.
     const trades = await fetchArcTrades(token as Address)
@@ -46,6 +47,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     const result = await fetchEvmHolders('arc', token as Address, {
       seedAddresses: seed,
       excludeAddresses: [
+        ...instantProtocolAddresses(),
         factory,
         locker,
         ...(pool.instantMeta?.uniPool ? [pool.instantMeta.uniPool] : []),

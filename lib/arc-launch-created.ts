@@ -8,7 +8,7 @@
  */
 import { parseAbiItem, type Address } from 'viem'
 import { kv } from '@vercel/kv'
-import { ARC, arcPublicClient } from './contracts-arc'
+import { ARC, arcPublicClient, instantCatalogFactories } from './contracts-arc'
 import { summarizeRpcError } from './rpc-error'
 import type { PoolToken } from './tokens'
 
@@ -25,7 +25,6 @@ const REFLECTION_CREATED = parseAbiItem(
   'event InstantReflectionCreated(address indexed token, address indexed creator, address rewardToken, address pool, uint256 positionId, address feeSink)',
 )
 
-const LEGACY_INSTANT = '0x607bff9EB2ff1494AC8f0b545502Ce49ee2Ae42B' as Address
 const ZERO = '0x0000000000000000000000000000000000000000'
 
 type LaunchCreatedState = {
@@ -58,8 +57,7 @@ async function writeState(state: LaunchCreatedState): Promise<void> {
 
 function factories() {
   return [
-    { address: ARC.INSTANT_FACTORY, event: INSTANT_CREATED },
-    { address: LEGACY_INSTANT, event: INSTANT_CREATED },
+    ...instantCatalogFactories().map((address) => ({ address, event: INSTANT_CREATED })),
     { address: ARC.REFLECTION_FACTORY, event: REFLECTION_CREATED },
   ].filter((f) => f.address && f.address !== ZERO)
 }

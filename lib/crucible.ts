@@ -1,8 +1,10 @@
 /**
  * Crucible product surface — quote-side 1% USDC fee splits, referral codes, Burn tape.
  *
- * Live locks may still be 70/30 (Meme) or 50/25/25 (Reflection). The numbers here are the
- * product splits. Do not treat them as on-chain until NEXT_PUBLIC_CRUCIBLE_ONCHAIN=1.
+ * New Instant creates lock through CrucibleLock (Meme 50/25/10/10/5). Eve and the other
+ * Instant tokens on the retired factory still split 70/30 on MonLock. Reflection is still
+ * 50/25/25. Do not set NEXT_PUBLIC_CRUCIBLE_ONCHAIN=1 globally — that would label old pools
+ * as if they already paid Crucible.
  */
 export const FEE_BPS_DENOM = 10_000
 /** Uniswap V3 pool fee on Instant launches (1%). */
@@ -33,7 +35,7 @@ export function usesLegacyOnChainSplits(): boolean {
 }
 
 export const CRUCIBLE_CONTRACTS_NOTE =
-  'Live pools still split quote fees 70/30 (Meme) or 50/25/25 (Reflection). Crucible legs ship with the next lock contracts — this UI is the product surface, not a claim that current pools already pay Crucible.'
+  'Eve and Instant tokens launched on the previous factory still split quote fees 70/30 on MonLock. New Instant launches lock through CrucibleLock (creator 50%, Crucible 30%, project burn 10%, platform 10%; unpaid referrer folds into Crucible). Reflection stays on its locker until that path is migrated.'
 
 export type LaunchKind = 'meme' | 'reflect'
 export type TradeSide = 'buy' | 'sell'

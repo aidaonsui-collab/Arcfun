@@ -11,7 +11,7 @@
  */
 import { kv } from '@vercel/kv'
 import { erc20Abi, parseAbiItem, type Address, type Log } from 'viem'
-import { ARC, arcPublicClient } from './contracts-arc'
+import { ARC, arcPublicClient, instantProtocolAddresses } from './contracts-arc'
 import { mapWithConcurrency } from './concurrency'
 import { withRateLimitRetry } from './rpc-retry'
 
@@ -159,6 +159,7 @@ export async function fetchEvmHolders(
   const factory = ARC.INSTANT_FACTORY
   const creator = (opts?.creatorAddress ?? '').toLowerCase()
   const extraExclude = new Set((opts?.excludeAddresses ?? []).map((a) => a.toLowerCase()).filter(Boolean))
+  for (const a of instantProtocolAddresses()) extraExclude.add(a.toLowerCase())
   const skip = (a: string) => isExcludedHolder(a, factory) || extraExclude.has(a)
 
   const totalSupply = await client

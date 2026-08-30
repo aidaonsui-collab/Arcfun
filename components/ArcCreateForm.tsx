@@ -17,6 +17,7 @@ import {
   arcReflectionEnabled,
   arcLaunchesEnabled,
   arcCreationFeeWeiFor,
+  factoryUsesCrucibleLock,
 } from '@/lib/contracts-arc'
 import {
   buildCreateTokenMemeInstantArc,
@@ -596,6 +597,7 @@ export function ArcCreateForm({
             kind={isReflection ? 'reflect' : 'meme'}
             notionalUsdc={100}
             showSideToggle={false}
+            legacyOnChain={isReflection || !factoryUsesCrucibleLock(ARC.INSTANT_FACTORY)}
           />
         </div>
 
