@@ -88,6 +88,7 @@ contract CrucibleLock {
     event KeeperSet(address indexed keeper, bool allowed);
     event CrucibleSet(address indexed crucible);
     event ReferralRegistrySet(address indexed registry);
+    event SwapRouterSet(address indexed router);
     event Locked(
         uint256 indexed tokenId,
         address indexed creator,
@@ -203,6 +204,15 @@ contract CrucibleLock {
         if (registry == address(0)) revert ZeroAddress();
         referralRegistry = registry;
         emit ReferralRegistrySet(registry);
+    }
+
+    /// @notice Rotate the project-burn router and revoke the old one's USDC allowance.
+    function setSwapRouter(address router) external onlyOwner {
+        if (router == address(0)) revert ZeroAddress();
+        address old = swapRouter;
+        if (old != router) _approve(usdc, old, 0);
+        swapRouter = router;
+        emit SwapRouterSet(router);
     }
 
     /// @notice Intentionally unimplemented. LP NFT stays in this contract forever.

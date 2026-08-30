@@ -244,4 +244,21 @@ contract CrucibleLockTest is Test {
         assertEq(locker.pendingProjectBurn(TOKEN_ID), 1_000e6);
         assertEq(launch.balanceOf(dead), 0);
     }
+
+    function test_setSwapRouterRevokesOldAllowance() public {
+        _seedFees(10_000e6, 0);
+        locker.collectFees(TOKEN_ID);
+        locker.projectBurn(TOKEN_ID, 1_000e18);
+        assertEq(usdc.allowance(address(locker), address(router)), type(uint256).max);
+
+        MockSwapRouter next = new MockSwapRouter();
+        locker.setSwapRouter(address(next));
+        assertEq(usdc.allowance(address(locker), address(router)), 0);
+        assertEq(locker.swapRouter(), address(next));
+    }
+
+    function test_setSwapRouterZeroReverts() public {
+        vm.expectRevert(CrucibleLock.ZeroAddress.selector);
+        locker.setSwapRouter(address(0));
+    }
 }
