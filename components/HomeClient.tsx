@@ -46,11 +46,10 @@ export function HomeClient({
   const [loading, setLoading] = useState(initialTokens.length === 0)
   const [sort, setSort] = useState<SortKey>('Top MC')
   const [volWindow, setVolWindow] = useState<VolumeWindow>('24H')
+  // Seed from initialQ if a caller passed one. URL `?q=` is applied by QuerySync.
+  // Do not sync `q` in an effect — it is '' when HomePage omits initialQ and would
+  // wipe QuerySync on mount.
   const [filter, setFilter] = useState(q)
-
-  useEffect(() => {
-    setFilter(q)
-  }, [q])
 
   useEffect(() => {
     setTokens(initialTokens)
