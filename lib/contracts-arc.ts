@@ -328,11 +328,11 @@ export const ARC = {
 
   // ── ArcFun Instant (LaunchToken18 · 5042) ───────────────────────────────────
   INSTANT_FACTORY: (process.env.NEXT_PUBLIC_ARC_INSTANT_FACTORY ??
-    '0xd51E6217bb3bC7586866713854Ea75B7BefF1009') as Address,
+    '0x6D7621997D8cF3b5d2d191cd014324149211Af93') as Address,
   INSTANT_LOCKER: (process.env.NEXT_PUBLIC_ARC_INSTANT_LOCKER ??
-    '0x84F486d7254aEDc89986bce392771D88bf5828EA') as Address,
+    '0x9aB2C774b317C11B69c0A316B47cA8d90b805a9C') as Address,
   BPS_SOURCE: (process.env.NEXT_PUBLIC_ARC_BPS_SOURCE ??
-    '0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE') as Address,
+    '0x12239B4593b143838b0ceb55Bc8A4150946E45Ed') as Address,
 
   /** ArcStudio NFT factory (UUPS proxy, Deploy.s.sol 2026-08-23 on 5042). */
   NFT_FACTORY: envAddr(
