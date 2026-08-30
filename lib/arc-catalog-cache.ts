@@ -16,7 +16,7 @@ import { buildArcCatalog } from './arc-instant-tokens'
 import { bigintReplacer } from './json-safe'
 import { summarizeRpcError } from './rpc-error'
 
-const KV_KEY = 'arcfun:catalog:home:v2'
+const KV_KEY = 'arcfun:catalog:home:v3'
 const FRESH_MS = 20_000
 const KV_TTL_SEC = 10 * 60
 

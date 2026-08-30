@@ -4,6 +4,7 @@
  */
 import { parseAbiItem, type Address, type Hex } from 'viem'
 import { ARC, arcPublicClient, arcInstantEnabled, arcReflectionEnabled } from '@/lib/contracts-arc'
+import { instantCatalogFactories } from '@/lib/arc-instant-tokens'
 import { syncTradesToHead } from '@/lib/arc-trades'
 import {
   ROBIN_OTC_LIQUIDITY,
@@ -131,7 +132,9 @@ async function seedTokensFromFactories(): Promise<number> {
     }
   }
 
-  if (arcInstantEnabled()) await seedFactory(ARC.INSTANT_FACTORY, 'instant')
+  if (arcInstantEnabled()) {
+    for (const f of instantCatalogFactories()) await seedFactory(f, 'instant')
+  }
   if (arcReflectionEnabled()) await seedFactory(ARC.REFLECTION_FACTORY, 'reflection')
 
   return added
