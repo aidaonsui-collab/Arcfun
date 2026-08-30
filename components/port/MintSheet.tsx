@@ -19,6 +19,7 @@ import { Price } from './Price'
 import { PortSheet } from './PortSheet'
 import { PORT_NFT_ABI } from '@/lib/port/abi'
 import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
+import { cdnImage } from '@/lib/cdn-image'
 
 export function MintSheet({
   collection,
@@ -130,7 +131,7 @@ export function MintSheet({
         <div className="pb-2">
           <div className="flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={collection.image} alt="" className="h-14 w-14 rounded-2xl object-cover" />
+            <img src={cdnImage(collection.image, 56)} alt="" className="h-14 w-14 rounded-2xl object-cover" />
             <div className="min-w-0">
               <div className="truncate text-[15px] font-semibold">{collection.name}</div>
               <Price value={collection.mintPriceUsdc} />

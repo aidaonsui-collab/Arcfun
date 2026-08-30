@@ -20,6 +20,7 @@ import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
 import { priceChangeFromTrades } from '@/lib/candles'
 import { telegramHref, twitterHref, websiteHref } from '@/lib/social-href'
+import { cdnImage } from '@/lib/cdn-image'
 
 const TradingViewChart = nextDynamic(() => import('@/components/TradingViewChart'), {
   ssr: false,
@@ -297,7 +298,7 @@ export default function TokenPage() {
               >
                 {img ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                  <img src={cdnImage(img, 128)} alt="" className="absolute inset-0 w-full h-full object-cover" />
                 ) : (
                   initial
                 )}

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Code2, Coins, Eye, Layers, Plus, Split } from 'lucide-react'
+import { cdnImage } from '@/lib/cdn-image'
 
 const MOSAIC = [
   { src: '/port/studio/rooms.jpg', alt: '' },
@@ -41,7 +42,7 @@ export function PortStudio() {
               className="aspect-square overflow-hidden rounded-2xl bg-s2 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={img.src} alt={img.alt} className="h-full w-full object-cover" />
+              <img src={cdnImage(img.src, 320)} alt={img.alt} className="h-full w-full object-cover" />
             </div>
           ))}
           <Link

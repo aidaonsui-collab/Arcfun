@@ -31,6 +31,7 @@ import {
 import { formatToken, parseToken } from '@/lib/token-format'
 import { getIncomingReferralCode } from '@/lib/crucible'
 import { tileGradient } from '@/lib/ui-format'
+import { cdnImage } from '@/lib/cdn-image'
 
 const SLIPPAGE_BPS = 500 // 5% — thin Instant single-sided ranges
 const BUY_PRESETS = [25, 100, 500]
@@ -287,7 +288,7 @@ export function ArcDexTradePanel({
       <span className="inline-flex items-center gap-2 h-10 pl-1.5 pr-3 rounded-full bg-[#111318] border border-white/10">
         {imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageUrl} alt="" className="w-7 h-7 rounded-full object-cover" />
+          <img src={cdnImage(imageUrl, 28)} alt="" className="w-7 h-7 rounded-full object-cover" />
         ) : (
           <span
             className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"

@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { Suspense, useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import type { PoolToken, VolumeWindow } from '@/lib/tokens'
 import { volumeForWindow } from '@/lib/tokens'
@@ -14,14 +15,32 @@ type SortKey = 'Top volume' | 'New' | 'Top MC'
 
 const VOL_WINDOWS: VolumeWindow[] = ['1H', '6H', '12H', '24H']
 
+/**
+ * Reads `?q=` and renders nothing.
+ *
+ * useSearchParams forces a client-side-rendering bailout for whatever Suspense boundary
+ * contains it. Keeping it in a leaf that outputs no markup means only this empty node
+ * bails — the token grid above stays in the prerendered HTML, so the route is still
+ * statically cacheable and still ships content on first byte.
+ */
+function QuerySync({ onChange }: { onChange: (v: string) => void }) {
+  const sp = useSearchParams()
+  const q = (sp.get('q') ?? '').trim().toLowerCase()
+  useEffect(() => {
+    onChange(q)
+  }, [q, onChange])
+  return null
+}
+
 export function HomeClient({
   initialTokens,
-  initialQ = '',
+  initialQ,
 }: {
   initialTokens: PoolToken[]
+  /** Only for callers that already know the query; normally read from the URL below. */
   initialQ?: string
 }) {
-  const q = initialQ.trim().toLowerCase()
+  const q = (initialQ ?? '').trim().toLowerCase()
 
   const [tokens, setTokens] = useState<PoolToken[]>(initialTokens)
   const [loading, setLoading] = useState(initialTokens.length === 0)
@@ -110,6 +129,9 @@ export function HomeClient({
 
   return (
     <main className="relative min-h-screen text-white pt-16 pb-16 overflow-hidden">
+      <Suspense fallback={null}>
+        <QuerySync onChange={setFilter} />
+      </Suspense>
       <div aria-hidden="true" className="hero-grid-fade" />
       <div className="relative z-10 max-w-desk mx-auto px-4 sm:px-10">
         <section className="relative mt-6 lg:min-h-[200px]">

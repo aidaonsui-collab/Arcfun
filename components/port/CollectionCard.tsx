@@ -4,6 +4,7 @@ import { collectionStatus, type Collection } from '@/lib/port/types'
 import { formatInt } from '@/lib/port/format'
 import { Price } from './Price'
 import { OfficialBadge } from './OfficialBadge'
+import { cdnImage } from '@/lib/cdn-image'
 
 export function CollectionCard({ collection }: { collection: Collection }) {
   const status = collectionStatus(collection)
@@ -15,7 +16,7 @@ export function CollectionCard({ collection }: { collection: Collection }) {
       <div className="aspect-square overflow-hidden rounded-[24px] bg-s1 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={collection.image}
+          src={cdnImage(collection.image, 320)}
           alt=""
           className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]"
         />

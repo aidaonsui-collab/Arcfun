@@ -16,6 +16,7 @@ import { TransferSheet } from './TransferSheet'
 import { AcceptOfferSheet } from './AcceptOfferSheet'
 import { studioPath } from '@/lib/port/path'
 import type { Collection, NftItem } from '@/lib/port/types'
+import { cdnImage } from '@/lib/cdn-image'
 
 /**
  * Rebuild the book one collection at a time: take fresh rows where the fetch answered, keep the
@@ -182,7 +183,7 @@ export function StudioProfileView({ address }: { address?: string }) {
         <span className="grid h-16 w-16 place-items-center overflow-hidden rounded-2xl border border-hair bg-s2 sm:h-20 sm:w-20">
           {avatar ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={avatar} alt="" className="h-full w-full object-cover" />
+            <img src={cdnImage(avatar, 96)} alt="" className="h-full w-full object-cover" />
           ) : (
             <span className="text-[18px] font-semibold text-t3">{name.slice(0, 1).toUpperCase()}</span>
           )}

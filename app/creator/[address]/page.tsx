@@ -26,6 +26,7 @@ import { ARC_EXPLORER, ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { ageLabel, fmtUsd, tileGradient } from '@/lib/ui-format'
 import { PortfolioDesk } from '@/components/PortfolioDesk'
 import type { Address } from 'viem'
+import { cdnImage } from '@/lib/cdn-image'
 
 type PnlRange = CreatorPnl['range']
 
@@ -270,7 +271,7 @@ export default function CreatorPage() {
             >
               {avatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={avatar} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                <img src={cdnImage(avatar, 128)} alt="" className="absolute inset-0 w-full h-full object-cover" />
               ) : (
                 profile.short.slice(2, 4).toUpperCase()
               )}
@@ -670,7 +671,7 @@ function CoinRow({ token }: { token: PoolToken }) {
           >
             {img ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" />
+              <img src={cdnImage(img, 128)} alt="" className="absolute inset-0 w-full h-full object-cover" />
             ) : (
               initial
             )}
@@ -770,7 +771,7 @@ function EditProfileModal({
           <span className="relative w-16 h-16 rounded-full overflow-hidden bg-s3 shrink-0">
             {avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={avatarUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+              <img src={cdnImage(avatarUrl, 128)} alt="" className="absolute inset-0 w-full h-full object-cover" />
             ) : null}
           </span>
           <label className="inline-flex h-9 items-center px-3 rounded-xl border border-hair text-sm font-semibold cursor-pointer hover:border-lime-line">
