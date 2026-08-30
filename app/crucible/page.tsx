@@ -5,7 +5,7 @@ import {
   ARCFUN_TOKEN,
   BURN_ADDRESS,
   CRUCIBLE_CONTRACTS_NOTE,
-  mockCrucibleStats,
+  emptyCrucibleStats,
   usesLegacyOnChainSplits,
 } from '@/lib/crucible'
 import { fetchTokenBurnedPct } from '@/lib/evm-holders'
@@ -34,20 +34,21 @@ async function liveBurnedPct(): Promise<number | null> {
 
 export default async function CruciblePage() {
   const livePct = await liveBurnedPct()
-  const stats = mockCrucibleStats(Date.now(), livePct)
+  const stats = emptyCrucibleStats(livePct)
   const explorer = ARC_EXPLORER || 'https://arc-scan.org'
   const burnedHref = ARCFUN_TOKEN
     ? `${explorer}/token/${ARCFUN_TOKEN}?a=${BURN_ADDRESS}`
     : `${explorer}/address/${BURN_ADDRESS}`
-  const preview = stats.preview || usesLegacyOnChainSplits()
-
   const meltCount = stats.melts.length
   const tiles = [
     {
       label: 'Burned',
-      value: (
-        <CrucibleCountUp value={stats.burnedPct ?? 0} kind="pct" />
-      ),
+      value:
+        stats.burnedPct != null ? (
+          <CrucibleCountUp value={stats.burnedPct} kind="pct" />
+        ) : (
+          '—'
+        ),
       sub: 'of supply',
       subColor: 'var(--limeT)',
       bar: stats.burnedPct,
@@ -106,12 +107,6 @@ export default async function CruciblePage() {
           You trade. Fees accrue. When it cooks, Crucible buys $EVE and burns it. Referrals on
           Arcfun buys are extra, and instant.
         </p>
-
-        {preview ? (
-          <p className="mt-4 mb-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-hair bg-s2 text-[12px] font-semibold text-t2">
-            Burn tape · preview, events not indexed yet
-          </p>
-        ) : null}
 
         <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-px bg-hair2 border border-hair rounded-[24px] overflow-hidden">
           {tiles.map((m) => {
@@ -175,8 +170,6 @@ export default async function CruciblePage() {
                 {stats.lastMelt
                   ? `Last burn ${ageLabel(stats.lastMelt.ts)} ago`
                   : 'No burns yet'}
-                {' · '}
-                preview until buy/burn events exist
               </p>
             </div>
           </div>

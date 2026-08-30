@@ -1,5 +1,5 @@
 /**
- * Crucible product surface — quote-side 1% USDC fee splits, referral codes, mock Burn tape.
+ * Crucible product surface — quote-side 1% USDC fee splits, referral codes, Burn tape.
  *
  * Live locks may still be 70/30 (Meme) or 50/25/25 (Reflection). The numbers here are the
  * product splits. Do not treat them as on-chain until NEXT_PUBLIC_CRUCIBLE_ONCHAIN=1.
@@ -252,59 +252,15 @@ export type CrucibleStats = {
   preview: boolean
 }
 
-function mulberry(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a |= 0
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-/**
- * Deterministic demo Burn tape until Crucible buy/burn events exist.
- * Always tagged `preview: true`.
- */
-export function mockMeltFeed(nowMs = Date.now()): CrucibleMelt[] {
-  const now = Math.floor(nowMs / 1000)
-  const day = Math.floor(now / 86400)
-  const rand = mulberry(0xc4c1b1e ^ day)
-  const melts: CrucibleMelt[] = []
-  let t = now - 68 * 3600
-  for (let i = 0; i < 16; i++) {
-    t += Math.floor(2.4 * 3600 + rand() * 4.6 * 3600)
-    if (t > now - 90) break
-    const usdcIn = Math.round((22 + rand() * 240) * 100) / 100
-    const px = 0.012 + rand() * 0.01
-    const bought = Math.round((usdcIn / px) * 100) / 100
-    melts.push({
-      id: `preview-${day}-${i}`,
-      ts: t,
-      usdcIn,
-      arcfunBought: bought,
-      arcfunBurned: bought,
-      preview: true,
-    })
-  }
-  return melts.sort((a, b) => b.ts - a.ts)
-}
-
-export function mockCrucibleStats(nowMs = Date.now(), burnedPctLive: number | null = null): CrucibleStats {
-  const melts = mockMeltFeed(nowMs)
-  const usdcIn = melts.reduce((s, m) => s + m.usdcIn, 0)
-  const arcfunBought = melts.reduce((s, m) => s + m.arcfunBought, 0)
-  const arcfunAtDead = melts.reduce((s, m) => s + m.arcfunBurned, 0)
-  const supply = 1_000_000_000
+export function emptyCrucibleStats(burnedPctLive: number | null = null): CrucibleStats {
   return {
-    usdcIn,
-    arcfunBought,
-    arcfunAtDead,
-    burnedPct: burnedPctLive != null ? burnedPctLive : (arcfunAtDead / supply) * 100,
-    lastMelt: melts[0] ?? null,
-    melts,
-    preview: burnedPctLive == null,
+    usdcIn: 0,
+    arcfunBought: 0,
+    arcfunAtDead: 0,
+    burnedPct: burnedPctLive,
+    lastMelt: null,
+    melts: [],
+    preview: false,
   }
 }
 
