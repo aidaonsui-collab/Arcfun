@@ -68,13 +68,23 @@ contract ReferralRouter {
         owner = next;
     }
 
+    /// @notice Rotate the fee router and revoke the old one's USDC allowance.
+    /// @dev `_approveMax` grants an unlimited allowance, so rotating without revoking leaves a
+    ///      de-authorised contract able to pull whatever USDC this contract holds. It is normally
+    ///      empty between calls, but "normally empty" is not a guarantee, and
+    ///      `Crucible.setSwapRouter` already revokes on rotation — these should not disagree.
     function setFeeRouter(address feeRouter_) external onlyOwner {
+        address old = feeRouter;
+        if (old != address(0) && old != feeRouter_) _approve(usdc, old, 0);
         feeRouter = feeRouter_;
         emit FeeRouterSet(feeRouter_);
     }
 
+    /// @notice Rotate the swap router and revoke the old one's USDC allowance.
     function setSwapRouter(address router) external onlyOwner {
         if (router == address(0)) revert ZeroAddress();
+        address old = swapRouter;
+        if (old != router) _approve(usdc, old, 0);
         swapRouter = router;
         emit SwapRouterSet(router);
     }
