@@ -327,12 +327,22 @@ export const ARC = {
   CURVE_FOR_SALE: 800_000_000n * 10n ** 18n,
 
   // ── ArcFun Instant (LaunchToken18 · 5042) ───────────────────────────────────
+  // Reverted 2026-08-30: #94 cut /create to a new factory (0x6D76…); #97 then pointed its
+  // locker fallback at CrucibleLock (0xa302…) and called that "an explicit decision" — it
+  // wasn't agreed, and it changes the creator take from 70% to 50% with no economics
+  // conversation attached. ArcBpsSource (0x1223…) still reads 70/30 the whole time; it's
+  // CrucibleLock's own hardcoded split that actually governs collect(), so that config value
+  // is disconnected from what happens — a real trap for the next person who checks it and
+  // concludes the split is fine. Confirmed zero launches went through the new factory before
+  // this revert (allTokensLength() = 0), so nothing to migrate. Back to the addresses actually
+  // paying 70/30 to the 22 already-live tokens until Instant-into-Crucible is a real, agreed
+  // decision — not one declared and merged in the same six seconds.
   INSTANT_FACTORY: (process.env.NEXT_PUBLIC_ARC_INSTANT_FACTORY ??
-    '0x6D7621997D8cF3b5d2d191cd014324149211Af93') as Address,
+    '0xd51E6217bb3bC7586866713854Ea75B7BefF1009') as Address,
   INSTANT_LOCKER: (process.env.NEXT_PUBLIC_ARC_INSTANT_LOCKER ??
-    '0xa3025cd2cBD6F2cc75521D5a2786dFC10FF5C6EF') as Address,
+    '0x84F486d7254aEDc89986bce392771D88bf5828EA') as Address,
   BPS_SOURCE: (process.env.NEXT_PUBLIC_ARC_BPS_SOURCE ??
-    '0x12239B4593b143838b0ceb55Bc8A4150946E45Ed') as Address,
+    '0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE') as Address,
 
   /** ArcStudio NFT factory (UUPS proxy, Deploy.s.sol 2026-08-23 on 5042). */
   NFT_FACTORY: envAddr(
