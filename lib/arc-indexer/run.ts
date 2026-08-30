@@ -4,7 +4,7 @@
  */
 import { parseAbiItem, type Address, type Hex } from 'viem'
 import { ARC, arcPublicClient, arcInstantEnabled, arcReflectionEnabled } from '@/lib/contracts-arc'
-import { fetchArcTrades } from '@/lib/arc-trades'
+import { syncTradesToHead } from '@/lib/arc-trades'
 import {
   ROBIN_OTC_LIQUIDITY,
   LIQUIDITY_ABI,
@@ -21,6 +21,7 @@ import {
   listIndexedTokens,
   listTokenAddresses,
   setVolume,
+  getVolumesMap,
   upsertOtcOffer,
   removeOtcOffer,
   listOtcOffers,
@@ -52,8 +53,24 @@ const OTC_FLOOR = 14_000_000n
 
 const MAX_FACTORY_CHUNKS = 24
 const MAX_OTC_CHUNKS = 24
-/** How many tokens to catch up per cron tick (swap + volume). */
-const SWAP_BATCH = 8
+/**
+ * How many tokens to catch up per cron tick (swap + volume), split two ways.
+ *
+ * HOT_BATCH: recomputed fresh every cycle from cached IndexedVolume.lastTradeAt (a single
+ * kv.mget, no RPC) — whichever tokens are currently most active get synced close to every
+ * cycle, not once per full rotation. Previously a single flat SWAP_BATCH=8 round-robinned ALL
+ * tokens with identical cadence: with 29 tokens that's ~4 cycles / 8 minutes before a token's
+ * proactive turn came around again, whether it was the hottest token on the pad or dead.
+ *
+ * ROTATE_BATCH: the original round-robin, unchanged in mechanism, over the stable
+ * listIndexedTokens() order — this is what still guarantees every token, including quiet ones,
+ * gets touched eventually. That matters for correctness, not just freshness: computeVolumeWindows
+ * recomputes rolling 1h/6h/12h/24h windows from the persisted trade tape each time it runs: a
+ * token that stops getting a turn doesn't decay to zero as its old trades age out of those
+ * windows, it just freezes at its last-computed values.
+ */
+const HOT_BATCH = 8
+const ROTATE_BATCH = 12
 
 const ALL_TOKENS_ABI = [
   {
@@ -311,17 +328,49 @@ async function catchUpSwapsAndVolume(
   const all = await listIndexedTokens()
   if (!all.length) return { state, tokens: 0 }
 
+  // Hottest first: sort by last-seen trade activity, recomputed fresh every cycle — this is not
+  // meant to be stable across cycles the way the rotation index below is, volumes genuinely
+  // shift. A token with no cached volume yet (never synced) ranks alongside "just traded now"
+  // rather than last: it's the token most in need of a first pass, not one to defer behind
+  // already-known-quiet tokens.
+  const volumes = await getVolumesMap(all.map((t) => t.token))
+  const now = Math.floor(Date.now() / 1000)
+  const byRecency = [...all].sort((a, b) => {
+    const ta = volumes[a.token.toLowerCase()]?.lastTradeAt ?? now
+    const tb = volumes[b.token.toLowerCase()]?.lastTradeAt ?? now
+    return tb - ta
+  })
+  const hot = byRecency.slice(0, HOT_BATCH)
+
+  // Round-robin over the STABLE listIndexedTokens() order (not byRecency, which reshuffles every
+  // cycle as volumes change) — a rotating index into a list that keeps reordering under it would
+  // risk skipping tokens or revisiting others, defeating the coverage guarantee this exists for.
   const start = state.swapRotate % all.length
+  const rotated: IndexedToken[] = []
+  for (let i = 0; i < Math.min(ROTATE_BATCH, all.length); i++) {
+    rotated.push(all[(start + i) % all.length])
+  }
+
+  // A token in both sets is processed once.
+  const seen = new Set<string>()
   const batch: IndexedToken[] = []
-  for (let i = 0; i < Math.min(SWAP_BATCH, all.length); i++) {
-    batch.push(all[(start + i) % all.length])
+  for (const t of [...hot, ...rotated]) {
+    const key = t.token.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    batch.push(t)
   }
 
   let n = 0
   for (const t of batch) {
     try {
-      // Reuses per-token KV trade index (cold backfill / warm catch-up)
-      await fetchArcTrades(t.token as Address, { limit: 20 })
+      // Sync directly rather than via fetchArcTrades: this call never used fetchArcTrades's
+      // return value, only its blocking sync side effect, and computeVolumeWindows right below
+      // reads the same arcfun:trades:* KV state syncTradesToHead just wrote. fetchArcTrades now
+      // returns immediately and refreshes stale tokens in the background (see fetchArcTrades's
+      // own comment) — right for a page view, wrong here, where volume must reflect this cycle's
+      // sync, not whatever was cached before it.
+      await syncTradesToHead(t.token as Address)
       const vol = await computeVolumeWindows(t.token)
       await setVolume(t.token, vol)
       n++
@@ -333,7 +382,11 @@ async function catchUpSwapsAndVolume(
   return {
     state: {
       ...state,
-      swapRotate: (start + batch.length) % Math.max(all.length, 1),
+      // Advances by what the ROTATION portion consumed, not the de-duplicated combined batch —
+      // otherwise overlap with the hot set (a currently-hot token that also happened to be next
+      // in line) would advance the pointer too slowly, or leave it stuck if the two kept
+      // overlapping, defeating the coverage guarantee.
+      swapRotate: (start + rotated.length) % Math.max(all.length, 1),
     },
     tokens: n,
   }

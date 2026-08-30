@@ -10,6 +10,7 @@
  * indexer (e.g. RadarDEX) never re-derives history from a bounded RPC window, so it never has this
  * problem — this makes ArcFun behave the same way: index once, keep forever, only ever scan the gap.
  */
+import { after } from 'next/server'
 import { kv } from '@vercel/kv'
 import { erc20Abi as erc20DecimalsAbi, formatUnits, parseAbiItem, type Address, type Log } from 'viem'
 import { ARC, arcPublicClient } from './contracts-arc'
@@ -311,7 +312,7 @@ async function persistTrades(key: string, ascendingNew: EvmTrade[], newCursor: b
  * write the same cursor. Measured live before this fix: one page view, ~5s per request, four
  * times over. Now the first caller pays it once and the rest await that same call.
  */
-async function syncTradesToHead(token: Address): Promise<void> {
+export async function syncTradesToHead(token: Address): Promise<void> {
   const key = token.toLowerCase()
   const last = lastSyncedAt.get(key)
   if (last != null && Date.now() - last < SYNC_FRESH_MS) return
@@ -360,6 +361,27 @@ async function syncTradesToHead(token: Address): Promise<void> {
   lastSyncedAt.set(key, Date.now())
 }
 
+/**
+ * Refresh a token's trades AFTER the current response is sent, matching the pattern already
+ * proven in lib/arc-catalog-cache.ts's scheduleRefresh — this is the same "return what's cached,
+ * refresh in the background" shape applied to trades instead of the home catalog. `run` never
+ * awaits the sync, so even the defensive fallback (after() throws outside a request-scoped
+ * context — a Route Handler, Server Component, or Server Action; the cron and the local-indexer
+ * script both call syncTradesToHead directly, bypassing this) stays non-blocking.
+ */
+function scheduleTradesSync(token: Address): void {
+  const run = () => {
+    void syncTradesToHead(token).catch((e) =>
+      console.warn('[arc-trades] background sync', token, summarizeRpcError(e)),
+    )
+  }
+  try {
+    after(run)
+  } catch {
+    run()
+  }
+}
+
 export interface FetchArcTradesOpts {
   /** Page size. Defaults to MAX_TRADES (50). */
   limit?: number
@@ -379,7 +401,28 @@ export async function fetchArcTrades(
   if (hit && Date.now() - hit.at < FRESH_MS) return hit.result
 
   try {
-    await syncTradesToHead(token)
+    // Block only on a token's genuine first-ever view — no cursor means nothing has ever been
+    // indexed for it, so there's nothing to return without syncing first (same shape as
+    // arc-catalog-cache.ts's rebuild() fallback for a true cold start). Every other case has
+    // *something* already in KV: return that immediately and refresh in the background via
+    // scheduleTradesSync, so the viewer isn't the one paying for the scan. This was the actual
+    // remaining latency after the coalescing fix — coalescing stopped N concurrent requests from
+    // each triggering their own scan, but the one scan that *did* run still blocked the response
+    // it was attached to. The client already polls every 8s (app/token/[address]/page.tsx), well
+    // past SYNC_FRESH_MS (6s), so a page that briefly shows stale/empty data self-heals on its
+    // own next poll without any client change.
+    let cursorExists = true
+    try {
+      cursorExists = (await kv.get<string | number>(cursorKvKey(key))) != null
+    } catch {
+      cursorExists = true // a failed check must not force the slow cold-start path
+    }
+
+    if (cursorExists) {
+      scheduleTradesSync(token)
+    } else {
+      await syncTradesToHead(token)
+    }
 
     // Stored ascending (oldest→newest); newest page (offset 0) is the tail of the list. Redis
     // LRANGE with negative indices counts from the end, so page N's ascending slice is
