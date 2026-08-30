@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Template only — NOT installed by anything in this repo. If you decide to run local-indexer.ts
+  unattended, copy this to ~/Library/LaunchAgents/co.arcfun.local-indexer.plist, fill in the two
+  ABSOLUTE PATHS below, then:
+
+    launchctl load ~/Library/LaunchAgents/co.arcfun.local-indexer.plist
+
+  KeepAlive restarts it if it crashes; RunAtLoad starts it on login. It does NOT survive the Mac
+  being asleep — pair with `caffeinate -i` or `pmset` if you want it to keep running with the lid
+  closed. StandardOutPath/StandardErrorPath give you a log file, since a launchd process has no
+  visible terminal to watch.
+
+  To stop it: launchctl unload ~/Library/LaunchAgents/co.arcfun.local-indexer.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>co.arcfun.local-indexer</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>npx</string>
+    <string>tsx</string>
+    <string>--env-file=.env.local</string>
+    <string>scripts/local-indexer.ts</string>
+  </array>
+
+  <!-- REQUIRED: absolute path to your Arcfun checkout -->
+  <key>WorkingDirectory</key>
+  <string>/Users/YOUR_USERNAME/path/to/Arcfun</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- REQUIRED: absolute paths for log output -->
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_USERNAME/path/to/Arcfun/scripts/local-indexer.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_USERNAME/path/to/Arcfun/scripts/local-indexer.error.log</string>
+</dict>
+</plist>

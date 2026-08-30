@@ -311,7 +311,7 @@ async function persistTrades(key: string, ascendingNew: EvmTrade[], newCursor: b
  * write the same cursor. Measured live before this fix: one page view, ~5s per request, four
  * times over. Now the first caller pays it once and the rest await that same call.
  */
-async function syncTradesToHead(token: Address): Promise<void> {
+export async function syncTradesToHead(token: Address): Promise<void> {
   const key = token.toLowerCase()
   const last = lastSyncedAt.get(key)
   if (last != null && Date.now() - last < SYNC_FRESH_MS) return
