@@ -5,17 +5,21 @@ import {IERC20Minimal} from "./interfaces/IERC20Minimal.sol";
 import {ISwapRouter02} from "./interfaces/ISwapRouter02.sol";
 
 /// @title Crucible
-/// @notice Holds quote-side Crucible USDC and, once `$ARCFUN` is set, cooks it:
-///         USDC → ARCFUN on SwapRouter02, ARCFUN to `0x…dead`. Burn tape event is `Burn`.
-/// @dev `$ARCFUN` is not launched yet. While `arcfun == address(0)` USDC is HELD here —
-///      cook() reverts, nothing is bought, nothing is sent to dead.
-///      `setArcfun` is one-shot. cook is never called from collect; a keeper passes minOut.
+/// @notice Holds quote-side Crucible USDC and cooks it: USDC → `$EVE` on SwapRouter02,
+///         `$EVE` to `0x…dead`. Burn tape event is `Burn`.
+/// @dev The burn target is `$EVE` and is fixed at construction. It was previously a one-shot
+///      `setArcfun` setter, which existed only because the protocol token did not exist yet when
+///      this was written. It does now (`0x19209E55049bc613c5cC8b66B7DF7824096e78CF`), so the
+///      setter is gone: an immutable cannot be pointed at the wrong token by a mistaken or
+///      compromised owner call, and there is no window in which USDC accrues against an unset
+///      target. Same shape as EveBurn. Use `cookPaused` to stop cooking.
+///      cook is never called from collect; a keeper passes minOut.
 contract Crucible {
     address public owner;
     address public usdc;
     address public swapRouter;
-    address public arcfun;
-    uint24 public arcfunPoolFee;
+    address public immutable eve;
+    uint24 public evePoolFee;
     bool public cookPaused;
 
     /// @notice Addresses allowed to execute the swap. The owner is always allowed.
@@ -26,19 +30,16 @@ contract Crucible {
     uint256 private _unlocked = 1;
 
     event OwnerTransferred(address indexed previous, address indexed next);
-    event ArcfunSet(address indexed token);
-    event ArcfunPoolFeeSet(uint24 fee);
+    event EvePoolFeeSet(uint24 fee);
     event CookPausedSet(bool paused);
     event KeeperSet(address indexed keeper, bool allowed);
     event SwapRouterSet(address indexed router);
     /// @notice Burn tape row. `token` is the ARCFUN that was bought and sent to dead.
-    event Burn(address indexed token, uint256 usdcIn, uint256 arcfunOut, uint256 ts);
+    event Burn(address indexed token, uint256 usdcIn, uint256 eveOut, uint256 ts);
 
     error NotOwner();
     error NotKeeper();
     error ZeroAddress();
-    error ArcfunUnset();
-    error ArcfunAlreadySet();
     error ZeroFee();
     error ZeroMinOut();
     error InsufficientUsdc();
@@ -52,7 +53,7 @@ contract Crucible {
         _;
     }
 
-    /// @dev Swap execution is keeper-gated. `minArcfunOut` is supplied by the caller, so leaving
+    /// @dev Swap execution is keeper-gated. `minEveOut` is supplied by the caller, so leaving
     ///      this open let anyone pass 1 and accept a manipulated price — the ZeroMinOut guard only
     ///      rejects a literal zero. A caller-chosen bound cannot protect against the caller.
     modifier onlyKeeper() {
@@ -67,12 +68,13 @@ contract Crucible {
         _unlocked = 1;
     }
 
-    constructor(address usdc_, address swapRouter_, uint24 arcfunPoolFee_) {
-        if (usdc_ == address(0) || swapRouter_ == address(0)) revert ZeroAddress();
+    constructor(address usdc_, address swapRouter_, address eve_, uint24 evePoolFee_) {
+        if (usdc_ == address(0) || swapRouter_ == address(0) || eve_ == address(0)) revert ZeroAddress();
         owner = msg.sender;
         usdc = usdc_;
         swapRouter = swapRouter_;
-        arcfunPoolFee = arcfunPoolFee_ == 0 ? 10_000 : arcfunPoolFee_;
+        eve = eve_;
+        evePoolFee = evePoolFee_ == 0 ? 10_000 : evePoolFee_;
     }
 
     function transferOwnership(address next) external onlyOwner {
@@ -82,17 +84,11 @@ contract Crucible {
     }
 
     /// @notice One-shot. Points the burn target. Cannot unset or repoint.
-    function setArcfun(address token) external onlyOwner {
-        if (token == address(0)) revert ZeroAddress();
-        if (arcfun != address(0)) revert ArcfunAlreadySet();
-        arcfun = token;
-        emit ArcfunSet(token);
-    }
 
-    function setArcfunPoolFee(uint24 fee) external onlyOwner {
+    function setEvePoolFee(uint24 fee) external onlyOwner {
         if (fee == 0) revert ZeroFee();
-        arcfunPoolFee = fee;
-        emit ArcfunPoolFeeSet(fee);
+        evePoolFee = fee;
+        emit EvePoolFeeSet(fee);
     }
 
     /// @notice Rotate the router and revoke the old one's USDC allowance.
@@ -116,37 +112,36 @@ contract Crucible {
     }
 
     /// @notice Permissionless. Swaps `amountIn` USDC for ARCFUN and sends it to dead.
-    ///         Reverts while `arcfun` is unset or cook is paused. `amountIn == 0` is a no-op.
-    ///         `minArcfunOut` must be > 0 when swapping; there is no zero-slippage overload.
-    function cook(uint256 amountIn, uint256 minArcfunOut) external onlyKeeper returns (uint256 arcfunOut) {
-        return _cook(amountIn, minArcfunOut);
+    ///         Reverts while cook is paused. `amountIn == 0` is a no-op.
+    ///         `minEveOut` must be > 0 when swapping; there is no zero-slippage overload.
+    function cook(uint256 amountIn, uint256 minEveOut) external onlyKeeper returns (uint256 eveOut) {
+        return _cook(amountIn, minEveOut);
     }
 
-    function _cook(uint256 amountIn, uint256 minArcfunOut) internal nonReentrant returns (uint256 arcfunOut) {
-        address token = arcfun;
-        if (token == address(0)) revert ArcfunUnset();
+    function _cook(uint256 amountIn, uint256 minEveOut) internal nonReentrant returns (uint256 eveOut) {
+        address token = eve;
         if (cookPaused) revert CookIsPaused();
         if (amountIn == 0) return 0;
 
         uint256 bal = IERC20Minimal(usdc).balanceOf(address(this));
         if (amountIn > bal) revert InsufficientUsdc();
-        if (minArcfunOut == 0) revert ZeroMinOut();
+        if (minEveOut == 0) revert ZeroMinOut();
 
         _approveMax(usdc, swapRouter, amountIn);
 
-        arcfunOut = ISwapRouter02(swapRouter).exactInputSingle(
+        eveOut = ISwapRouter02(swapRouter).exactInputSingle(
             ISwapRouter02.ExactInputSingleParams({
                 tokenIn: usdc,
                 tokenOut: token,
-                fee: arcfunPoolFee,
+                fee: evePoolFee,
                 recipient: DEAD,
                 amountIn: amountIn,
-                amountOutMinimum: minArcfunOut,
+                amountOutMinimum: minEveOut,
                 sqrtPriceLimitX96: 0
             })
         );
 
-        emit Burn(token, amountIn, arcfunOut, block.timestamp);
+        emit Burn(token, amountIn, eveOut, block.timestamp);
     }
 
     function _approveMax(address token, address spender, uint256 needed) internal {

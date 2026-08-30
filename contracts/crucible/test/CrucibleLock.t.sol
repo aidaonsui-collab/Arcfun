@@ -32,7 +32,7 @@ contract CrucibleLockTest is Test {
         router = new MockSwapRouter();
         nfpm = new MockNFPM();
         registry = new ReferralRegistry();
-        crucible = new Crucible(address(usdc), address(router), 10_000);
+        crucible = new Crucible(address(usdc), address(router), address(arcfun), 10_000);
         locker = new CrucibleLock(
             address(nfpm), address(usdc), address(router), address(crucible), address(registry), platform
         );
@@ -78,7 +78,9 @@ contract CrucibleLockTest is Test {
         assertEq(usdc.balanceOf(platform), 0);
     }
 
-    function test_unsetArcfunHoldsUsdcOnCrucible() public {
+    /// The burn target is immutable now, so "unset" is unreachable: USDC accrues against a
+    /// target that was fixed at construction and cannot be repointed.
+    function test_burnTargetIsFixedAtConstruction() public {
         uint256 fee = 10_000e6;
         _seedFees(fee, 0);
 
@@ -91,18 +93,12 @@ contract CrucibleLockTest is Test {
         assertEq(usdc.balanceOf(address(crucible)), 3_000e6);
         assertEq(launch.balanceOf(dead), 1_000e18);
         assertEq(usdc.balanceOf(dead), 0);
-        assertEq(crucible.arcfun(), address(0));
-
-        vm.expectRevert(Crucible.ArcfunUnset.selector);
-        crucible.cook(3_000e6, 3_000e18);
-        assertEq(usdc.balanceOf(address(crucible)), 3_000e6);
-        assertEq(arcfun.balanceOf(dead), 0);
+        assertEq(crucible.eve(), address(arcfun), "target fixed at deploy");
     }
 
     function test_collectDoesNotAutoCook() public {
         uint256 fee = 10_000e6;
         _seedFees(fee, 0);
-        crucible.setArcfun(address(arcfun));
 
         locker.collectFees(TOKEN_ID);
 

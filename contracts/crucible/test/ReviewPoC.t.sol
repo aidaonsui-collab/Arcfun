@@ -15,6 +15,7 @@ contract ReviewPoCTest is Test {
     ReferralRegistry internal registry;
     MockERC20 internal usdc;
     MockERC20 internal launch;
+    MockERC20 internal arcfun;
     MockSwapRouter internal router;
     MockNFPM internal nfpm;
 
@@ -28,10 +29,11 @@ contract ReviewPoCTest is Test {
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
         launch = new MockERC20("MEME", "MEME", 18);
+        arcfun = new MockERC20("EVE", "EVE", 18);
         router = new MockSwapRouter();
         nfpm = new MockNFPM();
         registry = new ReferralRegistry();
-        crucible = new Crucible(address(usdc), address(router), 10_000);
+        crucible = new Crucible(address(usdc), address(router), address(arcfun), 10_000);
         locker = new CrucibleLock(
             address(nfpm), address(usdc), address(router), address(crucible), address(registry), platform
         );
@@ -75,7 +77,7 @@ contract ReviewPoCTest is Test {
     function test_PoC_oneBlockedRecipientFreezesEveryone() public {
         BlockingERC20 bUsdc = new BlockingERC20();
         MockNFPM n2 = new MockNFPM();
-        Crucible c2 = new Crucible(address(bUsdc), address(router), 10_000);
+        Crucible c2 = new Crucible(address(bUsdc), address(router), address(launch), 10_000);
         CrucibleLock l2 = new CrucibleLock(
             address(n2), address(bUsdc), address(router), address(c2), address(registry), platform
         );

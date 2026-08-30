@@ -35,11 +35,11 @@ contract ReviewPoC2Test is Test {
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
         launch = new MockERC20("MEME", "MEME", 18);
-        arcfun = new MockERC20("ARCFUN", "ARCFUN", 18);
+        arcfun = new MockERC20("EVE", "EVE", 18);
         router = new MockSwapRouter();
         nfpm = new MockNFPM();
         registry = new ReferralRegistry();
-        crucible = new Crucible(address(usdc), address(router), 10_000);
+        crucible = new Crucible(address(usdc), address(router), address(arcfun), 10_000);
         locker = new CrucibleLock(
             address(nfpm), address(usdc), address(router), address(crucible), address(registry), platform
         );
@@ -75,7 +75,6 @@ contract ReviewPoC2Test is Test {
     }
 
     function test_attackerCannotCookWithMinOutOfOne() public {
-        crucible.setArcfun(address(arcfun));
         usdc.mint(address(crucible), 5_000e6);
         router.setOutPerIn(1);
 
@@ -101,7 +100,6 @@ contract ReviewPoC2Test is Test {
     }
 
     function test_keeperCanStillCook() public {
-        crucible.setArcfun(address(arcfun));
         usdc.mint(address(crucible), 5_000e6);
 
         vm.prank(keeper);

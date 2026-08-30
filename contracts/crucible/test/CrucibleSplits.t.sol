@@ -14,15 +14,17 @@ contract CrucibleSplitsTest is Test {
     MockNFPM internal nfpm;
     Crucible internal crucible;
     ReferralRegistry internal registry;
+    MockERC20 internal arcfun;
 
     address internal platform = makeAddr("platform");
 
     function setUp() public {
         usdc = new MockERC20("USD Coin", "USDC", 6);
+        arcfun = new MockERC20("EVE", "EVE", 18);
         router = new MockSwapRouter();
         nfpm = new MockNFPM();
         registry = new ReferralRegistry();
-        crucible = new Crucible(address(usdc), address(router), 10_000);
+        crucible = new Crucible(address(usdc), address(router), address(arcfun), 10_000);
         lock = new CrucibleLock(
             address(nfpm), address(usdc), address(router), address(crucible), address(registry), platform
         );
