@@ -9,6 +9,7 @@ optimizer = true
 optimizer_runs = 200
 # bytecode_hash left at solc default to match the deployed contract's metadata
 via_ir = true
+fs_permissions = [{ access = "read", path = "./script/bytecode"}]
 
 remappings = [
     "forge-std/=lib/forge-std/src/",
