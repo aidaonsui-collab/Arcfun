@@ -60,7 +60,8 @@ contract DeployInstantArcTestnet is Script {
                 creationFee: creationFee,
                 launchVirtualQuote: launchVq,
                 memeCreatorBps: memeCreatorBps,
-                memeStakerBps: memeStakerBps
+                memeStakerBps: memeStakerBps,
+                wireOwner: owner == deployer
             })
         );
 

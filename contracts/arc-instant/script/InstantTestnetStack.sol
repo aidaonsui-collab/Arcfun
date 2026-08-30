@@ -44,6 +44,7 @@ library InstantTestnetStack {
         uint256 launchVirtualQuote;
         uint16 memeCreatorBps;
         uint16 memeStakerBps;
+        bool wireOwner;
     }
 
     function defaultParams(address owner) internal pure returns (DeployParams memory p) {
@@ -56,6 +57,7 @@ library InstantTestnetStack {
         p.launchVirtualQuote = 5_500_000_000; // 5500 USDC (6dp)
         p.memeCreatorBps = 7000;
         p.memeStakerBps = 0;
+        p.wireOwner = true;
     }
 
     function deploy(address owner) internal returns (Addresses memory) {
@@ -82,10 +84,9 @@ library InstantTestnetStack {
 
         ArcBpsSource bps = new ArcBpsSource(p.owner);
         s.bpsSource = address(bps);
-        // onlyOwner wiring: broadcast Script has msg.sender = EOA; forge tests have
-        // address(this) = the test contract (msg.sender is Foundry's default sender).
-        bool wire = p.owner == msg.sender || p.owner == address(this);
-        if (wire) {
+        // Tests set wireOwner (library is inlined; msg.sender is Foundry's default sender).
+        // Broadcast scripts must not use address(this) — Foundry treats Script contracts as ephemeral.
+        if (p.wireOwner) {
             bps.setMemeBps(p.memeCreatorBps, p.memeStakerBps);
         }
 
@@ -112,7 +113,7 @@ library InstantTestnetStack {
         s.factory = address(factoryProxy);
         InstantErc20QuoteFactoryProxyInit factory = InstantErc20QuoteFactoryProxyInit(payable(s.factory));
 
-        if (wire) {
+        if (p.wireOwner) {
             factory.setUniV3Config(s.nfpm, POOL_FEE, TICK_SPACING, s.locker, s.swapRouter02);
             if (p.creationFee > 0) factory.setCreationFee(p.creationFee);
             MonLockProxyInit(payable(s.locker)).setStamper(s.factory);
