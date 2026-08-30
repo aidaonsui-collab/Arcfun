@@ -26,6 +26,7 @@
   "exclude": [
     "node_modules",
     "subgraph",
-    "public"
+    "public",
+    "contracts"
   ]
 }
