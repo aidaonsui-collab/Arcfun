@@ -34,11 +34,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const limit = Number(req.nextUrl.searchParams.get('limit') || '') || undefined
   const offset = Number(req.nextUrl.searchParams.get('offset') || '') || undefined
   const data = await fetchArcTrades(token as Address, { limit, offset })
+  // Widened from s-maxage=5 2026-08-30 alongside the fetchArcTrades sync coalescing (same file's
+  // SYNC_FRESH_MS is 6s) — no point caching the edge response shorter than the underlying data
+  // itself refuses to re-sync. Note ?fresh=1 only ever bypassed the CDN layer below, not
+  // fetchArcTrades's own per-page or per-token freshness windows — `fresh` was never threaded
+  // into that call. No current caller passes it; if one is added expecting a true bypass, it
+  // needs to reach fetchArcTrades too.
   return NextResponse.json(data.trades.length || offset ? data : EMPTY, {
     headers: {
       'Cache-Control': fresh
         ? 'private, no-store'
-        : 'public, s-maxage=5, stale-while-revalidate=10',
+        : 'public, s-maxage=8, stale-while-revalidate=20',
     },
   })
 }
