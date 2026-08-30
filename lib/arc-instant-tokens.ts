@@ -138,6 +138,21 @@ const VIRTUAL_TOKEN_INIT_18 = ARC.VIRTUAL_TOKEN_INIT
 const VIRTUAL_TOKEN_INIT_6 = 1_066_666_666_666_666n
 /** Pre–LaunchToken18 Instant factory (still holds live 6dp tokens). */
 const ARC_INSTANT_FACTORY_LEGACY = '0x607bff9EB2ff1494AC8f0b545502Ce49ee2Ae42B' as Address
+/** LaunchToken18 Instant factory retired 2026-08-30. Eve and the live book still live here. */
+const ARC_INSTANT_FACTORY_PREV = '0xd51E6217bb3bC7586866713854Ea75B7BefF1009' as Address
+
+/** Current Instant factory first, then retired factories so existing tokens stay listed. */
+export function instantCatalogFactories(): Address[] {
+  const out: Address[] = []
+  const seen = new Set<string>()
+  for (const f of [ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_PREV, ARC_INSTANT_FACTORY_LEGACY]) {
+    const k = f.toLowerCase()
+    if (!f || f === ZERO || seen.has(k)) continue
+    seen.add(k)
+    out.push(f)
+  }
+  return out
+}
 
 type InstantQuotePool = {
   creator: Address
@@ -241,7 +256,7 @@ export async function getArcLivePriceUsdc(token: Address, uniPool?: Address): Pr
     let pool = uniPool
     if (!pool || pool === ZERO) {
       // Prefer current factory; fall back to legacy Instant for pre–LaunchToken18 pools.
-      for (const factory of [ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_LEGACY]) {
+      for (const factory of instantCatalogFactories()) {
         try {
           const row = (await client.readContract({
             address: factory,
@@ -391,7 +406,7 @@ export async function fetchArcInstantPoolToken(token: Address): Promise<PoolToke
   // pre–LaunchToken18 legacy factory. Without this fallback, any token whose pool lives only on
   // the legacy factory shows fine in the home-grid catalog but 404s on its own /token page, since
   // this single-lookup path used to check only ARC.INSTANT_FACTORY.
-  for (const factory of [ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_LEGACY]) {
+  for (const factory of instantCatalogFactories()) {
     const row = await fetchArcInstantPoolTokenFromFactory(token, factory)
     if (row) {
       const [withAge] = await attachLaunchCreatedAt([row])
@@ -443,17 +458,21 @@ async function fetchArcInstantPoolTokenFromFactory(token: Address, factory: Addr
 
 export async function isArcInstantToken(token: Address): Promise<boolean> {
   if (!arcInstantEnabled()) return false
-  try {
-    const p = (await arcPublicClient().readContract({
-      address: ARC.INSTANT_FACTORY,
-      abi: INSTANT_QUOTE_FACTORY_ABI,
-      functionName: 'getPool',
-      args: [token],
-    })) as InstantQuotePool
-    return !!(p?.creator && p.creator !== ZERO && p.uniPool && p.uniPool !== ZERO)
-  } catch {
-    return false
+  const client = arcPublicClient()
+  for (const factory of instantCatalogFactories()) {
+    try {
+      const p = (await client.readContract({
+        address: factory,
+        abi: INSTANT_QUOTE_FACTORY_ABI,
+        functionName: 'getPool',
+        args: [token],
+      })) as InstantQuotePool
+      if (p?.creator && p.creator !== ZERO && p.uniPool && p.uniPool !== ZERO) return true
+    } catch {
+      /* try next factory */
+    }
   }
+  return false
 }
 
 /**
@@ -698,14 +717,17 @@ export async function fetchArcInstantPoolTokens(): Promise<PoolToken[]> {
   if (!arcInstantEnabled()) return []
   const client = arcPublicClient()
   try {
-    const factories = [ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_LEGACY]
-    const listed = await Promise.all([
-      listInstantFactoryTokens(factories[0]),
-      listInstantFactoryTokens(factories[1]).catch(() => ({
-        addrs: [] as Address[],
-        launchVq: 5_500_000_000n,
-      })),
-    ])
+    const factories = instantCatalogFactories()
+    const listed = await Promise.all(
+      factories.map((factory, i) =>
+        i === 0
+          ? listInstantFactoryTokens(factory)
+          : listInstantFactoryTokens(factory).catch(() => ({
+              addrs: [] as Address[],
+              launchVq: 5_500_000_000n,
+            })),
+      ),
+    )
 
     // Dedupe by token address (prefer first = current factory).
     const seen = new Set<string>()
