@@ -189,9 +189,24 @@ export function getPaymentChain(id: OtcPaymentChainId | number): OtcPaymentChain
 }
 
 export function robinOtcEnabled(): boolean {
-  // Default ON when live defaults exist; set NEXT_PUBLIC_ROBIN_OTC_ENABLED=0 to force off.
+  // Retired 2026-08-30 — the /otc UI redirects home (next.config.js) and there is no way to
+  // create a new offer, so this now defaults OFF rather than ON. Set
+  // NEXT_PUBLIC_ROBIN_OTC_ENABLED=1 to bring it back without a code change.
+  //
+  // This one flag is already the sole gate on all recurring OTC work: scanOtcOffers
+  // (lib/arc-indexer/run.ts) and catchUpOtcDeskStats (lib/arc-indexer/otc-desk-stats.ts) both
+  // check it and no-op immediately when false, without touching what's already persisted —
+  // otcCursor stays wherever it was, and the desk-stats KV row (settledTrades, volumeUsdc) is
+  // untouched. So this stops the OTC-specific RPC scanning inside the shared 2-minute indexer
+  // cron cycle (/api/arc/indexer/run — factory and swap/volume scanning are separate and keep
+  // running) while every *read* path — GET /api/otc/offers, the indexer status endpoint's
+  // deskStats — keeps serving the real last-known numbers, frozen rather than erased. Verified
+  // live before this change: otcCursor was advancing every cycle, deskStats.updatedAt was
+  // current, and the one component that reads the flag-gated fetchOtcDeskStats (which zeroes
+  // out instead of freezing) — components/bridge/InstantOtcPanel.tsx — is rendered nowhere.
+  if (process.env.NEXT_PUBLIC_ROBIN_OTC_ENABLED === '1') return true
   if (process.env.NEXT_PUBLIC_ROBIN_OTC_ENABLED === '0') return false
-  return ROBIN_OTC_LIQUIDITY !== ZERO && livePaymentChains().length > 0
+  return false
 }
 
 /** Total open depth across active offers (USDC 6dp) — uses available when present. */
