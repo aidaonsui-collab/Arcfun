@@ -1,5 +1,11 @@
 import { erc20Abi, zeroAddress, type Address } from 'viem'
-import { ARC, arcInstantEnabled, arcPublicClient, arcReflectionEnabled } from '@/lib/contracts-arc'
+import {
+  ARC,
+  arcInstantEnabled,
+  arcPublicClient,
+  arcReflectionEnabled,
+  instantCatalogFactories,
+} from '@/lib/contracts-arc'
 import { INSTANT_QUOTE_FACTORY_ABI } from '@/lib/instant-quote-launchpad'
 import { getArcTokenMeta } from '@/lib/arc-token-meta'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
@@ -38,18 +44,20 @@ export type OriginTokenInfo = {
 export async function readPadCreator(token: Address): Promise<Address | null> {
   const client = arcPublicClient()
   if (arcInstantEnabled()) {
-    try {
-      const p = await client.readContract({
-        address: ARC.INSTANT_FACTORY,
-        abi: INSTANT_QUOTE_FACTORY_ABI,
-        functionName: 'getPool',
-        args: [token],
-      })
-      if (p.creator && p.creator !== zeroAddress && p.uniPool && p.uniPool !== zeroAddress) {
-        return p.creator
+    for (const factory of instantCatalogFactories()) {
+      try {
+        const p = await client.readContract({
+          address: factory,
+          abi: INSTANT_QUOTE_FACTORY_ABI,
+          functionName: 'getPool',
+          args: [token],
+        })
+        if (p.creator && p.creator !== zeroAddress && p.uniPool && p.uniPool !== zeroAddress) {
+          return p.creator
+        }
+      } catch {
+        /* not this factory */
       }
-    } catch {
-      /* not instant */
     }
   }
   if (arcReflectionEnabled()) {

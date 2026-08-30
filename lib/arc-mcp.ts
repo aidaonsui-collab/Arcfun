@@ -11,6 +11,8 @@ import {
   ARC_INSTANT_CREATE_GAS,
   ARC_IS_TESTNET,
   arcCreationFeeWeiFor,
+  instantLockerForFactory,
+  instantProtocolAddresses,
 } from './contracts-arc'
 import { buildCreateTokenMemeInstantArc } from './arc-instant-launchpad'
 import {
@@ -104,10 +106,7 @@ function encodeCall(abi: readonly unknown[], functionName: string, args: unknown
 
 export function policyAllowlist(wallet?: string) {
   const contracts = [
-    ARC.INSTANT_FACTORY,
-    ARC.REFLECTION_FACTORY,
-    ARC.INSTANT_LOCKER,
-    ARC.REFLECTION_LOCKER,
+    ...instantProtocolAddresses(),
     ARC.USDC,
     ARC.UNI_ROUTER,
     ARC.FEE_ROUTER,
@@ -289,8 +288,9 @@ export async function mcpHolders(address: string) {
   if (isHiddenToken(token)) throw new Error('token not listed')
   const pool = await fetchArcPoolToken(token)
   if (!pool) throw new Error('token not found')
-  const factory = isReflectionToken(pool) ? ARC.REFLECTION_FACTORY : ARC.INSTANT_FACTORY
-  const locker = isReflectionToken(pool) ? ARC.REFLECTION_LOCKER : ARC.INSTANT_LOCKER
+  const factory = (pool.moonbagsPackageId ||
+    (isReflectionToken(pool) ? ARC.REFLECTION_FACTORY : ARC.INSTANT_FACTORY)) as Address
+  const locker = instantLockerForFactory(factory)
   const trades = await fetchArcTrades(token)
   const seed = Array.from(
     new Set(
@@ -304,7 +304,12 @@ export async function mcpHolders(address: string) {
   )
   return fetchEvmHolders('arc', token, {
     seedAddresses: seed,
-    excludeAddresses: [factory, locker, ...(pool.instantMeta?.uniPool ? [pool.instantMeta.uniPool] : [])],
+    excludeAddresses: [
+      ...instantProtocolAddresses(),
+      factory,
+      locker,
+      ...(pool.instantMeta?.uniPool ? [pool.instantMeta.uniPool] : []),
+    ],
     creatorAddress: pool.creator,
   })
 }

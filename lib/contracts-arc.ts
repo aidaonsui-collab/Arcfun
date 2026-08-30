@@ -327,22 +327,21 @@ export const ARC = {
   CURVE_FOR_SALE: 800_000_000n * 10n ** 18n,
 
   // ── ArcFun Instant (LaunchToken18 · 5042) ───────────────────────────────────
-  // Reverted 2026-08-30: #94 cut /create to a new factory (0x6D76…); #97 then pointed its
-  // locker fallback at CrucibleLock (0xa302…) and called that "an explicit decision" — it
-  // wasn't agreed, and it changes the creator take from 70% to 50% with no economics
-  // conversation attached. ArcBpsSource (0x1223…) still reads 70/30 the whole time; it's
-  // CrucibleLock's own hardcoded split that actually governs collect(), so that config value
-  // is disconnected from what happens — a real trap for the next person who checks it and
-  // concludes the split is fine. Confirmed zero launches went through the new factory before
-  // this revert (allTokensLength() = 0), so nothing to migrate. Back to the addresses actually
-  // paying 70/30 to the 22 already-live tokens until Instant-into-Crucible is a real, agreed
-  // decision — not one declared and merged in the same six seconds.
-  INSTANT_FACTORY: (process.env.NEXT_PUBLIC_ARC_INSTANT_FACTORY ??
-    '0xd51E6217bb3bC7586866713854Ea75B7BefF1009') as Address,
-  INSTANT_LOCKER: (process.env.NEXT_PUBLIC_ARC_INSTANT_LOCKER ??
-    '0x84F486d7254aEDc89986bce392771D88bf5828EA') as Address,
-  BPS_SOURCE: (process.env.NEXT_PUBLIC_ARC_BPS_SOURCE ??
-    '0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE') as Address,
+  // New creates: Instant factory → InstantLockerAdapter → CrucibleLock (Meme 50/25/10/10/5).
+  // Eve + the 22 tokens on 0xd51E stay on MonLock 0x84F4 (70/30). Collect by factory.
+  // INSTANT_LOCKER is CrucibleLock (collectFees ABI), not the adapter Instant stamps as lpLocker.
+  INSTANT_FACTORY: envAddr(
+    process.env.NEXT_PUBLIC_ARC_INSTANT_FACTORY,
+    '0x05BF9d713E1f58779aD4Dd8d6Fef4C7529c7323a',
+  ),
+  INSTANT_LOCKER: envAddr(
+    process.env.NEXT_PUBLIC_ARC_INSTANT_LOCKER,
+    '0xE522907807CdDF006b433a103356d2c30ac39209',
+  ),
+  BPS_SOURCE: envAddr(
+    process.env.NEXT_PUBLIC_ARC_BPS_SOURCE,
+    '0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE',
+  ),
 
   /** ArcStudio NFT factory (UUPS proxy, Deploy.s.sol 2026-08-23 on 5042). */
   NFT_FACTORY: envAddr(
@@ -396,6 +395,72 @@ export const ARC = {
     '0xd0c5C466d430d52416B402608ef47FA286681A45',
   ),
 } as const
+
+/** Pre–LaunchToken18 Instant factory (6dp tokens). Collects on MonLock. */
+export const ARC_INSTANT_FACTORY_LEGACY = '0x607bff9EB2ff1494AC8f0b545502Ce49ee2Ae42B' as Address
+/** LaunchToken18 Instant factory retired 2026-08-30. Eve and the 22 live tokens. Collects on MonLock. */
+export const ARC_INSTANT_FACTORY_PREV = '0xd51E6217bb3bC7586866713854Ea75B7BefF1009' as Address
+/** MonLock for PREV + LEGACY Instant factories. Do not retarget. */
+export const ARC_INSTANT_LOCKER_MONLOCK = '0x84F486d7254aEDc89986bce392771D88bf5828EA' as Address
+/** Instant factory.lpLocker for the Crucible factory. Collect on CrucibleLock, not here. */
+export const ARC_INSTANT_LOCKER_ADAPTER = '0x9deBd8d2CFa7dA789257146D325Af4094B1c1c5f' as Address
+
+function uniqAddrs(addrs: readonly (Address | string | undefined | null)[]): Address[] {
+  const seen = new Set<string>()
+  const out: Address[] = []
+  for (const raw of addrs) {
+    const a = (raw ?? '').trim() as Address
+    const k = a.toLowerCase()
+    if (!a || k === ZERO || seen.has(k)) continue
+    seen.add(k)
+    out.push(a)
+  }
+  return out
+}
+
+/** Current Instant factory first, then retired factories so existing tokens stay listed. */
+export function instantCatalogFactories(): Address[] {
+  return uniqAddrs([ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_PREV, ARC_INSTANT_FACTORY_LEGACY])
+}
+
+/**
+ * Locker that holds the Uni V3 NFT for a factory. PREV/LEGACY Instant → MonLock.
+ * Current Instant → CrucibleLock (`ARC.INSTANT_LOCKER`). Reflection → its locker.
+ */
+export function instantLockerForFactory(factory?: string | null): Address {
+  const f = (factory ?? '').trim().toLowerCase()
+  if (!f || f === ZERO) return ARC.INSTANT_LOCKER
+  if (f === ARC.REFLECTION_FACTORY.toLowerCase()) return ARC.REFLECTION_LOCKER
+  if (f === ARC_INSTANT_FACTORY_PREV.toLowerCase() || f === ARC_INSTANT_FACTORY_LEGACY.toLowerCase()) {
+    return ARC_INSTANT_LOCKER_MONLOCK
+  }
+  return ARC.INSTANT_LOCKER
+}
+
+/** True when this Instant factory locks through CrucibleLock (new creates). */
+export function factoryUsesCrucibleLock(factory?: string | null): boolean {
+  const f = (factory ?? '').trim().toLowerCase()
+  if (!f || f === ZERO) return false
+  if (f === ARC_INSTANT_FACTORY_PREV.toLowerCase() || f === ARC_INSTANT_FACTORY_LEGACY.toLowerCase()) {
+    return false
+  }
+  if (f === ARC.REFLECTION_FACTORY.toLowerCase()) return false
+  return f === ARC.INSTANT_FACTORY.toLowerCase()
+}
+
+/** Factory + locker + adapter addresses to drop from holder rankings. */
+export function instantProtocolAddresses(): Address[] {
+  return uniqAddrs([
+    ARC.INSTANT_FACTORY,
+    ARC.INSTANT_LOCKER,
+    ARC_INSTANT_FACTORY_PREV,
+    ARC_INSTANT_FACTORY_LEGACY,
+    ARC_INSTANT_LOCKER_MONLOCK,
+    ARC_INSTANT_LOCKER_ADAPTER,
+    ARC.REFLECTION_FACTORY,
+    ARC.REFLECTION_LOCKER,
+  ])
+}
 
 export function arcRpcConfigured(): boolean {
   return ARC_RPC !== ''

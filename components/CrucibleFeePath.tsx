@@ -244,17 +244,20 @@ export function CrucibleFeePath({
   notionalUsdc = 100,
   showSideToggle = true,
   className = '',
+  legacyOnChain,
 }: {
   kind: LaunchKind
   /** Sample buy/sell size used to label USDC on each leg. */
   notionalUsdc?: number
   showSideToggle?: boolean
   className?: string
+  /** Override. Default is the global flag (old pools still 70/30). */
+  legacyOnChain?: boolean
 }) {
   const [side, setSide] = useState<TradeSide>('buy')
   const fee = quoteFeeFromNotional(notionalUsdc)
   const legs = useMemo(() => splitUsdcFee(fee, kind), [fee, kind])
-  const legacy = usesLegacyOnChainSplits()
+  const legacy = legacyOnChain ?? usesLegacyOnChainSplits()
   const kindLabel = kind === 'reflect' ? 'Reflect' : 'Meme'
 
   const buyBody = (
@@ -287,7 +290,9 @@ export function CrucibleFeePath({
         <div className="min-w-0 flex-1">
           <p className="m-0 text-[11px] font-semibold tracking-[0.06em] uppercase text-t3">
             Fee path · {kindLabel}
-            <span className="normal-case tracking-normal font-semibold text-t3"> (coming soon)</span>
+            {legacy ? (
+              <span className="normal-case tracking-normal font-semibold text-t3"> (coming soon)</span>
+            ) : null}
           </p>
           {showSideToggle ? (
             <div className="grid mt-1">

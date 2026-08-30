@@ -2,8 +2,9 @@
  * Arc LP-fee keeper — Instant collect + Instant Reflection sweep.
  * Cron: app/api/arc/keeper/reflect/route.ts + vercel.json (every 15m).
  *
- * Instant (TOKEN/USDC, 70% creator / 30% platform):
- *   MonLock.collectFees(positionId) on the Instant locker. No reflect step.
+ * Instant (TOKEN/USDC):
+ *   collectFees(positionId) on the locker for that factory. MonLock 70/30 for
+ *   retired Instant factories; CrucibleLock 50/25/10/10/5 for new creates. No reflect step.
  *
  * Instant Reflection:
  *   1. MonLock.collectFees(positionId) — 25% creator / 50% holder-sink / 25% platform;
@@ -24,13 +25,12 @@ import {
   arcPublicClient,
   arcReflectionEnabled,
   arcServerWalletClient,
+  instantCatalogFactories,
+  instantLockerForFactory,
 } from './contracts-arc'
 import { INSTANT_REFLECTION_FACTORY_ABI } from './arc-reflection-launchpad'
 import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
 import { minOutFromSlippage } from './arc-swap'
-
-/** Pre–LaunchToken18 Instant factory (still holds live 6dp tokens). */
-const ARC_INSTANT_FACTORY_LEGACY = '0x607bff9EB2ff1494AC8f0b545502Ce49ee2Ae42B' as Address
 
 const MONLOCK_ABI = [
   {
@@ -345,11 +345,11 @@ async function collectInstantPositions(
   if (!arcInstantEnabled()) return []
   const client = arcPublicClient()
   const wallet = arcServerWalletClient(privateKey)
-  const locker = ARC.INSTANT_LOCKER
   const seen = new Set<string>()
   const results: KeeperTokenResult[] = []
 
-  for (const factory of [ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_LEGACY]) {
+  for (const factory of instantCatalogFactories()) {
+    const locker = instantLockerForFactory(factory)
     let tokens: Address[] = []
     try {
       tokens = await listFactoryTokens(factory, INSTANT_QUOTE_FACTORY_ABI)

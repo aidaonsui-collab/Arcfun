@@ -2,13 +2,23 @@
  * Arc InstantErc20QuoteFactory + ArcBondingCurveFactory → PoolToken (USDC-quoted).
  */
 import { formatUnits, type Address } from 'viem'
-import { ARC, ARC_UNI_V3, arcInstantEnabled, arcCurveEnabled, arcReflectionEnabled, arcPublicClient } from './contracts-arc'
+import {
+  ARC,
+  ARC_UNI_V3,
+  arcInstantEnabled,
+  arcCurveEnabled,
+  arcReflectionEnabled,
+  arcPublicClient,
+  instantCatalogFactories,
+} from './contracts-arc'
 import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
 import { erc20Abi as ERC20_ABI } from 'viem'
 import { getArcTokenMeta, getArcTokenMetas } from './arc-token-meta'
 import { type PoolToken } from './tokens'
 import { summarizeRpcError } from './rpc-error'
 import { attachLaunchCreatedAt } from './arc-launch-created'
+
+export { instantCatalogFactories } from './contracts-arc'
 
 /** InstantReflectionUsdcFactory.pools(token) — same shape the keeper reads (arc-reflection-keeper.ts). */
 const REFLECTION_POOL_ABI = [
@@ -136,23 +146,7 @@ const USDC_DECIMALS = 6
 /** LaunchToken18 virtuals (18dp). Old Instant used 6dp LaunchToken. */
 const VIRTUAL_TOKEN_INIT_18 = ARC.VIRTUAL_TOKEN_INIT
 const VIRTUAL_TOKEN_INIT_6 = 1_066_666_666_666_666n
-/** Pre–LaunchToken18 Instant factory (still holds live 6dp tokens). */
-const ARC_INSTANT_FACTORY_LEGACY = '0x607bff9EB2ff1494AC8f0b545502Ce49ee2Ae42B' as Address
-/** LaunchToken18 Instant factory retired 2026-08-30. Eve and the live book still live here. */
-const ARC_INSTANT_FACTORY_PREV = '0xd51E6217bb3bC7586866713854Ea75B7BefF1009' as Address
 
-/** Current Instant factory first, then retired factories so existing tokens stay listed. */
-export function instantCatalogFactories(): Address[] {
-  const out: Address[] = []
-  const seen = new Set<string>()
-  for (const f of [ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_PREV, ARC_INSTANT_FACTORY_LEGACY]) {
-    const k = f.toLowerCase()
-    if (!f || f === ZERO || seen.has(k)) continue
-    seen.add(k)
-    out.push(f)
-  }
-  return out
-}
 
 type InstantQuotePool = {
   creator: Address
@@ -449,7 +443,7 @@ async function fetchArcInstantPoolTokenFromFactory(token: Address, factory: Addr
     const live = await getArcLivePriceUsdc(token, p.uniPool)
     const priceUsdc = live != null && live > 0 ? live : defaultPrice > 0 ? defaultPrice : 0
 
-    return toPoolToken(token, p, name, symbol, priceUsdc, meta, launchVq)
+    return toPoolToken(token, p, name, symbol, priceUsdc, meta, launchVq, undefined, factory)
   } catch (e) {
     console.error('[arc-instant-tokens]', summarizeRpcError(e))
     return null
