@@ -56,11 +56,12 @@ Uniswap V3 pool fee on Instant launches is 1% (`fee = 10000`).
 
 **Reflect:** Holders 2000, Crucible 3500, Creator 2000, Project burn 1500, Platform 1000
 
-- **Sell path:** collected launch token is 100% sent to dead. Nobody is paid. No USDC from sells.
+- **Sell path:** collected launch token is 100% sent to dead. Nobody is paid. No USDC from sells. A launch token that refuses the transfer to dead (pausable, blacklisting) accrues to `owed[launch][dead]` rather than reverting the collect — otherwise the project's own token could freeze the creator's, the platform's and Crucible's USDC. `withdrawOwed(launch, 0x…dead)` retries the burn; anyone may call it.
 - **Project burn:** that USDC slice is accrued on collect. A keeper calls `projectBurn(tokenId, minLaunchOut)`, which buys the **launch** token on the same pool and sends it to dead. Collapsed price reverts instead of burning dust.
 - **Referrer:** not paid from collect. See ReferralRouter.
 - Rounding dust goes to Crucible.
 - A blacklisted payee (Circle USDC) accrues to `owed[token][account]` instead of reverting the whole collect. `withdrawOwed(token, to)` pulls it later.
+- `lock` rejects a position whose pair does not include the quote. There is no NFT withdraw, so a position this contract cannot collect on is one nobody could ever recover.
 
 Old lockers stay as they are (70/30 Meme, 50/25/25 Reflection). This lock is for **new** launches only.
 
@@ -99,6 +100,7 @@ Live (unchanged by this PR):
 ## Owner knobs (no LP rug)
 
 - `Crucible`: `setEvePoolFee`, `setSwapRouter` (revokes old approval), `setCookPaused`, `setKeeper`, `transferOwnership`. The burn target is immutable — no setter.
+- `ReferralRouter`: `setSwapRouter` / `setFeeRouter` both revoke the old contract's USDC approval on rotation, matching `Crucible.setSwapRouter`. `_approveMax` grants an unlimited allowance, so a rotation that skipped the revoke would leave a de-authorised router able to pull whatever this contract holds.
 - `CrucibleLock`: `setFactory`, `setPlatformWallet`, `setCrucible`, `setReferralRegistry`, `transferOwnership`
 - `withdrawNft` exists only to revert `NoNftWithdraw`. The LP NFT cannot leave this contract.
 

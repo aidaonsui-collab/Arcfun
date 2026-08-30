@@ -225,6 +225,15 @@ contract CrucibleLock {
         if (kind == Kind.Reflect && holdersWallet == address(0)) revert HoldersRequired();
         if (positions[tokenId].locked) revert AlreadyLocked();
 
+        // There is no NFT withdraw, so a position this contract cannot service is one nobody can
+        // ever recover. `collectFees` and `projectBurn` both need one side of the pair to be the
+        // quote, so check that here rather than after the NFT is already stuck.
+        {
+            (,, address token0, address token1,,,,,,,,) = INonfungiblePositionManager(nfpm).positions(tokenId);
+            address quote = usdc;
+            if (token0 != quote && token1 != quote) revert NotUsdcPool();
+        }
+
         address nftOwner = INonfungiblePositionManager(nfpm).ownerOf(tokenId);
         if (nftOwner != address(this)) {
             INonfungiblePositionManager(nfpm).transferFrom(nftOwner, address(this), tokenId);
@@ -280,8 +289,10 @@ contract CrucibleLock {
             else revert NotUsdcPool();
         }
 
-        tokenOut = _projectBurn(quote, launch, poolFee, usdcIn, minLaunchOut);
+        // Clear before the swap. `nonReentrant` already covers this, but the swap calls a router we
+        // do not control and the pending balance has no business reading as unspent while it runs.
         pendingProjectBurn[tokenId] = 0;
+        tokenOut = _projectBurn(quote, launch, poolFee, usdcIn, minLaunchOut);
         emit ProjectBurn(launch, usdcIn, tokenOut);
     }
 
@@ -289,8 +300,10 @@ contract CrucibleLock {
     function withdrawOwed(address token, address to) external nonReentrant {
         uint256 amount = owed[token][to];
         if (amount == 0) return;
-        _pay(token, to, amount);
+        // Clear first: `token` is caller-supplied, so `_pay` is a call into arbitrary code with this
+        // balance still on the books otherwise.
         owed[token][to] = 0;
+        _pay(token, to, amount);
     }
 
     /// @notice MonLock-compatible view: stamped creator wallet + bps.
@@ -379,7 +392,11 @@ contract CrucibleLock {
         c.launchGot = IERC20Minimal(c.launch).balanceOf(address(this)) - launchBefore;
 
         // Sell path: 100% of collected launch token is burned. Nobody is paid.
-        if (c.launchGot > 0) _pay(c.launch, DEAD, c.launchGot);
+        // Accrue rather than revert on failure. The launch token is the project's code, not ours:
+        // one that pauses, blacklists, or reverts on a transfer to `dead` would otherwise take the
+        // whole collect down with it, stranding the creator's, the platform's and Crucible's USDC
+        // behind a burn that cannot happen. `withdrawOwed(launch, DEAD)` retries it, open to anyone.
+        if (c.launchGot > 0) _payOrAccrue(c.launch, DEAD, c.launchGot);
 
         // Referrer is paid at swap time by ReferralRouter, not from the batched LP collect.
         c.paidReferrer = address(0);

@@ -160,3 +160,50 @@ contract MockNFPM {
         if (amount1 > 0) require(MockERC20(p.token1).transfer(params.recipient, amount1), "T1");
     }
 }
+
+/// @notice A launch token that refuses to pay specific recipients, the way a pausable or
+///         blacklisting project token does. Proves a hostile launch token cannot take the USDC
+///         legs of a collect down with it.
+contract MockBlockingERC20 {
+    string public name = "BLOCK";
+    string public symbol = "BLOCK";
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
+
+    mapping(address => bool) public blockedTo;
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function setBlocked(address who, bool v) external {
+        blockedTo[who] = v;
+    }
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        require(!blockedTo[to], "BLOCKED");
+        require(balanceOf[msg.sender] >= amount, "BAL");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        require(!blockedTo[to], "BLOCKED");
+        uint256 a = allowance[from][msg.sender];
+        require(a >= amount, "ALLOW");
+        if (a != type(uint256).max) allowance[from][msg.sender] = a - amount;
+        require(balanceOf[from] >= amount, "BAL");
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+}

@@ -34,7 +34,7 @@ contract Crucible {
     event CookPausedSet(bool paused);
     event KeeperSet(address indexed keeper, bool allowed);
     event SwapRouterSet(address indexed router);
-    /// @notice Burn tape row. `token` is the ARCFUN that was bought and sent to dead.
+    /// @notice Burn tape row. `token` is the `$EVE` that was bought and sent to dead.
     event Burn(address indexed token, uint256 usdcIn, uint256 eveOut, uint256 ts);
 
     error NotOwner();
@@ -83,8 +83,6 @@ contract Crucible {
         owner = next;
     }
 
-    /// @notice One-shot. Points the burn target. Cannot unset or repoint.
-
     function setEvePoolFee(uint24 fee) external onlyOwner {
         if (fee == 0) revert ZeroFee();
         evePoolFee = fee;
@@ -111,7 +109,7 @@ contract Crucible {
         emit KeeperSet(keeper, allowed);
     }
 
-    /// @notice Permissionless. Swaps `amountIn` USDC for ARCFUN and sends it to dead.
+    /// @notice Keeper-gated. Swaps `amountIn` USDC for `$EVE` and sends it to dead.
     ///         Reverts while cook is paused. `amountIn == 0` is a no-op.
     ///         `minEveOut` must be > 0 when swapping; there is no zero-slippage overload.
     function cook(uint256 amountIn, uint256 minEveOut) external onlyKeeper returns (uint256 eveOut) {
