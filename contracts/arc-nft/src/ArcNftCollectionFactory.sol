@@ -112,6 +112,7 @@ contract ArcNftCollectionFactory is Initializable, OwnableUpgradeable, UUPSUpgra
         if (owner_ == address(0) || treasury_ == address(0) || usdc_ == address(0) || implementation_ == address(0)) {
             revert ZeroAddr();
         }
+        if (implementation_.code.length == 0) revert BadImpl();
         __Ownable_init(owner_);
         __UUPSUpgradeable_init();
         __ReentrancyGuard_init();
@@ -227,8 +228,13 @@ contract ArcNftCollectionFactory is Initializable, OwnableUpgradeable, UUPSUpgra
         emit CreationFeeSet(fee);
     }
 
+    /// @dev `Clones.clone` of an address with no code deploys a proxy that
+    ///      delegates into nothing: `initialize` returns successfully having
+    ///      done nothing, and every collection minted afterwards is a dead
+    ///      contract. Cheap to check here, unrecoverable if it lands.
     function setImplementation(address impl) external onlyOwner {
         if (impl == address(0)) revert ZeroAddr();
+        if (impl.code.length == 0) revert BadImpl();
         implementation = impl;
         emit ImplementationSet(impl);
     }

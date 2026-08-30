@@ -100,6 +100,13 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
         }
         if (c.royaltyBps > MAX_ROYALTY_BPS) revert RoyaltyTooHigh();
         if (c.maxSupply == 0 || c.maxPerWallet == 0) revert BadN();
+        // Same ordering rule `setSchedule` enforces. Without it a collection
+        // could be deployed with an allowlist window that closes before it
+        // opens, so `_allowlistLive()` is false forever and the allowlist mint
+        // silently never happens.
+        if (c.allowlistMintEnd != 0 && c.allowlistMintStart != 0 && c.allowlistMintEnd < c.allowlistMintStart) {
+            revert BadN();
+        }
 
         __ERC721_init(c.name, c.symbol);
         __ERC2981_init();
@@ -204,8 +211,11 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
         emit AllowlistRootSet(root);
     }
 
+    /// @dev Also locked once the allowlist window opens. Checking only
+    ///      `_publicLive()` left the price movable underneath an allowlist that
+    ///      was already minting, as long as nobody had minted yet.
     function setPrice(uint256 newPrice) external onlyOwner {
-        if (revealed || _publicLive() || totalMinted > 0) revert PriceLocked();
+        if (revealed || _publicLive() || _allowlistLive() || totalMinted > 0) revert PriceLocked();
         price = newPrice;
         emit PriceSet(newPrice);
     }
@@ -222,13 +232,16 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
     }
 
     /// @notice Team / reserved mint. Skips USDC and the per-wallet cap; still counts against maxSupply.
+    /// @dev Deliberately does not touch `mintedBy`. It used to, which meant an
+    ///      airdrop to a collector silently ate the public-mint allowance they
+    ///      had not spent yet — a reserved mint should not cost the recipient
+    ///      the right to buy.
     function ownerMint(address to, uint256 n) external onlyOwner nonReentrant {
         if (to == address(0)) revert ZeroAddr();
         if (n == 0) revert BadN();
         if (n > MAX_OWNER_MINT_PER_TX) revert TxCap();
         if (totalMinted + n > maxSupply) revert SoldOut();
         uint256 firstId = totalMinted + 1;
-        mintedBy[to] += n;
         totalMinted += n;
         for (uint256 i; i < n; ++i) {
             _safeMint(to, firstId + i);
