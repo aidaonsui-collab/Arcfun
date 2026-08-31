@@ -95,17 +95,39 @@ export function TokenPageClient({
       .catch(() => {})
   }, [token])
 
+  const mergePool = useCallback((next: PoolToken) => {
+    setPool((prev) => {
+      if (!prev) return next
+      return {
+        ...next,
+        liquidityUsd: next.liquidityUsd ?? prev.liquidityUsd,
+        liquidityQuoteUsd: next.liquidityQuoteUsd ?? prev.liquidityQuoteUsd,
+        burnedPct: next.burnedPct ?? prev.burnedPct,
+      }
+    })
+  }, [])
+
   const load = useCallback(async () => {
     if (!token) return
     try {
       const res = await coalescedFetch(`/api/arc/${token}`)
-      if (res.ok) setPool((await res.json()) as PoolToken)
+      if (res.ok) mergePool((await res.json()) as PoolToken)
     } catch {
       /* keep prior */
     } finally {
       setLoading(false)
     }
-  }, [token])
+  }, [token, mergePool])
+
+  const loadStats = useCallback(async () => {
+    if (!token) return
+    try {
+      const res = await fetch(`/api/arc/${token}?full=1`)
+      if (res.ok) mergePool((await res.json()) as PoolToken)
+    } catch {
+      /* keep prior */
+    }
+  }, [token, mergePool])
 
   const loadTrades = useCallback(async () => {
     if (!token) return
@@ -146,15 +168,17 @@ export function TokenPageClient({
 
   const refreshAfterTrade = useCallback(() => {
     load()
+    void loadStats()
     void loadTrades()
     if (chartReady) void loadChartTape()
     if (tab === 'holders') void loadHolders()
-  }, [load, loadTrades, loadChartTape, loadHolders, chartReady, tab])
+  }, [load, loadStats, loadTrades, loadChartTape, loadHolders, chartReady, tab])
 
   useEffect(() => {
     load()
     void loadTrades()
-  }, [load, loadTrades])
+    void loadStats()
+  }, [load, loadTrades, loadStats])
 
   useEffect(() => {
     if (!pool) return
@@ -180,6 +204,14 @@ export function TokenPageClient({
     }, 8_000)
     return () => clearInterval(id)
   }, [load, loadTrades])
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      void loadStats()
+    }, 60_000)
+    return () => clearInterval(id)
+  }, [loadStats])
 
   // Opt-in activity PFPs: only wallets with ArcFun profile + avatarUrl
   useEffect(() => {
