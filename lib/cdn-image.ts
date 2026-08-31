@@ -7,10 +7,9 @@
  * was the whole problem.
  *
  * Two hosts are in play and they need different treatment:
- *   - res.cloudinary.com — legacy uploads, and where every heavy image currently lives.
- *     Transformations are URL segments, so this is free, CDN-side, and needs no re-upload.
- *     The same 2.24 MB PNG comes back as 5,088 bytes of webp.
- *   - *.public.blob.vercel-storage.com — where new uploads go. Blob has no transform API, so
+ *   - res.cloudinary.com — leftover legacy URLs. Transformations are URL segments.
+ *     Live copies were moved to Blob (see scripts/migrate-cloudinary-to-blob.mjs).
+ *   - *.public.blob.vercel-storage.com — where uploads go. Blob has no transform API, so
  *     these route through Next's own optimizer, which is allow-listed for both hosts in
  *     next.config.js.
  *

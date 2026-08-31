@@ -2,8 +2,7 @@
  * Browser helper: POST an image to /api/upload (Vercel Blob).
  * Returns the public delivery URL. Throws on failure.
  *
- * Existing Cloudinary URLs already stamped on tokens/collections stay valid.
- * New uploads go to the public `arcfun-images` Blob store.
+ * Uploads go to the public `arcfun-images` Blob store.
  */
 export async function uploadImage(file: File, folder = 'arcfun'): Promise<string> {
   const fd = new FormData()
