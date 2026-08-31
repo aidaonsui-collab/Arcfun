@@ -25,6 +25,7 @@ import { getIncomingReferralCode } from '@/lib/crucible'
 import { tileGradient } from '@/lib/ui-format'
 import { cdnImage } from '@/lib/cdn-image'
 import { WalletButton } from '@/components/WalletButton'
+import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 
 const SLIPPAGE_BPS = 500 // 5% — thin Instant single-sided ranges
 const BUY_PRESETS = [25, 100, 500]
@@ -87,23 +88,13 @@ export function ArcDexTradePanel({
   const { tile, mono } = tileGradient(token)
   const initial = (symbol || '?').charAt(0).toUpperCase()
 
-  const { data: usdcBal, refetch: refetchUsdc } = useReadContract({
-    address: ARC.USDC,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    chainId: ARC_CHAIN_ID,
-    query: { enabled: !!address, refetchInterval: 15_000 },
-  })
-
-  const { data: tokenBal, refetch: refetchTok } = useReadContract({
-    address: token,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    chainId: ARC_CHAIN_ID,
-    query: { enabled: !!address, refetchInterval: 15_000 },
-  })
+  const usdcQ = useArcErc20Balance(ARC.USDC, address)
+  const tokQ = useArcErc20Balance(token, address)
+  const usdcBal = usdcQ.data
+  const tokenBal = tokQ.data
+  const refetchUsdc = usdcQ.refetch
+  const refetchTok = tokQ.refetch
+  const payBalPending = mode === 'buy' ? usdcQ.isPending : tokQ.isPending
 
   const { data: tokenDecimals } = useReadContract({
     address: token,
@@ -138,13 +129,15 @@ export function ArcDexTradePanel({
   }, [mined, onTraded, refetchUsdc, refetchTok, refetchAllowance])
 
   useEffect(() => {
+    if (!amount || Number(amount) <= 0 || !swapOn) {
+      setEstOut(null)
+      setError(null)
+      setQuoting(false)
+      return
+    }
     let cancelled = false
     const run = async () => {
       setEstOut(null)
-      if (!amount || Number(amount) <= 0 || !swapOn) {
-        setError(null)
-        return
-      }
       setQuoting(true)
       try {
         const ref = mode === 'buy' ? getIncomingReferralCode() : ''
@@ -280,9 +273,15 @@ export function ArcDexTradePanel({
 
   const amtNum = Number(amount) || 0
   const payBal = mode === 'buy' ? ((usdcBal as bigint | undefined) ?? 0n) : ((tokenBal as bigint | undefined) ?? 0n)
-  const payBalLabel = mode === 'buy' ? formatUsdc(payBal) : fmtTok(payBal, tokDec)
+  const payBalLabel = payBalPending ? '…' : mode === 'buy' ? formatUsdc(payBal) : fmtTok(payBal, tokDec)
   const receiveAmt =
-    quoting ? '…' : estOut == null ? '0' : mode === 'buy' ? fmtTok(estOut, tokDec) : formatUsdc(estOut)
+    quoting && amtNum > 0
+      ? '…'
+      : estOut == null
+        ? '0'
+        : mode === 'buy'
+          ? fmtTok(estOut, tokDec)
+          : formatUsdc(estOut)
   const rate = (() => {
     if (!(amtNum > 0) || estOut == null || estOut <= 0n) return null
     const out = Number(formatUnits(estOut, mode === 'buy' ? tokDec : 6))
@@ -328,9 +327,9 @@ export function ArcDexTradePanel({
               <span>You pay</span>
               <button
                 type="button"
-                disabled={payBal === 0n}
+                disabled={payBalPending || payBal === 0n}
                 onClick={() => {
-                  if (payBal <= 0n) return
+                  if (payBalPending || payBal <= 0n) return
                   setAmount(
                     mode === 'buy' ? formatUsdc(payBal).replace(/,/g, '') : formatToken(payBal, tokDec),
                   )
@@ -371,7 +370,7 @@ export function ArcDexTradePanel({
                   <button
                     key={pct}
                     type="button"
-                    disabled={payBal === 0n}
+                    disabled={payBalPending || payBal === 0n}
                     onClick={() => {
                       const pctAmt = (payBal * BigInt(pct)) / 100n
                       if (pctAmt > 0n) setAmount(formatToken(pctAmt, tokDec))

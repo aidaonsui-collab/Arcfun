@@ -200,16 +200,25 @@ export const ARC_RPC_URLS: string[] = (() => {
 
 export const ARC_RPC = ARC_RPC_URLS[0] || ''
 
-/** Browser wagmi transport. Same 4s / no-retry policy as arcPublicClient — a 20s hang on baracat is what made Buy wait ~30s before the wallet popup. */
+/** Browser wagmi transport. Baracat hangs in the wallet path; try scan/theleak first so MAX is not stuck 4s. Fail over in 2.5s. */
 export function arcBrowserTransport() {
-  const urls = ARC_RPC_URLS.length ? ARC_RPC_URLS : [ARC_RPC].filter(Boolean)
+  const seen = new Set<string>()
+  const urls: string[] = []
+  const ordered = ARC_IS_TESTNET
+    ? ARC_RPC_URLS
+    : [ARC_SCAN_RPC, ARC_THELEAK_RPC, ...ARC_RPC_URLS]
+  for (const u of ordered) {
+    if (!u || seen.has(u) || isBannedArcRpc(u) || isKeyedInfuraUrl(u)) continue
+    seen.add(u)
+    urls.push(u)
+  }
   if (urls.length > 1) {
     return fallback(
-      urls.map((u) => http(u, { retryCount: 0, timeout: 4_000 })),
+      urls.map((u) => http(u, { retryCount: 0, timeout: 2_500 })),
       { shouldThrow: (error) => !isArcRpcInfraError(error) },
     )
   }
-  return http(urls[0] || ARC_BARACAT_RPC, { retryCount: 0, timeout: 4_000 })
+  return http(urls[0] || ARC_SCAN_RPC, { retryCount: 0, timeout: 2_500 })
 }
 
 /** Server-only RPC override. Empty → same as ARC_RPC. */
