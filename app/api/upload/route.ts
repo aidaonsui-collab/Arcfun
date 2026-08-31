@@ -1,7 +1,7 @@
 /**
  * POST /api/upload — store a public image in Vercel Blob.
  * Browser create/edit flows send the file here (Blob writes cannot be unsigned).
- * Existing Cloudinary URLs in token metadata are left as-is.
+ * Legacy Cloudinary URLs in metadata were migrated to this store.
  */
 import { put } from '@vercel/blob'
 import { NextRequest, NextResponse } from 'next/server'
