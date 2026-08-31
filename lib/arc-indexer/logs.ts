@@ -54,12 +54,17 @@ export async function scanLogsChunked(
   const all: Log[] = []
   let failed = 0
   let ok = 0
+  // Only advance through a contiguous prefix of SUCCESSFUL chunks. A concurrent
+  // batch used to set scannedTo to the highest `to` even when an earlier chunk
+  // in the same batch failed — cursor jumped over OfferCreated and the book
+  // stayed empty (live 2026-08-31: KV offers=[], otcCursor at head).
+  const chunkOk = new Array(ranges.length).fill(false)
   let scannedTo = fromBlock > 0n ? fromBlock - 1n : 0n
 
   for (let i = 0; i < ranges.length; i += CONCURRENCY) {
     const batch = ranges.slice(i, i + CONCURRENCY)
     const part = await Promise.all(
-      batch.map(({ from, to }) =>
+      batch.map(({ from, to }, j) =>
         withRetry(() =>
           client.getLogs({
             address,
@@ -71,7 +76,7 @@ export async function scanLogsChunked(
         )
           .then((logs) => {
             ok++
-            scannedTo = to > scannedTo ? to : scannedTo
+            chunkOk[i + j] = true
             return logs as Log[]
           })
           .catch((err) => {
@@ -85,6 +90,10 @@ export async function scanLogsChunked(
       ),
     )
     for (const logs of part) all.push(...logs)
+  }
+  for (let i = 0; i < ranges.length; i++) {
+    if (!chunkOk[i]) break
+    scannedTo = ranges[i].to
   }
 
   if (ok === 0 && failed > 0) {

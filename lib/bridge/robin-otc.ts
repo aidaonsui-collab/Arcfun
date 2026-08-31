@@ -853,6 +853,8 @@ export async function fetchRecentFills(opts?: {
   const chunkSize = opts?.chunkSize ?? PAYMENT_LOG_LOOKBACK
   const out: OtcFill[] = []
   const seen = new Set<string>()
+  let chainsOk = 0
+  let chainsFailed = 0
 
   await Promise.all(
     livePaymentChains().map(async (chain) => {
@@ -962,11 +964,18 @@ export async function fetchRecentFills(opts?: {
           if (rangeFrom === 0n || rangeFrom <= earliest) break
           to = rangeFrom - 1n
         }
+        chainsOk++
       } catch {
-        /* chain failed */
+        chainsFailed++
       }
     }),
   )
+
+  // Empty + every chain failed used to look like "no fills" and wipe My orders
+  // on the next 10s poll (flicker). Same class as OfferCreated returning [].
+  if (chainsOk === 0 && chainsFailed > 0) {
+    throw new Error('OTC fill scan failed on every payment chain')
+  }
 
   out.sort((a, b) => b.createdAt - a.createdAt)
 

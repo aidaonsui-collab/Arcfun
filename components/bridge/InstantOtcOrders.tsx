@@ -146,7 +146,7 @@ export function InstantOtcOrders() {
       let makerOffers: OtcOffer[] = []
       let indexOk = false
       try {
-        const res = await fetch('/api/otc/offers', { cache: 'no-store' })
+        const res = await fetch(`/api/otc/offers?maker=${address}`, { cache: 'no-store' })
         if (res.ok) {
           const data = (await res.json()) as {
             ok?: boolean
@@ -166,13 +166,13 @@ export function InstantOtcOrders() {
         makerOffers = await fetchMakerOffers(address)
       }
 
-      setOffers(makerOffers)
+      setOffers((prev) => (makerOffers.length > 0 ? makerOffers : prev))
       try {
         const makerSales = await fetchRecentSales({
           seller: address,
           offerIds: makerOffers.map((o) => o.offerId),
         })
-        setSales(makerSales)
+        setSales((prev) => (makerSales.length > 0 ? makerSales : prev))
       } catch (e) {
         console.warn('[otc] sales scan failed', e)
       }

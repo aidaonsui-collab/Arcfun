@@ -51,6 +51,8 @@ export type IndexerState = {
   factoryCursor: string
   /** last processed block for OTC OfferCreated */
   otcCursor: string
+  /** unix ms of last empty-book cursor rewind (avoid looping a rescan every minute) */
+  otcEmptyRescanAt?: number
   /** round-robin offset into token list for swap catch-up */
   swapRotate: number
   updatedAt: number

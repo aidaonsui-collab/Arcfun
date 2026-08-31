@@ -3,7 +3,7 @@
 /**
  * Arc OTC desk — maker/taker book (Base / ARB USDC → Arc USDC).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   useAccount,
   useConnect,
@@ -92,6 +92,7 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
     () => readCachedOtcDeskStats() ?? { settledTrades: 0, volumeUsdc: 0n },
   )
   const [statsReady, setStatsReady] = useState(() => readCachedOtcDeskStats() != null)
+  const emptyBookPolls = useRef(0)
   /** Buy-flow progress for the step list in the fill modal — 'sign' is a free EIP-712
    *  authorization (see onFill), 'approve'/'confirm' are the two real on-chain signatures. */
   const [fillStep, setFillStep] = useState<'idle' | 'sign' | 'approve' | 'confirm' | 'done'>('idle')
@@ -203,10 +204,21 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
         list = await fetchOtcOffers()
       }
 
-      setOffers(list)
+      setOffers((prev) => {
+        // Indexed GET returning [] is not proof the chain is empty — a just-posted
+        // offer was wiped on the next refresh (POST ingest + empty KV book).
+        if (list.length === 0 && prev.length > 0) {
+          emptyBookPolls.current += 1
+          if (emptyBookPolls.current < 8) return prev
+        } else {
+          emptyBookPolls.current = 0
+        }
+        return list
+      })
       setSelected((prev) => {
         if (!prev) return prev
-        return list.find((o) => o.offerId === prev.offerId) ?? null
+        const next = list.find((o) => o.offerId === prev.offerId)
+        return next ?? (list.length === 0 ? prev : null)
       })
       setLoading(false)
 

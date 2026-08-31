@@ -3,7 +3,7 @@
  * POST /api/otc/offers — optimistic ingest after createOffer (keeps UI instant).
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { isAddress, type Address, type Hex } from 'viem'
+import { getAddress, isAddress, parseAbiItem, type Address, type Hex } from 'viem'
 import { getIndexedOtcBook } from '@/lib/arc-indexer/run'
 import { upsertOtcOffer } from '@/lib/arc-indexer/store'
 import { jsonSafe } from '@/lib/json-safe'
@@ -14,37 +14,105 @@ import {
   goldskyOtcConfigured,
 } from '@/lib/goldsky-otc'
 import { getPublicOtcDeskStats } from '@/lib/arc-indexer/otc-desk-stats'
+import { scanLogsChunked } from '@/lib/arc-indexer/logs'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
-export async function GET() {
+const OFFER_CREATED = parseAbiItem(
+  'event OfferCreated(bytes32 indexed offerId, address indexed maker, address sellerPayment, uint32 premiumBps, uint256 amount)',
+)
+const ZERO = '0x0000000000000000000000000000000000000000' as Address
+const OTC_FLOOR = 14_000_000n
+
+/** Maker-topic OfferCreated backfill when the KV book missed a live offer. */
+async function recoverMakerOffers(maker: Address): Promise<number> {
+  const client = arcPublicClient()
+  const head = await client.getBlockNumber()
+  const from = head > 1_500_000n ? head - 1_500_000n : OTC_FLOOR
+  const { logs } = await scanLogsChunked(client, {
+    address: ROBIN_OTC_LIQUIDITY,
+    event: OFFER_CREATED,
+    fromBlock: from < OTC_FLOOR ? OTC_FLOOR : from,
+    toBlock: head,
+    maxChunks: 80,
+    args: { maker },
+  })
+  let n = 0
+  for (const log of logs) {
+    const args = (log as { args?: { offerId?: Hex } }).args
+    const offerId = args?.offerId
+    if (!offerId) continue
+    try {
+      const row = (await client.readContract({
+        address: ROBIN_OTC_LIQUIDITY,
+        abi: LIQUIDITY_ABI,
+        functionName: 'offers',
+        args: [offerId],
+      })) as readonly [Address, Address, number, bigint, boolean]
+      const [m, sellerPayment, premiumBps, remaining, active] = row
+      if (!active || remaining === 0n || m === ZERO) continue
+      await upsertOtcOffer({
+        offerId,
+        maker: m,
+        sellerPayment,
+        premiumBps: Number(premiumBps),
+        remaining: remaining.toString(),
+        active,
+        createdBlock: Number(log.blockNumber ?? 0n),
+        updatedAt: Date.now(),
+      })
+      n++
+    } catch {
+      /* skip one */
+    }
+  }
+  return n
+}
+
+export async function GET(req: NextRequest) {
   try {
     const stats = await getPublicOtcDeskStats().catch(() => null)
     const headers = {
       'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
     }
+    const makerRaw = (req.nextUrl.searchParams.get('maker') || '').trim()
+    const maker = isAddress(makerRaw) ? getAddress(makerRaw) : null
 
     // Prefer Goldsky when configured (sub-second GraphQL vs KV lag).
     if (goldskyOtcConfigured()) {
       const gs = await fetchGoldskyOtcOffers()
       if (gs !== null) {
-        // Empty book is valid when Goldsky is healthy.
+        const offers = maker
+          ? gs.filter((o) => o.maker.toLowerCase() === maker.toLowerCase())
+          : gs
         return jsonSafe(
           {
             ok: true,
             source: 'goldsky',
             at: Date.now(),
-            offers: gs,
+            offers,
             stats,
           },
           { headers },
         )
       }
-      // Fall through to KV on Goldsky failure
       console.warn('[otc/offers] goldsky miss, falling back to arc-indexer')
     }
 
-    const offers = await getIndexedOtcBook()
+    let offers = await getIndexedOtcBook()
+    if (maker) {
+      let mine = offers.filter((o) => o.maker.toLowerCase() === maker.toLowerCase())
+      if (mine.length === 0) {
+        await recoverMakerOffers(maker).catch((e) =>
+          console.warn('[otc/offers] maker recover', e instanceof Error ? e.message : e),
+        )
+        offers = await getIndexedOtcBook()
+        mine = offers.filter((o) => o.maker.toLowerCase() === maker.toLowerCase())
+      }
+      offers = mine
+    }
+
     return jsonSafe(
       {
         ok: true,
