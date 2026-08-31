@@ -5,9 +5,9 @@ import {
   ARCFUN_TOKEN,
   BURN_ADDRESS,
   CRUCIBLE_CONTRACTS_NOTE,
-  emptyCrucibleStats,
   usesLegacyOnChainSplits,
 } from '@/lib/crucible'
+import { fetchCrucibleStats } from '@/lib/crucible-stats'
 import { fetchTokenBurnedPct } from '@/lib/evm-holders'
 import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { ageLabel, fmtCompact, fmtUsd } from '@/lib/ui-format'
@@ -34,7 +34,7 @@ async function liveBurnedPct(): Promise<number | null> {
 
 export default async function CruciblePage() {
   const livePct = await liveBurnedPct()
-  const stats = emptyCrucibleStats(livePct)
+  const stats = await fetchCrucibleStats(livePct)
   const explorer = ARC_EXPLORER || 'https://arc-scan.org'
   const burnedHref = ARCFUN_TOKEN
     ? `${explorer}/token/${ARCFUN_TOKEN}?a=${BURN_ADDRESS}`
@@ -179,9 +179,13 @@ export default async function CruciblePage() {
             <>
             <div className="sm:hidden divide-y divide-hair2">
               {stats.melts.map((m, i) => (
-                <div
+                <a
                   key={m.id}
-                  className="tape-row px-5 py-3.5 flex flex-col gap-1.5"
+                  href={`${explorer}/tx/${m.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="View cook on explorer"
+                  className="tape-row px-5 py-3.5 flex flex-col gap-1.5 hover:bg-s2 transition-colors"
                   style={{ ['--tape-i' as string]: i }}
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -199,7 +203,7 @@ export default async function CruciblePage() {
                     <span>{fmtUsd(m.usdcIn)} in</span>
                     <span>{fmtCompact(m.arcfunBought)} bought</span>
                   </div>
-                </div>
+                </a>
               ))}
             </div>
             <div className="hidden sm:block overflow-x-auto">
@@ -220,14 +224,20 @@ export default async function CruciblePage() {
                       style={{ ['--tape-i' as string]: i }}
                     >
                       <td className="px-5 py-3 text-t2 tabular-nums">
-                        <span className="inline-flex items-center gap-2">
+                        <a
+                          href={`${explorer}/tx/${m.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="View cook on explorer"
+                          className="inline-flex items-center gap-2 hover:text-white"
+                        >
                           {i === 0 ? (
                             <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot shrink-0" />
                           ) : (
                             <span className="w-1.5 h-1.5 shrink-0" aria-hidden />
                           )}
                           {ageLabel(m.ts)} ago
-                        </span>
+                        </a>
                       </td>
                       <td className="px-5 py-3 text-right tabular-nums font-semibold">
                         {fmtUsd(m.usdcIn)}
