@@ -71,11 +71,27 @@ async function rebuild(): Promise<CatalogSnapshot> {
     } catch {
       /* indexer optional */
     }
+    const prev = memory ?? (await readKv())
+    // A factory timeout (common after adding the Crucible Instant factory) used
+    // to throw and freeze the last snapshot, so a just-launched token stayed off
+    // home even though /token/[addr] worked. Keep tokens the rebuild missed.
+    if (prev && prev.tokens.length > 0) {
+      const byId = new Map<string, PoolToken>()
+      for (const t of tokens) {
+        const id = (t.coinType || t.poolId || t.id || '').toLowerCase()
+        if (id) byId.set(id, t)
+      }
+      for (const t of prev.tokens) {
+        const id = (t.coinType || t.poolId || t.id || '').toLowerCase()
+        if (!id || byId.has(id) || isHiddenToken(id)) continue
+        byId.set(id, t)
+      }
+      tokens = [...byId.values()]
+    }
     const snap: CatalogSnapshot = cloneJson({ tokens, source, at: Date.now() })
     // An empty rebuild is almost always a failed Instant/RPC pass, not a pad
     // with zero launches. Writing it would wipe the home grid until the next
     // successful read (the same [] vs failure collapse as fetchListings).
-    const prev = memory ?? (await readKv())
     if (snap.tokens.length === 0 && prev && prev.tokens.length > 0) {
       console.warn('[arc-catalog] empty rebuild, keeping last-known-good', prev.tokens.length)
       return prev

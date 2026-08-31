@@ -703,63 +703,57 @@ async function listInstantFactoryTokens(
   return { addrs, launchVq }
 }
 
+/** One Instant factory: enumerate + getPool + hydrate. Isolated so a timeout on
+ *  the 22-token retired factory cannot hide a launch on the current factory. */
+async function fetchInstantTokensForFactory(factory: Address): Promise<PoolToken[]> {
+  const { addrs, launchVq } = await listInstantFactoryTokens(factory)
+  if (addrs.length === 0) return []
+  const client = arcPublicClient()
+  const poolRows = await multicallChunked(
+    client,
+    addrs.map((token) => ({
+      address: factory,
+      abi: INSTANT_QUOTE_FACTORY_ABI,
+      functionName: 'getPool',
+      args: [token],
+    })),
+  )
+  const rows: { token: Address; factory: Address; launchVq: bigint; pool: InstantQuotePool }[] = []
+  for (let i = 0; i < addrs.length; i++) {
+    const p = asInstantPool(mcOk(poolRows[i]))
+    if (!p) continue
+    rows.push({ token: addrs[i], factory, launchVq, pool: p })
+  }
+  if (rows.length === 0) return []
+  return hydrateInstantRows(rows)
+}
+
 /**
  * Full Instant catalog for home grid. Merges current + legacy factories so
  * 6dp (pre–LaunchToken18) and 18dp Instant tokens both show correct MC.
  */
 export async function fetchArcInstantPoolTokens(): Promise<PoolToken[]> {
   if (!arcInstantEnabled()) return []
-  const client = arcPublicClient()
-  try {
-    const factories = instantCatalogFactories()
-    const listed = await Promise.all(
-      factories.map((factory, i) =>
-        i === 0
-          ? listInstantFactoryTokens(factory)
-          : listInstantFactoryTokens(factory).catch(() => ({
-              addrs: [] as Address[],
-              launchVq: 5_500_000_000n,
-            })),
-      ),
-    )
-
-    // Dedupe by token address (prefer first = current factory).
-    const seen = new Set<string>()
-    const entries: { token: Address; factory: Address; launchVq: bigint }[] = []
-    for (let fi = 0; fi < factories.length; fi++) {
-      const { addrs, launchVq } = listed[fi]
-      for (const token of addrs) {
-        const k = token.toLowerCase()
-        if (seen.has(k)) continue
-        seen.add(k)
-        entries.push({ token, factory: factories[fi], launchVq })
-      }
+  const factories = instantCatalogFactories()
+  const parts = await Promise.all(
+    factories.map((factory) =>
+      fetchInstantTokensForFactory(factory).catch((e) => {
+        console.warn('[arc-instant-tokens] factory', factory, summarizeRpcError(e))
+        return [] as PoolToken[]
+      }),
+    ),
+  )
+  const seen = new Set<string>()
+  const out: PoolToken[] = []
+  for (const list of parts) {
+    for (const t of list) {
+      const id = (t.coinType || t.poolId || t.id || '').toLowerCase()
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      out.push(t)
     }
-    if (entries.length === 0) return []
-
-    const poolRows = await multicallChunked(
-      client,
-      entries.map(({ token, factory }) => ({
-        address: factory,
-        abi: INSTANT_QUOTE_FACTORY_ABI,
-        functionName: 'getPool',
-        args: [token],
-      })),
-    )
-    const rows: { token: Address; factory: Address; launchVq: bigint; pool: InstantQuotePool }[] = []
-    for (let i = 0; i < entries.length; i++) {
-      const p = asInstantPool(mcOk(poolRows[i]))
-      if (!p) continue
-      rows.push({ ...entries[i], pool: p })
-    }
-    if (rows.length === 0) {
-      throw new Error('instant getPool reads returned no pools')
-    }
-    return hydrateInstantRows(rows)
-  } catch (e) {
-    console.error('[arc-instant-tokens] catalog', summarizeRpcError(e))
-    throw e
   }
+  return out
 }
 
 /**
@@ -932,7 +926,10 @@ export async function fetchArcCurvePoolTokens(): Promise<PoolToken[]> {
 
 export async function buildArcCatalog(): Promise<{ tokens: PoolToken[]; source: string }> {
   const [instant, reflection, curve] = await Promise.all([
-    fetchArcInstantPoolTokens(),
+    fetchArcInstantPoolTokens().catch((e) => {
+      console.warn('[arc-instant-tokens] catalog', summarizeRpcError(e))
+      return [] as PoolToken[]
+    }),
     fetchArcReflectionPoolTokens().catch(() => [] as PoolToken[]),
     fetchArcCurvePoolTokens().catch(() => [] as PoolToken[]),
   ])
