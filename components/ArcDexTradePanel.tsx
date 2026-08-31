@@ -5,16 +5,10 @@
  * Restyled to match redesign: sticky card, buy/sell pill, large amount, USDC chip.
  */
 import { useState, useEffect, useRef } from 'react'
-import {
-  useAccount,
-  useReadContract,
-  useSwitchChain,
-  useWriteContract,
-  useWaitForTransactionReceipt,
-} from 'wagmi'
+import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi, formatUnits, type Address } from 'viem'
 import { Loader2, AlertCircle, CheckCircle, ExternalLink } from 'lucide-react'
-import { ARC, ARC_CHAIN_ID, ARC_EXPLORER } from '@/lib/contracts-arc'
+import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_SWAP_GAS } from '@/lib/contracts-arc'
 import {
   arcSwapConfigured,
   arcSwapSpender,
@@ -24,14 +18,14 @@ import {
   formatUsdc,
   minOutFromSlippage,
   parseUsdc,
-  quoteArcBuy,
-  quoteArcSell,
   withRecipient,
 } from '@/lib/arc-swap'
 import { formatToken, parseToken } from '@/lib/token-format'
 import { getIncomingReferralCode } from '@/lib/crucible'
 import { tileGradient } from '@/lib/ui-format'
 import { cdnImage } from '@/lib/cdn-image'
+import { WalletButton } from '@/components/WalletButton'
+import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 
 const SLIPPAGE_BPS = 500 // 5% — thin Instant single-sided ranges
 const BUY_PRESETS = [25, 100, 500]
@@ -74,7 +68,6 @@ export function ArcDexTradePanel({
   onTraded?: () => void
 }) {
   const { address, chainId, isConnected } = useAccount()
-  const { switchChain, isPending: switching } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
 
   const [mode, setMode] = useState<'buy' | 'sell'>('buy')
@@ -95,26 +88,19 @@ export function ArcDexTradePanel({
   const { tile, mono } = tileGradient(token)
   const initial = (symbol || '?').charAt(0).toUpperCase()
 
-  const { data: usdcBal, refetch: refetchUsdc } = useReadContract({
-    address: ARC.USDC,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    query: { enabled: !!address, refetchInterval: 15_000 },
-  })
-
-  const { data: tokenBal, refetch: refetchTok } = useReadContract({
-    address: token,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    query: { enabled: !!address, refetchInterval: 15_000 },
-  })
+  const usdcQ = useArcErc20Balance(ARC.USDC, address)
+  const tokQ = useArcErc20Balance(token, address)
+  const usdcBal = usdcQ.data
+  const tokenBal = tokQ.data
+  const refetchUsdc = usdcQ.refetch
+  const refetchTok = tokQ.refetch
+  const payBalPending = mode === 'buy' ? usdcQ.isPending : tokQ.isPending
 
   const { data: tokenDecimals } = useReadContract({
     address: token,
     abi: erc20Abi,
     functionName: 'decimals',
+    chainId: ARC_CHAIN_ID,
     query: { staleTime: 3_600_000 },
   })
   const tokDec = Number(tokenDecimals ?? ARC.TOKEN_DECIMALS) || ARC.TOKEN_DECIMALS
@@ -125,6 +111,7 @@ export function ArcDexTradePanel({
     abi: erc20Abi,
     functionName: 'allowance',
     args: address ? [address, spender] : undefined,
+    chainId: ARC_CHAIN_ID,
     query: { enabled: !!address },
   })
 
@@ -142,26 +129,43 @@ export function ArcDexTradePanel({
   }, [mined, onTraded, refetchUsdc, refetchTok, refetchAllowance])
 
   useEffect(() => {
+    if (!amount || Number(amount) <= 0 || !swapOn) {
+      setEstOut(null)
+      setError(null)
+      setQuoting(false)
+      return
+    }
     let cancelled = false
     const run = async () => {
       setEstOut(null)
-      setError(null)
-      if (!amount || Number(amount) <= 0 || !swapOn) return
       setQuoting(true)
       try {
-        if (mode === 'buy') {
-          const inAmt = parseUsdc(amount)
-          if (inAmt <= 0n) return
-          const q = await quoteArcBuy(token, inAmt, getIncomingReferralCode())
-          if (!cancelled) setEstOut(q)
-        } else {
-          const inAmt = parseToken(amount, tokDec)
-          if (inAmt <= 0n) return
-          const q = await quoteArcSell(token, inAmt)
-          if (!cancelled) setEstOut(q)
+        const ref = mode === 'buy' ? getIncomingReferralCode() : ''
+        const qs = new URLSearchParams({
+          token,
+          side: mode,
+          amount,
+          ...(ref ? { ref } : {}),
+        })
+        const res = await fetch(`/api/arc/quote?${qs}`)
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean
+          out?: string
+          error?: string
+        } | null
+        if (cancelled) return
+        if (!data?.ok || !data.out) {
+          setEstOut(null)
+          setError(data?.error || 'No quote for this size.')
+          return
         }
+        setEstOut(BigInt(data.out))
+        setError(null)
       } catch {
-        if (!cancelled) setEstOut(null)
+        if (!cancelled) {
+          setEstOut(null)
+          setError('Quote failed. Retry in a moment.')
+        }
       } finally {
         if (!cancelled) setQuoting(false)
       }
@@ -171,7 +175,7 @@ export function ArcDexTradePanel({
       cancelled = true
       clearTimeout(t)
     }
-  }, [amount, mode, token, swapOn, tokDec])
+  }, [amount, mode, token, swapOn])
 
   const needApprove = (() => {
     if (!amount || Number(amount) <= 0) return false
@@ -187,10 +191,12 @@ export function ArcDexTradePanel({
     setBusy(true)
     setStatusMsg('')
     try {
+      if (estOut == null || estOut <= 0n) {
+        throw new Error('No quote yet. Wait a moment or try a smaller amount.')
+      }
       if (mode === 'buy') {
         const inAmt = parseUsdc(amount)
-        const quoted = estOut ?? (await quoteArcBuy(token, inAmt, refCode)) ?? 0n
-        const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
+        const minOut = minOutFromSlippage(estOut, SLIPPAGE_BPS)
         if (needApprove) {
           setStatusMsg('Approve USDC…')
           await writeContractAsync({
@@ -199,10 +205,11 @@ export function ArcDexTradePanel({
             functionName: 'approve',
             args: [spender, inAmt],
             chainId: ARC_CHAIN_ID,
+            gas: ARC_ERC20_APPROVE_GAS,
           })
           void refetchAllowance()
         }
-        setStatusMsg('Buying…')
+        setStatusMsg('Confirm in wallet…')
         // Same tier the quote resolved — cached, so this is not an extra RPC round trip.
         const poolFee = (await findArcPoolFee(token)) ?? undefined
         let call = buildArcBuy(token, inAmt, minOut, poolFee, refCode)
@@ -213,13 +220,13 @@ export function ArcDexTradePanel({
           functionName: call.functionName as never,
           args: call.args as never,
           chainId: call.chainId,
+          gas: ARC_SWAP_GAS,
         })
         setTxHash(hash)
         setStatusMsg('Confirming…')
       } else {
         const inAmt = parseToken(amount, tokDec)
-        const quoted = estOut ?? (await quoteArcSell(token, inAmt)) ?? 0n
-        const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
+        const minOut = minOutFromSlippage(estOut, SLIPPAGE_BPS)
         if (needApprove) {
           setStatusMsg(`Approve ${symbol}…`)
           await writeContractAsync({
@@ -228,10 +235,11 @@ export function ArcDexTradePanel({
             functionName: 'approve',
             args: [spender, inAmt],
             chainId: ARC_CHAIN_ID,
+            gas: ARC_ERC20_APPROVE_GAS,
           })
           void refetchAllowance()
         }
-        setStatusMsg('Selling…')
+        setStatusMsg('Confirm in wallet…')
         const poolFee = (await findArcPoolFee(token)) ?? undefined
         const call = buildArcSell(token, inAmt, minOut, address, poolFee)
         const hash = await writeContractAsync({
@@ -240,6 +248,7 @@ export function ArcDexTradePanel({
           functionName: call.functionName as never,
           args: call.args as never,
           chainId: call.chainId,
+          gas: ARC_SWAP_GAS,
         })
         setTxHash(hash)
         setStatusMsg('Confirming…')
@@ -264,9 +273,15 @@ export function ArcDexTradePanel({
 
   const amtNum = Number(amount) || 0
   const payBal = mode === 'buy' ? ((usdcBal as bigint | undefined) ?? 0n) : ((tokenBal as bigint | undefined) ?? 0n)
-  const payBalLabel = mode === 'buy' ? formatUsdc(payBal) : fmtTok(payBal, tokDec)
+  const payBalLabel = payBalPending ? '…' : mode === 'buy' ? formatUsdc(payBal) : fmtTok(payBal, tokDec)
   const receiveAmt =
-    quoting ? '…' : estOut == null ? '0' : mode === 'buy' ? fmtTok(estOut, tokDec) : formatUsdc(estOut)
+    quoting && amtNum > 0
+      ? '…'
+      : estOut == null
+        ? '0'
+        : mode === 'buy'
+          ? fmtTok(estOut, tokDec)
+          : formatUsdc(estOut)
   const rate = (() => {
     if (!(amtNum > 0) || estOut == null || estOut <= 0n) return null
     const out = Number(formatUnits(estOut, mode === 'buy' ? tokDec : 6))
@@ -303,18 +318,8 @@ export function ArcDexTradePanel({
 
   return (
     <div className="rounded-[28px] border border-hair bg-[#0e1016] p-3">
-      {!isConnected ? (
-        <p className="text-sm text-t3 text-center py-10">Connect wallet to trade</p>
-      ) : wrongChain ? (
-        <button
-          type="button"
-          onClick={() => switchChain({ chainId: ARC_CHAIN_ID })}
-          disabled={switching}
-          className="w-full h-14 rounded-2xl bg-amber-500 text-black text-[17px] font-bold flex items-center justify-center gap-2"
-        >
-          {switching ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertCircle className="w-4 h-4" />}
-          Switch to Arc
-        </button>
+      {!isConnected || wrongChain ? (
+        <WalletButton variant="panel" />
       ) : (
         <>
           <div className="rounded-[22px] bg-[#16181f] p-4">
@@ -322,9 +327,9 @@ export function ArcDexTradePanel({
               <span>You pay</span>
               <button
                 type="button"
-                disabled={payBal === 0n}
+                disabled={payBalPending || payBal === 0n}
                 onClick={() => {
-                  if (payBal <= 0n) return
+                  if (payBalPending || payBal <= 0n) return
                   setAmount(
                     mode === 'buy' ? formatUsdc(payBal).replace(/,/g, '') : formatToken(payBal, tokDec),
                   )
@@ -365,7 +370,7 @@ export function ArcDexTradePanel({
                   <button
                     key={pct}
                     type="button"
-                    disabled={payBal === 0n}
+                    disabled={payBalPending || payBal === 0n}
                     onClick={() => {
                       const pctAmt = (payBal * BigInt(pct)) / 100n
                       if (pctAmt > 0n) setAmount(formatToken(pctAmt, tokDec))
@@ -452,7 +457,7 @@ export function ArcDexTradePanel({
 
           <button
             type="button"
-            disabled={busy || !amount || Number(amount) <= 0}
+            disabled={busy || quoting || !amount || Number(amount) <= 0 || estOut == null}
             onClick={() => void onSubmit()}
             className="mt-4 w-full h-[56px] rounded-2xl text-[17px] font-bold tracking-wide disabled:opacity-40 transition-opacity"
             style={{

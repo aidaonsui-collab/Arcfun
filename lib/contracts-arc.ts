@@ -200,6 +200,27 @@ export const ARC_RPC_URLS: string[] = (() => {
 
 export const ARC_RPC = ARC_RPC_URLS[0] || ''
 
+/** Browser wagmi transport. Baracat hangs in the wallet path; try scan/theleak first so MAX is not stuck 4s. Fail over in 2.5s. */
+export function arcBrowserTransport() {
+  const seen = new Set<string>()
+  const urls: string[] = []
+  const ordered = ARC_IS_TESTNET
+    ? ARC_RPC_URLS
+    : [ARC_SCAN_RPC, ARC_THELEAK_RPC, ...ARC_RPC_URLS]
+  for (const u of ordered) {
+    if (!u || seen.has(u) || isBannedArcRpc(u) || isKeyedInfuraUrl(u)) continue
+    seen.add(u)
+    urls.push(u)
+  }
+  if (urls.length > 1) {
+    return fallback(
+      urls.map((u) => http(u, { retryCount: 0, timeout: 2_500 })),
+      { shouldThrow: (error) => !isArcRpcInfraError(error) },
+    )
+  }
+  return http(urls[0] || ARC_SCAN_RPC, { retryCount: 0, timeout: 2_500 })
+}
+
 /** Server-only RPC override. Empty → same as ARC_RPC. */
 export const ARC_SERVER_RPC = process.env.ARC_RPC || ARC_RPC
 
@@ -209,6 +230,11 @@ export const ARC_SERVER_RPC = process.env.ARC_RPC || ARC_RPC
  * estimation with a fixed cap under Arc's 30M block gas limit.
  */
 export const ARC_INSTANT_CREATE_GAS = 12_000_000n
+
+/** ERC-20 approve — skip public-RPC eth_estimateGas (typical ~46k). */
+export const ARC_ERC20_APPROVE_GAS = 80_000n
+/** Uni V3 swap via FeeRouter / ReferralRouter — skip estimateGas. Measured Instant fills sit well under this. */
+export const ARC_SWAP_GAS = 500_000n
 
 /**
  * Bonding-curve create (token + optional first-buy) — lighter than Instant, but still
@@ -278,7 +304,7 @@ export const arcChain = defineChain({
   id: ARC_CHAIN_ID,
   name: ARC_IS_TESTNET ? 'Arc Testnet' : 'Arc',
   nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 18 },
-  rpcUrls: { default: { http: ARC_RPC ? [ARC_RPC] : [] } },
+  rpcUrls: { default: { http: ARC_RPC_URLS.length ? ARC_RPC_URLS : [ARC_BARACAT_RPC] } },
   ...(ARC_EXPLORER
     ? {
         blockExplorers: {
