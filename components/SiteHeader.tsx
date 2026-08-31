@@ -1,15 +1,27 @@
 'use client'
 
 /**
- * Sticky nav — brand mark, search, ArcStudio, wallet chip.
- * Mobile: Home, Blitz, ArcStudio, Create collection, Profile, Docs.
+ * Sticky nav — brand mark, search, ArcStudio, Arc OTC, wallet chip.
+ * Mobile: Home, Blitz, Crucible, ArcStudio, Create collection, Profile, Arc OTC, Docs.
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { FormEvent, useEffect, useState } from 'react'
 import { useAccount, useBalance, useConnect, useDisconnect } from 'wagmi'
 import { formatUnits } from 'viem'
-import { BookOpen, CircleUser, Flame, Home, LayoutGrid, Menu, PlusCircle, X, Zap, type LucideIcon } from 'lucide-react'
+import {
+  ArrowLeftRight,
+  BookOpen,
+  CircleUser,
+  Flame,
+  Home,
+  LayoutGrid,
+  Menu,
+  PlusCircle,
+  X,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
 import { CrucibleChip } from '@/components/CrucibleChip'
 import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
@@ -172,6 +184,17 @@ export function SiteHeader() {
           Studio
         </Link>
 
+        <Link
+          href="/otc"
+          className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
+            pathname.startsWith('/otc')
+              ? 'border-lime-line bg-s2 text-white'
+              : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
+          }`}
+        >
+          Arc OTC
+        </Link>
+
         {isConnected && address ? (
           <div className="flex items-center gap-2">
             {!wrongChain && (
@@ -308,6 +331,7 @@ export function SiteHeader() {
                   Profile
                 </button>
               )}
+              {navRow('/otc', 'Arc OTC', ArrowLeftRight)}
               {navRow('/docs', 'Docs', BookOpen)}
             </div>
           </aside>
