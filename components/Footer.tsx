@@ -21,6 +21,9 @@ export function Footer() {
           <Link href="/studio" className="hover:text-white">
             Studio
           </Link>
+          <Link href="/otc" className="hover:text-white">
+            Arc OTC
+          </Link>
           <Link href="/create" className="hover:text-white">
             Launch
           </Link>

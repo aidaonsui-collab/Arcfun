@@ -189,24 +189,19 @@ export function getPaymentChain(id: OtcPaymentChainId | number): OtcPaymentChain
 }
 
 export function robinOtcEnabled(): boolean {
-  // Retired 2026-08-30 — the /otc UI redirects home (next.config.js) and there is no way to
-  // create a new offer, so this now defaults OFF rather than ON. Set
-  // NEXT_PUBLIC_ROBIN_OTC_ENABLED=1 to bring it back without a code change.
+  // Rewired back in 2026-08-31 — /otc renders the real desk again (app/otc/page.tsx) and the
+  // header/mobile drawer link to it again, so this defaults back ON. The 2026-08-30 retirement
+  // (see git history) was purely "there's no UI path left to reach this," not a backend fault —
+  // that PR's own check confirmed otcCursor was advancing every indexer cycle and deskStats was
+  // current right up until the flag flipped. Flipping it back resumes exactly where the cursor
+  // and desk-stats KV row were left, per that same PR's design (both freeze, neither reset, when
+  // this is false) — nothing to backfill or reconcile here.
   //
-  // This one flag is already the sole gate on all recurring OTC work: scanOtcOffers
-  // (lib/arc-indexer/run.ts) and catchUpOtcDeskStats (lib/arc-indexer/otc-desk-stats.ts) both
-  // check it and no-op immediately when false, without touching what's already persisted —
-  // otcCursor stays wherever it was, and the desk-stats KV row (settledTrades, volumeUsdc) is
-  // untouched. So this stops the OTC-specific RPC scanning inside the shared 2-minute indexer
-  // cron cycle (/api/arc/indexer/run — factory and swap/volume scanning are separate and keep
-  // running) while every *read* path — GET /api/otc/offers, the indexer status endpoint's
-  // deskStats — keeps serving the real last-known numbers, frozen rather than erased. Verified
-  // live before this change: otcCursor was advancing every cycle, deskStats.updatedAt was
-  // current, and the one component that reads the flag-gated fetchOtcDeskStats (which zeroes
-  // out instead of freezing) — components/bridge/InstantOtcPanel.tsx — is rendered nowhere.
+  // NEXT_PUBLIC_ROBIN_OTC_ENABLED stays as a bidirectional override (`=1` forces on, `=0` forces
+  // off) if OTC ever needs to come down again without a code change.
   if (process.env.NEXT_PUBLIC_ROBIN_OTC_ENABLED === '1') return true
   if (process.env.NEXT_PUBLIC_ROBIN_OTC_ENABLED === '0') return false
-  return false
+  return true
 }
 
 /** Total open depth across active offers (USDC 6dp) — uses available when present. */

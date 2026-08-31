@@ -165,6 +165,12 @@ export function HomeClient({
               >
                 How it works
               </Link>
+              <Link
+                href="/otc"
+                className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
+              >
+                OTC desk
+              </Link>
             </div>
             <div className="hidden lg:flex flex-wrap gap-3 pt-1">
               <Link
@@ -178,6 +184,12 @@ export function HomeClient({
                 className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
               >
                 How it works
+              </Link>
+              <Link
+                href="/otc"
+                className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
+              >
+                OTC desk
               </Link>
             </div>
           </div>
