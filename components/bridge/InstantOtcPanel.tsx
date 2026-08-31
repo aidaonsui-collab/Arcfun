@@ -557,6 +557,24 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
             gas: 500_000n,
           })
       const receipt = await payClient.waitForTransactionReceipt({ hash: fillTx })
+      // waitForTransactionReceipt does NOT throw on a reverted tx — a revert still gets mined,
+      // so the receipt resolves normally with status 'reverted'. Without this check, a fill that
+      // reverted on-chain (e.g. wallet balance short of destAmount + maker premium + platform
+      // fee — real case, confirmed on Base: "ERC20: transfer amount exceeds balance") fell
+      // straight through to the success path below: no FillCreated log to find (silently
+      // skipped), reservationId nulled as "bound to fill" even though nothing was ever
+      // consumed on Arc, and the "Order placed" confirmation shown regardless. The buyer saw
+      // success, gas was spent, no funds moved, and the reservation sat locked out of the book
+      // for its full 30m TTL for nothing — then "My orders" correctly showed nothing, because
+      // nothing had actually happened, which is what looked like a missing-order bug from the
+      // outside.
+      if (receipt.status !== 'success') {
+        throw new Error(
+          `Transaction reverted on ${payChain.name} — no funds moved beyond gas. Check your ` +
+            `${payChain.name} USDC balance covers the total (destination amount + maker premium ` +
+            `+ platform fee), not just the amount you want to receive on Arc.`,
+        )
+      }
       const fillTopics = encodeEventTopics({
         abi: PAYMENT_ABI,
         eventName: 'FillCreated',
