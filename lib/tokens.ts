@@ -108,6 +108,8 @@ export const HIDDEN_TOKENS = new Set<string>([
   '0xc2048103f02757d42df7c1d9241eb80b27fa432e', // hidden per platform owner request
   '0x31117e17505d64ae54f0cd94cba139d7ec7a0855', // hidden per platform owner request
   '0xdd2d4318bac5a7e087da2397ae36161bffd81095', // hidden per platform owner request
+  '0x32b8f1ba5800d566bba0e47aaf7f7bf813a2e2e5', // hidden per platform owner request
+  '0x69fd600c50672ad0d321dc069db7482a35973748', // hidden per platform owner request
 ])
 
 /** Case-insensitive match for EVM addresses (0x…). */
