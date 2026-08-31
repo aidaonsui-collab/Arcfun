@@ -3,7 +3,7 @@
 /**
  * My orders — purchases (fills) + maker liquidity offers, read from chain.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   useAccount,
   useConnect,
@@ -58,26 +58,41 @@ export function InstantOtcOrders() {
     return () => clearInterval(t)
   }, [])
 
-  const refresh = useCallback(async () => {
-    if (!enabled) return
+  // Two independent scans that used to be one Promise.all([fetchRecentFills, fetchMakerOffers]) —
+  // split apart 2026-08-31 after a live report: successful, settled fills were not appearing in
+  // Purchases at all. Root cause was two compounding bugs, not one:
+  //
+  //   1. fetchMakerOffers scans from the liquidity contract's deploy block to chain head — on Arc
+  //      that's ~4.4M blocks (KNOWN_LIQUIDITY_DEPLOY_FLOOR 14,000,000 vs. a head in the high
+  //      18-millions), chunked at 9k blocks/request, 6 concurrent — routinely 30s-2min+ per call,
+  //      confirmed by running it directly: it hadn't finished after 60s. fetchRecentFills, by
+  //      contrast, is fast (bounded lookback, indexed by buyer topic).
+  //   2. Promise.all([fetchRecentFills(...), fetchMakerOffers(...)]) means ANY rejection — and a
+  //      multi-minute scan under real RPC conditions rejects often — discards the OTHER promise's
+  //      result too. Purchases could fetch successfully and still never reach setPurchases()
+  //      because its sibling call in the same Promise.all failed.
+  //
+  // Bundling the slow scan into the same 10s poll as the fast one (see the interval below) made
+  // this far more visible — overlapping multi-minute scans stacking up every 10 seconds — but the
+  // underlying bug pre-dates that change; it would eventually have surfaced at 30s too.
+  //
+  // Fix: two fully independent functions, each with its own re-entrancy guard (a ref, not state —
+  // needs to be readable synchronously within the same tick an overlapping call could start) and
+  // its own error handling, so a slow/failing offers scan can never block or discard a
+  // successfully-fetched purchases list.
+  const purchasesInFlight = useRef(false)
+  const offersInFlight = useRef(false)
+
+  const refreshPurchases = useCallback(async () => {
+    if (!enabled || !address) {
+      setPurchases([])
+      return
+    }
+    if (purchasesInFlight.current) return
+    purchasesInFlight.current = true
     setLoading(true)
-    setErr(null)
     try {
-      const [chainFills, makerOffers] = await Promise.all([
-        address ? fetchRecentFills({ buyer: address }) : Promise.resolve([] as OtcFill[]),
-        address ? fetchMakerOffers(address) : Promise.resolve([] as OtcOffer[]),
-      ])
-      let makerSales: OtcFill[] = []
-      if (address) {
-        try {
-          makerSales = await fetchRecentSales({
-            seller: address,
-            offerIds: makerOffers.map((o) => o.offerId),
-          })
-        } catch (e) {
-          console.warn('[otc] sales scan failed', e)
-        }
-      }
+      const chainFills = await fetchRecentFills({ buyer: address })
 
       // Merge browser-local fill ids not in log window
       const local = loadLocalFillIds()
@@ -85,38 +100,75 @@ export function InstantOtcOrders() {
       const extras: OtcFill[] = []
       for (const loc of local) {
         if (seen.has(loc.fillId.toLowerCase())) continue
-        if (address) {
-          const f = await fetchFillById(loc.fillId, loc.chain)
-          if (f && f.buyer.toLowerCase() === address.toLowerCase()) {
-            extras.push(f)
-            seen.add(f.fillId.toLowerCase())
-          }
+        const f = await fetchFillById(loc.fillId, loc.chain)
+        if (f && f.buyer.toLowerCase() === address.toLowerCase()) {
+          extras.push(f)
+          seen.add(f.fillId.toLowerCase())
         }
       }
 
       const all = [...extras, ...chainFills]
       all.sort((a, b) => b.createdAt - a.createdAt)
       setPurchases(all)
-      setSales(makerSales)
-      setOffers(makerOffers)
+      setErr(null)
     } catch (e) {
-      // Keep prior purchases/offers when Arc/Base RPC scan fails mid-poll.
+      // Keep prior purchases when an Arc/Base RPC scan fails mid-poll.
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
+      purchasesInFlight.current = false
+    }
+  }, [enabled, address])
+
+  const refreshOffersAndSales = useCallback(async () => {
+    if (!enabled || !address) {
+      setOffers([])
+      setSales([])
+      return
+    }
+    if (offersInFlight.current) return
+    offersInFlight.current = true
+    try {
+      const makerOffers = await fetchMakerOffers(address)
+      setOffers(makerOffers)
+      try {
+        const makerSales = await fetchRecentSales({
+          seller: address,
+          offerIds: makerOffers.map((o) => o.offerId),
+        })
+        setSales(makerSales)
+      } catch (e) {
+        console.warn('[otc] sales scan failed', e)
+      }
+    } catch (e) {
+      // Own failure, own log line — never touches purchases state.
+      console.warn('[otc] maker offers scan failed', e)
+    } finally {
+      offersInFlight.current = false
     }
   }, [enabled, address])
 
   useEffect(() => {
-    void refresh()
-    // 10s (was 30s) — faster feedback while testing fills against the just-restored settlement
-    // keeper. The original 30s comment's concern (full OfferCreated scan is heavy; aggressive
-    // polls amplify 429s and empty lists) is still real — this trades some of that margin away
-    // deliberately. If 429s/empty-list flicker show up under real traffic, that's the tradeoff
-    // to revisit first, not a new bug.
-    const t = setInterval(() => void refresh(), 10_000)
+    void refreshPurchases()
+    // 10s — fetchRecentFills is bounded/fast, safe to poll this often.
+    const t = setInterval(() => void refreshPurchases(), 10_000)
     return () => clearInterval(t)
-  }, [refresh])
+  }, [refreshPurchases])
+
+  useEffect(() => {
+    void refreshOffersAndSales()
+    // 90s, not 10s — this scan alone can take 30s-2min (see comment above); polling it as often
+    // as purchases would mean it's *always* in flight, back-to-back, for no benefit (your own
+    // posted offers don't change on a 10s cadence). The Refresh button below covers "I want this
+    // now" for both.
+    const t = setInterval(() => void refreshOffersAndSales(), 90_000)
+    return () => clearInterval(t)
+  }, [refreshOffersAndSales])
+
+  const refreshAll = useCallback(() => {
+    void refreshPurchases()
+    void refreshOffersAndSales()
+  }, [refreshPurchases, refreshOffersAndSales])
 
   const onLookup = async () => {
     setErr(null)
@@ -154,7 +206,7 @@ export function InstantOtcOrders() {
         gas: 200_000n,
       })
       setStatus(`Refund submitted ${tx.slice(0, 12)}…`)
-      void refresh()
+      void refreshPurchases()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -186,7 +238,7 @@ export function InstantOtcOrders() {
         gas: 200_000n,
       })
       setStatus(`Cancel submitted ${tx.slice(0, 12)}…`)
-      void refresh()
+      void refreshOffersAndSales()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -276,7 +328,7 @@ export function InstantOtcOrders() {
             type="button"
             className="ab-btn ab-btn-ghost"
             style={{ fontSize: 11, padding: '2px 10px' }}
-            onClick={() => void refresh()}
+            onClick={refreshAll}
           >
             {loading ? '…' : 'Refresh'}
           </button>
