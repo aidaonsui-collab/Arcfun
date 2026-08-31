@@ -18,8 +18,6 @@ import {
   formatUsdc,
   minOutFromSlippage,
   parseUsdc,
-  quoteArcBuy,
-  quoteArcSell,
   withRecipient,
 } from '@/lib/arc-swap'
 import { formatToken, parseToken } from '@/lib/token-format'
@@ -143,23 +141,38 @@ export function ArcDexTradePanel({
     let cancelled = false
     const run = async () => {
       setEstOut(null)
-      setError(null)
-      if (!amount || Number(amount) <= 0 || !swapOn) return
+      if (!amount || Number(amount) <= 0 || !swapOn) {
+        setError(null)
+        return
+      }
       setQuoting(true)
       try {
-        if (mode === 'buy') {
-          const inAmt = parseUsdc(amount)
-          if (inAmt <= 0n) return
-          const q = await quoteArcBuy(token, inAmt, getIncomingReferralCode())
-          if (!cancelled) setEstOut(q)
-        } else {
-          const inAmt = parseToken(amount, tokDec)
-          if (inAmt <= 0n) return
-          const q = await quoteArcSell(token, inAmt)
-          if (!cancelled) setEstOut(q)
+        const ref = mode === 'buy' ? getIncomingReferralCode() : ''
+        const qs = new URLSearchParams({
+          token,
+          side: mode,
+          amount,
+          ...(ref ? { ref } : {}),
+        })
+        const res = await fetch(`/api/arc/quote?${qs}`)
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean
+          out?: string
+          error?: string
+        } | null
+        if (cancelled) return
+        if (!data?.ok || !data.out) {
+          setEstOut(null)
+          setError(data?.error || 'No quote for this size.')
+          return
         }
+        setEstOut(BigInt(data.out))
+        setError(null)
       } catch {
-        if (!cancelled) setEstOut(null)
+        if (!cancelled) {
+          setEstOut(null)
+          setError('Quote failed. Retry in a moment.')
+        }
       } finally {
         if (!cancelled) setQuoting(false)
       }
@@ -169,7 +182,7 @@ export function ArcDexTradePanel({
       cancelled = true
       clearTimeout(t)
     }
-  }, [amount, mode, token, swapOn, tokDec])
+  }, [amount, mode, token, swapOn])
 
   const needApprove = (() => {
     if (!amount || Number(amount) <= 0) return false
@@ -185,10 +198,12 @@ export function ArcDexTradePanel({
     setBusy(true)
     setStatusMsg('')
     try {
+      if (estOut == null || estOut <= 0n) {
+        throw new Error('No quote yet. Wait a moment or try a smaller amount.')
+      }
       if (mode === 'buy') {
         const inAmt = parseUsdc(amount)
-        const quoted = estOut ?? (await quoteArcBuy(token, inAmt, refCode)) ?? 0n
-        const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
+        const minOut = minOutFromSlippage(estOut, SLIPPAGE_BPS)
         if (needApprove) {
           setStatusMsg('Approve USDC…')
           await writeContractAsync({
@@ -218,8 +233,7 @@ export function ArcDexTradePanel({
         setStatusMsg('Confirming…')
       } else {
         const inAmt = parseToken(amount, tokDec)
-        const quoted = estOut ?? (await quoteArcSell(token, inAmt)) ?? 0n
-        const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
+        const minOut = minOutFromSlippage(estOut, SLIPPAGE_BPS)
         if (needApprove) {
           setStatusMsg(`Approve ${symbol}…`)
           await writeContractAsync({
@@ -444,7 +458,7 @@ export function ArcDexTradePanel({
 
           <button
             type="button"
-            disabled={busy || !amount || Number(amount) <= 0}
+            disabled={busy || quoting || !amount || Number(amount) <= 0 || estOut == null}
             onClick={() => void onSubmit()}
             className="mt-4 w-full h-[56px] rounded-2xl text-[17px] font-bold tracking-wide disabled:opacity-40 transition-opacity"
             style={{
