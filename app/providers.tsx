@@ -3,10 +3,10 @@
 import type { ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
-import { WagmiProvider, createConfig, http, fallback } from 'wagmi'
+import { WagmiProvider, createConfig, http } from 'wagmi'
 import { injected, walletConnect } from 'wagmi/connectors'
 import { base, arbitrum, mainnet } from 'wagmi/chains'
-import { arcChain, ARC_RPC_URLS } from '@/lib/contracts-arc'
+import { arcChain, arcBrowserTransport } from '@/lib/contracts-arc'
 
 // Multi-chain: Arc (launchpad) + Base/ARB/ETH (Arc OTC payment spokes).
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
@@ -31,10 +31,7 @@ const wagmiConfig = createConfig({
       : []),
   ],
   transports: {
-    [arcChain.id]:
-      ARC_RPC_URLS.length > 1
-        ? fallback(ARC_RPC_URLS.map((u) => http(u, { timeout: 20_000 })))
-        : http(ARC_RPC_URLS[0] || arcChain.rpcUrls.default.http[0], { timeout: 20_000 }),
+    [arcChain.id]: arcBrowserTransport(),
     [base.id]: http(process.env.NEXT_PUBLIC_BASE_RPC || 'https://mainnet.base.org', {
       timeout: 20_000,
     }),

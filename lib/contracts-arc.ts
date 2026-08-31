@@ -200,6 +200,18 @@ export const ARC_RPC_URLS: string[] = (() => {
 
 export const ARC_RPC = ARC_RPC_URLS[0] || ''
 
+/** Browser wagmi transport. Same 4s / no-retry policy as arcPublicClient — a 20s hang on baracat is what made Buy wait ~30s before the wallet popup. */
+export function arcBrowserTransport() {
+  const urls = ARC_RPC_URLS.length ? ARC_RPC_URLS : [ARC_RPC].filter(Boolean)
+  if (urls.length > 1) {
+    return fallback(
+      urls.map((u) => http(u, { retryCount: 0, timeout: 4_000 })),
+      { shouldThrow: (error) => !isArcRpcInfraError(error) },
+    )
+  }
+  return http(urls[0] || ARC_BARACAT_RPC, { retryCount: 0, timeout: 4_000 })
+}
+
 /** Server-only RPC override. Empty → same as ARC_RPC. */
 export const ARC_SERVER_RPC = process.env.ARC_RPC || ARC_RPC
 
@@ -209,6 +221,11 @@ export const ARC_SERVER_RPC = process.env.ARC_RPC || ARC_RPC
  * estimation with a fixed cap under Arc's 30M block gas limit.
  */
 export const ARC_INSTANT_CREATE_GAS = 12_000_000n
+
+/** ERC-20 approve — skip public-RPC eth_estimateGas (typical ~46k). */
+export const ARC_ERC20_APPROVE_GAS = 80_000n
+/** Uni V3 swap via FeeRouter / ReferralRouter — skip estimateGas. Measured Instant fills sit well under this. */
+export const ARC_SWAP_GAS = 500_000n
 
 /**
  * Bonding-curve create (token + optional first-buy) — lighter than Instant, but still

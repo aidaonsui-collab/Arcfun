@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi, formatUnits, type Address } from 'viem'
 import { Loader2, AlertCircle, CheckCircle, ExternalLink } from 'lucide-react'
-import { ARC, ARC_CHAIN_ID, ARC_EXPLORER } from '@/lib/contracts-arc'
+import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_SWAP_GAS } from '@/lib/contracts-arc'
 import {
   arcSwapConfigured,
   arcSwapSpender,
@@ -197,10 +197,11 @@ export function ArcDexTradePanel({
             functionName: 'approve',
             args: [spender, inAmt],
             chainId: ARC_CHAIN_ID,
+            gas: ARC_ERC20_APPROVE_GAS,
           })
           void refetchAllowance()
         }
-        setStatusMsg('Buying…')
+        setStatusMsg('Confirm in wallet…')
         // Same tier the quote resolved — cached, so this is not an extra RPC round trip.
         const poolFee = (await findArcPoolFee(token)) ?? undefined
         let call = buildArcBuy(token, inAmt, minOut, poolFee, refCode)
@@ -211,6 +212,7 @@ export function ArcDexTradePanel({
           functionName: call.functionName as never,
           args: call.args as never,
           chainId: call.chainId,
+          gas: ARC_SWAP_GAS,
         })
         setTxHash(hash)
         setStatusMsg('Confirming…')
@@ -226,10 +228,11 @@ export function ArcDexTradePanel({
             functionName: 'approve',
             args: [spender, inAmt],
             chainId: ARC_CHAIN_ID,
+            gas: ARC_ERC20_APPROVE_GAS,
           })
           void refetchAllowance()
         }
-        setStatusMsg('Selling…')
+        setStatusMsg('Confirm in wallet…')
         const poolFee = (await findArcPoolFee(token)) ?? undefined
         const call = buildArcSell(token, inAmt, minOut, address, poolFee)
         const hash = await writeContractAsync({
@@ -238,6 +241,7 @@ export function ArcDexTradePanel({
           functionName: call.functionName as never,
           args: call.args as never,
           chainId: call.chainId,
+          gas: ARC_SWAP_GAS,
         })
         setTxHash(hash)
         setStatusMsg('Confirming…')
