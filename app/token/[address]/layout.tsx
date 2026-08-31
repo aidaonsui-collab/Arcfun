@@ -6,14 +6,10 @@ import { isHiddenToken } from '@/lib/tokens'
 /**
  * ISR for the whole /token/[address] segment.
  *
- * The page itself is 'use client' and reads its address from useParams, so it holds no
- * server data — but without segment config a dynamic route is rendered per request, and every
- * hit was returning `private, no-cache, no-store` with `x-vercel-cache: MISS`. generateMetadata
- * below also does a KV read, which was therefore running on every single request.
- *
- * 60s of shared CDN cache makes the shell a static asset and collapses that KV read to at most
- * one per token per minute. Live prices are client-fetched after hydration, so nothing
- * user-visible goes stale.
+ * The page SSRs a catalog snapshot (name / symbol / image / last price) from KV when the
+ * token is already listed — first HTML is the hero, not a spinner. generateMetadata also
+ * does a KV read. 60s of shared CDN cache collapses both to at most one per token per
+ * minute. Live price still client-polls `/api/arc/[token]` after hydration.
  */
 export const revalidate = 60
 
