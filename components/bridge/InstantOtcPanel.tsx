@@ -24,6 +24,7 @@ import {
   ERC20_MIN_ABI,
   fetchOtcOffers,
   fetchOtcFeeBps,
+  mapApiOffers,
   quoteFill,
   premiumLabel,
   parseUsdc6,
@@ -162,36 +163,6 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
   useEffect(() => {
     void refreshRobin()
   }, [refreshRobin])
-
-  const mapApiOffers = (
-    raw: Array<{
-      offerId: `0x${string}`
-      maker: `0x${string}`
-      sellerPayment: `0x${string}`
-      premiumBps: number
-      remaining: string | number
-      active: boolean
-      allInMult?: number
-      available?: string | number
-      hasPending?: boolean
-    }>,
-  ): OtcOffer[] =>
-    raw.map((o) => {
-      const remaining = BigInt(o.remaining ?? 0)
-      const available = o.available != null ? BigInt(o.available) : remaining
-      return {
-        offerId: o.offerId,
-        maker: o.maker,
-        sellerPayment: o.sellerPayment,
-        premiumBps: o.premiumBps,
-        remaining,
-        active: o.active,
-        allInMult: o.allInMult,
-        available,
-        pendingReserved: 0n,
-        hasPending: !!o.hasPending,
-      }
-    })
 
   const refresh = useCallback(async () => {
     if (!enabled) return
