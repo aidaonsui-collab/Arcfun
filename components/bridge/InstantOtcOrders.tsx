@@ -109,8 +109,12 @@ export function InstantOtcOrders() {
 
   useEffect(() => {
     void refresh()
-    // 30s — full OfferCreated scan is heavy; aggressive polls amplify 429s and empty lists.
-    const t = setInterval(() => void refresh(), 30_000)
+    // 10s (was 30s) — faster feedback while testing fills against the just-restored settlement
+    // keeper. The original 30s comment's concern (full OfferCreated scan is heavy; aggressive
+    // polls amplify 429s and empty lists) is still real — this trades some of that margin away
+    // deliberately. If 429s/empty-list flicker show up under real traffic, that's the tradeoff
+    // to revisit first, not a new bug.
+    const t = setInterval(() => void refresh(), 10_000)
     return () => clearInterval(t)
   }, [refresh])
 
