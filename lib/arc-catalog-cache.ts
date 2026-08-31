@@ -127,6 +127,20 @@ export async function getArcHomeCatalog(): Promise<CatalogSnapshot> {
   return rebuild()
 }
 
+/** KV/memory lookup only — never kicks a catalog rebuild. Token pages and the cheap
+ *  `/api/arc/[token]` path use this so first HTML does not wait on Instant RPC. */
+export async function getArcCatalogToken(address: string): Promise<PoolToken | null> {
+  const needle = (address || '').toLowerCase()
+  if (!needle) return null
+  const snap = memory ?? (await readKv())
+  if (!snap?.tokens?.length) return null
+  return (
+    snap.tokens.find((t) =>
+      [t.coinType, t.poolId, t.id].some((v) => (v || '').toLowerCase() === needle),
+    ) ?? null
+  )
+}
+
 export async function invalidateArcHomeCatalog(): Promise<void> {
   memory = null
   try {
