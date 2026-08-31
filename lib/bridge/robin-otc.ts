@@ -284,6 +284,39 @@ export type OtcOffer = {
   hasPending?: boolean
 }
 
+/** Raw shape /api/otc/offers returns per offer (Goldsky or KV-indexer sourced). */
+export type ApiOffer = {
+  offerId: Hex
+  maker: Address
+  sellerPayment: Address
+  premiumBps: number
+  remaining: string | number
+  active: boolean
+  allInMult?: number
+  available?: string | number
+  hasPending?: boolean
+}
+
+/** Shared with InstantOtcOrders.tsx — same cached book, same shape, one mapping to maintain. */
+export function mapApiOffers(raw: ApiOffer[]): OtcOffer[] {
+  return raw.map((o) => {
+    const remaining = BigInt(o.remaining ?? 0)
+    const available = o.available != null ? BigInt(o.available) : remaining
+    return {
+      offerId: o.offerId,
+      maker: o.maker,
+      sellerPayment: o.sellerPayment,
+      premiumBps: o.premiumBps,
+      remaining,
+      active: o.active,
+      allInMult: o.allInMult,
+      available,
+      pendingReserved: 0n,
+      hasPending: !!o.hasPending,
+    }
+  })
+}
+
 /** 'locked' = keeper began Arc delivery; self-refund blocked until unlock/settle. */
 export type OtcFillStatus = 'none' | 'pending' | 'locked' | 'settled' | 'refunded'
 

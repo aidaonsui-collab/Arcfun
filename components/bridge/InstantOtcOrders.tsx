@@ -22,6 +22,7 @@ import {
   fetchRecentSales,
   fetchFillById,
   fetchMakerOffers,
+  mapApiOffers,
   loadLocalFillIds,
   formatUsdc6,
   premiumLabel,
@@ -129,7 +130,42 @@ export function InstantOtcOrders() {
     if (offersInFlight.current) return
     offersInFlight.current = true
     try {
-      const makerOffers = await fetchMakerOffers(address)
+      // Fast path: the same Goldsky/KV-cached book InstantOtcPanel.tsx's Trade tab already
+      // reads (GET /api/otc/offers, sub-second) — filtered to this wallet's own maker address
+      // client-side. A live offer with real remaining inventory (confirmed on-chain: 0xdf11...,
+      // maker == this wallet, active, 1 USDC remaining) was showing "No offers from this
+      // wallet" because fetchMakerOffers's live scan (see below) hadn't finished, or hadn't
+      // even been given the chance to under the old 90s/Promise.all setup — same class of bug
+      // as the purchases one, same fix: don't make the fast, common case wait on the slow one.
+      //
+      // fetchMakerOffers itself still exists and is correct (verified: it does eventually
+      // return the right offer) — it's just genuinely a live ~4.1M-block Arc scan every call
+      // (confirmed: still running past 60s), never cached, never incremental. Only fall back to
+      // it when the indexed API is actually down, not merely reporting zero offers for this
+      // wallet — same distinction InstantOtcPanel.tsx's own Trade-tab refresh already draws.
+      let makerOffers: OtcOffer[] = []
+      let indexOk = false
+      try {
+        const res = await fetch('/api/otc/offers', { cache: 'no-store' })
+        if (res.ok) {
+          const data = (await res.json()) as {
+            ok?: boolean
+            offers?: Parameters<typeof mapApiOffers>[0]
+          }
+          indexOk = data.ok !== false
+          if (data.offers?.length) {
+            makerOffers = mapApiOffers(data.offers).filter(
+              (o) => o.maker.toLowerCase() === address.toLowerCase(),
+            )
+          }
+        }
+      } catch {
+        /* index optional — falls through to indexOk === false below */
+      }
+      if (!indexOk) {
+        makerOffers = await fetchMakerOffers(address)
+      }
+
       setOffers(makerOffers)
       try {
         const makerSales = await fetchRecentSales({
@@ -157,11 +193,11 @@ export function InstantOtcOrders() {
 
   useEffect(() => {
     void refreshOffersAndSales()
-    // 90s, not 10s — this scan alone can take 30s-2min (see comment above); polling it as often
-    // as purchases would mean it's *always* in flight, back-to-back, for no benefit (your own
-    // posted offers don't change on a 10s cadence). The Refresh button below covers "I want this
-    // now" for both.
-    const t = setInterval(() => void refreshOffersAndSales(), 90_000)
+    // 10s too, now that the fast path above is the default — the indexed API read is cheap
+    // (same one the Trade tab already polls this often). Only the rare live-scan fallback is
+    // slow, and it's naturally self-limiting: offersInFlight guards against a slow fallback
+    // pass overlapping with the next tick.
+    const t = setInterval(() => void refreshOffersAndSales(), 10_000)
     return () => clearInterval(t)
   }, [refreshOffersAndSales])
 
