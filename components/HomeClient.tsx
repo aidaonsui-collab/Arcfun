@@ -58,7 +58,7 @@ export function HomeClient({
 
   const load = useCallback(async () => {
     try {
-      const res = await coalescedFetch('/api/arc/tokens')
+      const res = await coalescedFetch(`/api/arc/tokens?t=${Date.now()}`)
       if (res.ok) {
         const data = (await res.json()) as { tokens?: PoolToken[] }
         const next = data.tokens ?? []
@@ -72,12 +72,12 @@ export function HomeClient({
   }, [])
 
   useEffect(() => {
-    if (initialTokens.length === 0) void load()
+    void load()
     const id = setInterval(() => {
       if (document.visibilityState === 'visible') load()
     }, 20_000)
     return () => clearInterval(id)
-  }, [load, initialTokens.length])
+  }, [load])
 
   const filtered = useMemo(() => {
     let list = [...tokens]
