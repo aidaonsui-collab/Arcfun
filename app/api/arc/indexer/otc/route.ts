@@ -78,6 +78,21 @@ export async function GET(req: NextRequest) {
       state.otcCursor = scannedTo.toString()
     }
 
+    // Empty book at head usually means a prior cursor skip, not "no offers ever".
+    // Nudge back 1M blocks at most once per 6h so OfferCreated can be re-ingested.
+    const knownBefore = await listOtcOffers()
+    if (knownBefore.length === 0) {
+      const last = state.otcEmptyRescanAt || 0
+      if (Date.now() - last > 6 * 60 * 60 * 1000) {
+        const back = head > 1_000_000n ? head - 1_000_000n : OTC_FLOOR
+        const cur = BigInt(state.otcCursor || '0')
+        if (cur > back) {
+          state.otcCursor = back.toString()
+          state.otcEmptyRescanAt = Date.now()
+        }
+      }
+    }
+
     // Refresh remaining/active for known offers (cheap offers() reads)
     const known = await listOtcOffers()
     let refreshed = 0
