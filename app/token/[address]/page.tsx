@@ -20,6 +20,7 @@ import { coalescedFetch } from '@/lib/coalesced-fetch'
 import { priceChangeFromTrades } from '@/lib/candles'
 import { telegramHref, twitterHref, websiteHref } from '@/lib/social-href'
 import { cdnImage } from '@/lib/cdn-image'
+import { TokenListingEdit } from '@/components/TokenListingEdit'
 
 const TradingViewChart = nextDynamic(() => import('@/components/TradingViewChart'), {
   ssr: false,
@@ -375,6 +376,11 @@ export default function TokenPage() {
                 </div>
               </div>
             </div>
+            <TokenListingEdit
+              token={token}
+              pool={pool}
+              onSaved={(patch) => setPool((p) => (p ? { ...p, ...patch } : p))}
+            />
 
             {/* FDV + change */}
             <div className="flex items-end gap-4 pt-1">
