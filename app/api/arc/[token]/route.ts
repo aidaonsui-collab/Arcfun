@@ -1,14 +1,19 @@
 /**
  * GET /api/arc/[token] — PoolToken for the token page.
  *
- * Fast path: home-catalog KV row + optional Uni slot0 overlay (capped). No factory
- * scan, no liquidity, no burned%. Cold path (not in catalog yet) falls back to a
- * live factory lookup without the extra RPC legs. Liquidity/burned still show as
- * "—" until a later enrich; first byte should not wait on them (~5.3s measured).
+ * Default: catalog KV row + optional Uni slot0 overlay (800ms cap). No factory scan.
+ * `?full=1`: also liquidity + burned% (5s cap). The token page loads that once after
+ * first paint so those tiles fill in without blocking the hero.
  */
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { type Address } from 'viem'
-import { arcMarketCapUsd, fetchArcPoolToken, getArcLivePriceUsdc } from '@/lib/arc-instant-tokens'
+import {
+  arcMarketCapUsd,
+  fetchArcPoolToken,
+  getArcLivePriceUsdc,
+  getArcPoolLiquidityUsdc,
+} from '@/lib/arc-instant-tokens'
+import { fetchTokenBurnedPct } from '@/lib/evm-holders'
 import { getArcCatalogToken } from '@/lib/arc-catalog-cache'
 import { arcInstantEnabled, arcCurveEnabled } from '@/lib/contracts-arc'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
@@ -25,6 +30,7 @@ const TOKEN_API_CACHE = {
 }
 
 const SLOT0_MS = 800
+const STATS_MS = 5_000
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
   return new Promise((resolve) => {
@@ -54,7 +60,23 @@ async function overlayLivePrice(pool: PoolToken, token: Address): Promise<PoolTo
   }
 }
 
-export async function GET(_req: Request, { params }: { params: Promise<{ token: string }> }) {
+async function overlayPoolStats(pool: PoolToken, token: Address): Promise<PoolToken> {
+  const uni = pool.instantMeta?.uniPool as Address | undefined
+  const [liq, burnedPct] = await Promise.all([
+    withTimeout(getArcPoolLiquidityUsdc(token, uni, pool.currentPrice), STATS_MS),
+    withTimeout(fetchTokenBurnedPct(token), STATS_MS),
+  ])
+  let next = pool
+  if (liq) {
+    next = { ...next, liquidityUsd: liq.tvlUsd, liquidityQuoteUsd: liq.usdc }
+  }
+  if (burnedPct != null) {
+    next = { ...next, burnedPct }
+  }
+  return next
+}
+
+export async function GET(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
   if (!isPlausibleEvmAddress(token)) {
     return NextResponse.json({ error: 'invalid token' }, { status: 400 })
@@ -65,23 +87,22 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
   if (!arcInstantEnabled() && !arcCurveEnabled()) {
     return NextResponse.json({ error: 'arc launchpad not configured' }, { status: 404 })
   }
+  const full = req.nextUrl.searchParams.get('full') === '1'
   try {
     const addr = token as Address
-    const cached = await getArcCatalogToken(addr)
-    if (cached) {
-      const pool = await overlayLivePrice(cached, addr)
-      return jsonSafe(pool, { headers: TOKEN_API_CACHE })
-    }
-
-    let pool = await fetchArcPoolToken(addr)
-    if (!pool) return NextResponse.json({ error: 'not found' }, { status: 404 })
-    try {
-      const { enrichTokensWithIndexVolume } = await import('@/lib/arc-indexer/run')
-      ;[pool] = await enrichTokensWithIndexVolume([pool])
-    } catch {
-      /* indexer optional */
+    let pool = await getArcCatalogToken(addr)
+    if (!pool) {
+      pool = await fetchArcPoolToken(addr)
+      if (!pool) return NextResponse.json({ error: 'not found' }, { status: 404 })
+      try {
+        const { enrichTokensWithIndexVolume } = await import('@/lib/arc-indexer/run')
+        ;[pool] = await enrichTokensWithIndexVolume([pool])
+      } catch {
+        /* indexer optional */
+      }
     }
     pool = await overlayLivePrice(pool, addr)
+    if (full) pool = await overlayPoolStats(pool, addr)
     return jsonSafe(pool, { headers: TOKEN_API_CACHE })
   } catch (e) {
     console.error('[api/arc/token]', summarizeRpcError(e))
