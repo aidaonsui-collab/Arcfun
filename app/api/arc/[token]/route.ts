@@ -52,8 +52,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
     // RPC chain (pool + liquidity + burnedPct) live — measured ~5.3s cold. This pool/liquidity
     // data does not move meaningfully faster than that; syncTradesToHead's own SYNC_FRESH_MS
     // (lib/arc-trades.ts) uses the same order of magnitude for the trade tape.
+    // CDN-Cache-Control / Vercel-CDN-Cache-Control: Vercel strips s-maxage from Cache-Control
+    // on dynamic routes, so the catalog route stamps all three. Same pattern here (s-maxage=20,
+    // swr=40 — live price/liq, tighter than the home catalog's swr=300).
     return jsonSafe(pool, {
-      headers: { 'Cache-Control': 'public, s-maxage=20, stale-while-revalidate=40' },
+      headers: {
+        'Cache-Control': 'public, s-maxage=20, stale-while-revalidate=40',
+        'CDN-Cache-Control': 'public, s-maxage=20, stale-while-revalidate=40',
+        'Vercel-CDN-Cache-Control': 'public, s-maxage=20, stale-while-revalidate=40',
+      },
     })
   } catch (e) {
     console.error('[api/arc/token]', summarizeRpcError(e))
