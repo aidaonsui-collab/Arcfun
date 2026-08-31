@@ -11,10 +11,6 @@
     {
       "path": "/api/arc/blitz/bot",
       "schedule": "*/1 * * * *"
-    },
-    {
-      "path": "/api/arc/telegram/launches",
-      "schedule": "* * * * *"
     }
   ]
 }
