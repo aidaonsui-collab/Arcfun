@@ -14,7 +14,7 @@ import {
   usePublicClient,
 } from 'wagmi'
 import { isAddress, type Address } from 'viem'
-import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
+import { ARC_CHAIN_ID, arcPublicClient } from '@/lib/contracts-arc'
 import {
   ROBIN_OTC_LIQUIDITY,
   ARC_USDC,
@@ -367,19 +367,14 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
     setLastFill(null)
   }
 
-  const makeArcPublicClient = async () => {
-    const { createPublicClient, http } = await import('viem')
-    const rpc = process.env.NEXT_PUBLIC_ARC_RPC || process.env.ARC_RPC || ''
-    return createPublicClient({
-      chain: {
-        id: ARC_CHAIN_ID,
-        name: 'Arc',
-        nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
-        rpcUrls: { default: { http: [rpc] } },
-      },
-      transport: http(rpc),
-    })
-  }
+  // Was its own createPublicClient({ transport: http(process.env.NEXT_PUBLIC_ARC_RPC || '') }) —
+  // that env var is deliberately left unset in production (lib/contracts-arc.ts falls back to
+  // baracat/theleak/arc-scan instead), so this always resolved to http('') and threw "No URL was
+  // provided to the Transport" the moment anyone tried to post an offer. lib/bridge/robin-otc.ts
+  // hit the identical bug on its read side once already (see its own arcClient() comment) and
+  // fixed it by switching to the shared arcPublicClient(), which always has a working fallback
+  // list regardless of env config — same fix here instead of a second hand-rolled client.
+  const makeArcPublicClient = async () => arcPublicClient()
 
   const setMax = () => {
     if (!selected) return
