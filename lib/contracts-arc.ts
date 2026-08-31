@@ -278,7 +278,7 @@ export const arcChain = defineChain({
   id: ARC_CHAIN_ID,
   name: ARC_IS_TESTNET ? 'Arc Testnet' : 'Arc',
   nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 18 },
-  rpcUrls: { default: { http: ARC_RPC ? [ARC_RPC] : [] } },
+  rpcUrls: { default: { http: ARC_RPC_URLS.length ? ARC_RPC_URLS : [ARC_BARACAT_RPC] } },
   ...(ARC_EXPLORER
     ? {
         blockExplorers: {

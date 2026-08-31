@@ -5,13 +5,7 @@
  * Restyled to match redesign: sticky card, buy/sell pill, large amount, USDC chip.
  */
 import { useState, useEffect, useRef } from 'react'
-import {
-  useAccount,
-  useReadContract,
-  useSwitchChain,
-  useWriteContract,
-  useWaitForTransactionReceipt,
-} from 'wagmi'
+import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi, formatUnits, type Address } from 'viem'
 import { Loader2, AlertCircle, CheckCircle, ExternalLink } from 'lucide-react'
 import { ARC, ARC_CHAIN_ID, ARC_EXPLORER } from '@/lib/contracts-arc'
@@ -32,6 +26,7 @@ import { formatToken, parseToken } from '@/lib/token-format'
 import { getIncomingReferralCode } from '@/lib/crucible'
 import { tileGradient } from '@/lib/ui-format'
 import { cdnImage } from '@/lib/cdn-image'
+import { WalletButton } from '@/components/WalletButton'
 
 const SLIPPAGE_BPS = 500 // 5% — thin Instant single-sided ranges
 const BUY_PRESETS = [25, 100, 500]
@@ -74,7 +69,6 @@ export function ArcDexTradePanel({
   onTraded?: () => void
 }) {
   const { address, chainId, isConnected } = useAccount()
-  const { switchChain, isPending: switching } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
 
   const [mode, setMode] = useState<'buy' | 'sell'>('buy')
@@ -100,6 +94,7 @@ export function ArcDexTradePanel({
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
+    chainId: ARC_CHAIN_ID,
     query: { enabled: !!address, refetchInterval: 15_000 },
   })
 
@@ -108,6 +103,7 @@ export function ArcDexTradePanel({
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
+    chainId: ARC_CHAIN_ID,
     query: { enabled: !!address, refetchInterval: 15_000 },
   })
 
@@ -115,6 +111,7 @@ export function ArcDexTradePanel({
     address: token,
     abi: erc20Abi,
     functionName: 'decimals',
+    chainId: ARC_CHAIN_ID,
     query: { staleTime: 3_600_000 },
   })
   const tokDec = Number(tokenDecimals ?? ARC.TOKEN_DECIMALS) || ARC.TOKEN_DECIMALS
@@ -125,6 +122,7 @@ export function ArcDexTradePanel({
     abi: erc20Abi,
     functionName: 'allowance',
     args: address ? [address, spender] : undefined,
+    chainId: ARC_CHAIN_ID,
     query: { enabled: !!address },
   })
 
@@ -303,18 +301,8 @@ export function ArcDexTradePanel({
 
   return (
     <div className="rounded-[28px] border border-hair bg-[#0e1016] p-3">
-      {!isConnected ? (
-        <p className="text-sm text-t3 text-center py-10">Connect wallet to trade</p>
-      ) : wrongChain ? (
-        <button
-          type="button"
-          onClick={() => switchChain({ chainId: ARC_CHAIN_ID })}
-          disabled={switching}
-          className="w-full h-14 rounded-2xl bg-amber-500 text-black text-[17px] font-bold flex items-center justify-center gap-2"
-        >
-          {switching ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertCircle className="w-4 h-4" />}
-          Switch to Arc
-        </button>
+      {!isConnected || wrongChain ? (
+        <WalletButton variant="panel" />
       ) : (
         <>
           <div className="rounded-[22px] bg-[#16181f] p-4">

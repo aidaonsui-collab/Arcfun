@@ -7,8 +7,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { FormEvent, useEffect, useState } from 'react'
-import { useAccount, useBalance, useConnect, useDisconnect } from 'wagmi'
-import { formatUnits } from 'viem'
+import { useAccount, useConnect } from 'wagmi'
 import {
   ArrowLeftRight,
   BookOpen,
@@ -24,38 +23,17 @@ import {
 } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
 import { CrucibleChip } from '@/components/CrucibleChip'
-import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
-
-const SUPPORTED_CHAIN_IDS = new Set([ARC_CHAIN_ID])
-
-function short(addr: string) {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`
-}
-
-function fmtBal(raw: bigint | undefined): string {
-  if (raw == null) return '—'
-  // Arc native USDC is 18dp; ERC-20 USDC is 6dp — balance here is native gas token.
-  const n = Number(formatUnits(raw, 18))
-  if (!Number.isFinite(n)) return '—'
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
-}
+import { WalletButton } from '@/components/WalletButton'
+import { connectToArc } from '@/lib/arc-wallet'
+import { ARC } from '@/lib/contracts-arc'
 
 export function SiteHeader() {
   const router = useRouter()
   const pathname = usePathname()
-  const { address, isConnected, chainId } = useAccount()
+  const { address, isConnected } = useAccount()
   const { connect, connectors, isPending } = useConnect()
-  const { disconnect } = useDisconnect()
-  const onArc = isConnected && chainId === ARC_CHAIN_ID
-  const wrongChain = isConnected && chainId != null && !SUPPORTED_CHAIN_IDS.has(chainId)
   const [q, setQ] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
-
-  const { data: bal } = useBalance({
-    address,
-    chainId: ARC_CHAIN_ID,
-    query: { enabled: !!address && onArc },
-  })
 
   // Close sheet on route change
   useEffect(() => {
@@ -196,59 +174,20 @@ export function SiteHeader() {
         </Link>
 
         {isConnected && address ? (
-          <div className="flex items-center gap-2">
-            {!wrongChain && (
-              <Link
-                href={onStudio ? '/studio/me' : `/creator/${address}`}
-                className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
-                  pathname.startsWith('/portfolio') ||
-                  pathname.toLowerCase() === `/creator/${address.toLowerCase()}` ||
-                  (onStudio && pathname.startsWith('/studio/me'))
-                    ? 'border-lime-line bg-s2 text-white'
-                    : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
-                }`}
-              >
-                Profile
-              </Link>
-            )}
-            <button
-              type="button"
-              onClick={() => disconnect()}
-              className={`h-9 flex items-center gap-2.5 pl-3.5 pr-1.5 rounded-xl border text-sm font-semibold tabular-nums tracking-tightish transition-colors ${
-                wrongChain
-                  ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
-                  : 'border-hair bg-s2 text-white hover:bg-s3'
-              }`}
-              title={wrongChain ? 'Unsupported network — click to disconnect' : 'Disconnect'}
-            >
-              {wrongChain ? (
-                'Wrong network'
-              ) : (
-                <>
-                  {onArc ? (
-                    <span className="hidden xs:inline sm:inline">{fmtBal(bal?.value)}</span>
-                  ) : (
-                    <span className="text-t3 text-xs">{short(address)}</span>
-                  )}
-                  <span
-                    className="w-6 h-6 rounded-lg shrink-0"
-                    style={{ background: 'linear-gradient(140deg,#6DB3F2,#1D5FA8)' }}
-                    title={short(address)}
-                  />
-                </>
-              )}
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            disabled={isPending}
-            onClick={() => connect({ connector: connectors[0] })}
-            className="h-9 px-3 sm:px-4 rounded-xl bg-s2 border border-hair text-white text-sm font-semibold hover:bg-s3 disabled:opacity-50 transition-colors"
+          <Link
+            href={onStudio ? '/studio/me' : `/creator/${address}`}
+            className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
+              pathname.startsWith('/portfolio') ||
+              pathname.toLowerCase() === `/creator/${address.toLowerCase()}` ||
+              (onStudio && pathname.startsWith('/studio/me'))
+                ? 'border-lime-line bg-s2 text-white'
+                : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
+            }`}
           >
-            {isPending ? '…' : 'Connect'}
-          </button>
-        )}
+            Profile
+          </Link>
+        ) : null}
+        <WalletButton />
 
         <span className="hidden" aria-hidden>
           {ARC.USDC}
@@ -321,14 +260,14 @@ export function SiteHeader() {
                   disabled={isPending}
                   onClick={() => {
                     setMenuOpen(false)
-                    connect({ connector: connectors[0] })
+                    connectToArc(connect, connectors)
                   }}
                   className="w-full flex items-center gap-4 px-5 h-[68px] border-b border-hair2 text-[17px] font-semibold text-white active:bg-white/5 transition-colors disabled:opacity-50"
                 >
                   <span className="w-11 h-11 shrink-0 rounded-full border border-hair flex items-center justify-center text-t2">
                     <CircleUser className="w-5 h-5" />
                   </span>
-                  Profile
+                  {isPending ? 'Connecting…' : 'Connect wallet'}
                 </button>
               )}
               {navRow('/otc', 'Arc OTC', ArrowLeftRight)}
