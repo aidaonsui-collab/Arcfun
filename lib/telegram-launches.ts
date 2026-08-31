@@ -140,7 +140,7 @@ async function saddAll(members: string[]): Promise<void> {
   const CHUNK = 64
   for (let i = 0; i < members.length; i += CHUNK) {
     const chunk = members.slice(i, i + CHUNK)
-    if (chunk.length) await kv.sadd(POSTED_KEY, ...chunk)
+    if (chunk.length) await kv.sadd(POSTED_KEY, chunk[0], ...chunk.slice(1))
   }
 }
 
@@ -153,7 +153,7 @@ export async function runTelegramLaunchTick(): Promise<TelegramLaunchTickResult>
   }
 
   const { tokens } = await getArcHomeCatalog()
-  const raw = await kv.smembers<string>(POSTED_KEY)
+  const raw = await kv.smembers<string[]>(POSTED_KEY)
   const postedSet = new Set((Array.isArray(raw) ? raw : []).map((s) => String(s).toLowerCase()))
 
   if (postedSet.size === 0) {
