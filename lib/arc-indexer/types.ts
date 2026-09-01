@@ -43,6 +43,18 @@ export type IndexedOtcOffer = {
   active: boolean
   createdBlock?: number
   updatedAt: number
+  /**
+   * First time this offer was observed at remaining === 0, ms epoch. remaining hits 0 whenever
+   * ALL free inventory is under an in-flight hard reserve — not just when an offer is genuinely
+   * exhausted or cancelled (cancelOffer() does not flip `active` false either, so that field
+   * can't distinguish the two cases yet). Cleared the moment remaining is read as > 0 again.
+   * Only remove an offer from the index once this has held for OTC_OFFER_ZERO_REMOVE_MS —
+   * comfortably past the 30m default reservation TTL — so a live reservation resolving (settle
+   * or self-refund) can't get an offer permanently deleted from the discoverable set for a
+   * transient zero read. Once removed, nothing re-adds it: the scan cursor has already moved
+   * past its OfferCreated block.
+   */
+  remainingZeroSince?: number
 }
 
 export type IndexerState = {
