@@ -15,6 +15,7 @@ import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
 import { erc20Abi as ERC20_ABI } from 'viem'
 import { getArcTokenMeta, getArcTokenMetas } from './arc-token-meta'
 import { type PoolToken } from './tokens'
+import { quoteSymbolForFactory } from './arc-rwa-assets'
 import { summarizeRpcError } from './rpc-error'
 import { attachLaunchCreatedAt } from './arc-launch-created'
 
@@ -374,11 +375,11 @@ function toPoolToken(
     instantMeta: {
       uniPool: p.uniPool,
       positionId: p.positionId.toString(),
-      isMeme: true,
-      isRwaBacked: false,
+      isMeme: quoteSymbolForFactory(factory) === 'USDC',
+      isRwaBacked: quoteSymbolForFactory(factory) !== 'USDC',
       isMarginBacked: false,
       dexId: 0,
-      quote: 'USDC',
+      quote: quoteSymbolForFactory(factory),
     },
     dexVenue: 'v3',
     virtualSuiReserves: launchVirtualQuote,

@@ -21,8 +21,9 @@ import {
 } from '@/lib/contracts-arc'
 import {
   buildCreateTokenMemeInstantArc,
-  parseArcUsdc,
+  parseArcQuote,
 } from '@/lib/arc-instant-launchpad'
+import { liveRwaQuoteAssets, pendingRwaQuoteAssets, rwaAssetById } from '@/lib/arc-rwa-assets'
 import {
   buildCreateTokenReflectionArc,
   ARC_REFLECTION_CREATE_GAS,
@@ -84,6 +85,8 @@ export function ArcCreateForm({
   const { signMessageAsync } = useSignMessage()
 
   const [launchType, setLaunchType] = useState<LaunchType>('instant')
+  /** Instant quote asset. `usdc` is the live factory; an RWA id is plug-and-play. */
+  const [quoteId, setQuoteId] = useState('usdc')
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
   const [description, setDescription] = useState('')
@@ -118,6 +121,10 @@ export function ArcCreateForm({
   /** Public creates on by default; set NEXT_PUBLIC_ARC_LAUNCHES_ENABLED=0 to pause. */
   const launchesLive = arcLaunchesEnabled()
   const busy = step !== 'idle' && step !== 'done'
+  const liveRwas = liveRwaQuoteAssets()
+  const pendingRwas = pendingRwaQuoteAssets()
+  const rwaQuote = quoteId !== 'usdc' ? rwaAssetById(quoteId) : null
+  const quoteSymbol = rwaQuote?.symbol || 'USDC'
   const isReflection = launchType === 'reflection'
   const rewardsOk =
     !rewardsWallet.trim() || isAddress(rewardsWallet.trim() as Address)
@@ -250,17 +257,23 @@ export function ArcCreateForm({
       let token: Address | undefined
       let pool: Address | undefined
 
-      const firstBuyUsdc6 =
-        buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcUsdc(firstBuy) : 0n
-      const factory = isReflection ? ARC.REFLECTION_FACTORY : ARC.INSTANT_FACTORY
+      const quoteDecimals = rwaQuote?.decimals || 6
+      const firstBuyQuote =
+        buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcQuote(firstBuy, quoteDecimals) : 0n
+      const factory = isReflection
+        ? ARC.REFLECTION_FACTORY
+        : rwaQuote?.factory
+          ? (rwaQuote.factory as Address)
+          : ARC.INSTANT_FACTORY
+      const quoteToken = (rwaQuote?.address as Address) || ARC.USDC
 
-      if (firstBuyUsdc6 > 0n) {
+      if (firstBuyQuote > 0n) {
         setStep('approving')
         await writeContractAsync({
-          address: ARC.USDC,
+          address: quoteToken,
           abi: erc20Abi,
           functionName: 'approve',
-          args: [factory, firstBuyUsdc6],
+          args: [factory, firstBuyQuote],
           chainId: ARC_CHAIN_ID,
         })
       }
@@ -271,7 +284,7 @@ export function ArcCreateForm({
           name.trim(),
           symbol.trim(),
           rewardToken as Address,
-          firstBuyUsdc6,
+          firstBuyQuote,
           feeWei,
           rewardsAddr,
         )
@@ -293,9 +306,10 @@ export function ArcCreateForm({
         const call = buildCreateTokenMemeInstantArc(
           name.trim(),
           symbol.trim(),
-          firstBuyUsdc6,
+          firstBuyQuote,
           feeWei,
           rewardsAddr,
+          isReflection ? undefined : (rwaQuote?.factory as Address | undefined),
         )
         hash = await writeContractAsync({
           address: call.address,
@@ -486,12 +500,15 @@ export function ArcCreateForm({
                 </div>
               )
             }
-            const on = launchType === lt.key
+            const on = launchType === lt.key && (lt.key !== 'instant' || quoteId === 'usdc')
             return (
               <button
                 key={lt.key}
                 type="button"
-                onClick={() => setLaunchType(lt.key)}
+                onClick={() => {
+                  setLaunchType(lt.key)
+                  setQuoteId('usdc')
+                }}
                 className="relative text-left p-5 rounded-[22px] transition-all"
                 style={{
                   background: on ? '#000' : 'var(--s2)',
@@ -545,7 +562,71 @@ export function ArcCreateForm({
             )
           })}
 
-          {/* RWA paired tokens — always placeholder */}
+          {liveRwas.map((a) => {
+            const on = launchType === 'instant' && quoteId === a.id
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => {
+                  setLaunchType('instant')
+                  setQuoteId(a.id)
+                }}
+                className="relative text-left p-5 rounded-[22px] transition-all"
+                style={{
+                  background: on ? '#000' : 'var(--s2)',
+                  border: `1px solid ${on ? 'var(--lime)' : 'var(--hair)'}`,
+                  boxShadow: on
+                    ? '0 0 0 1px var(--lime), 0 14px 44px rgba(38,118,202,0.20)'
+                    : 'none',
+                }}
+              >
+                <span
+                  className="absolute top-4 right-4 w-[22px] h-[22px] rounded-full flex items-center justify-center text-xs font-extrabold border-[1.5px]"
+                  style={{
+                    background: on ? 'var(--lime)' : 'transparent',
+                    color: on ? '#fff' : 'transparent',
+                    borderColor: on ? 'var(--lime)' : 'rgba(255,255,255,0.18)',
+                  }}
+                >
+                  ✓
+                </span>
+                <span
+                  className="flex items-center justify-center w-[38px] h-[38px] rounded-xl text-[17px]"
+                  style={{ background: on ? 'var(--limeSoft)' : 'rgba(255,255,255,0.06)' }}
+                >
+                  🏛
+                </span>
+                <h3 className="mt-3.5 mb-1 text-[17px] font-semibold tracking-tightish text-white">
+                  {a.symbol} paired
+                </h3>
+                <p
+                  className="m-0 text-[13px] font-semibold"
+                  style={{ color: on ? 'var(--limeT)' : 'rgba(255,255,255,0.34)' }}
+                >
+                  Instant TOKEN/{a.symbol}
+                </p>
+                <span className="mt-3.5 flex flex-col gap-2">
+                  {[
+                    `Same Instant mint + LP lock, quoted in ${a.symbol}`,
+                    a.permissioned
+                      ? `Permissioned — wallet must be allowlisted for ${a.symbol}`
+                      : 'Same create transaction as USDC Instant',
+                  ].map((p) => (
+                    <span
+                      key={p}
+                      className="text-[13px] leading-snug"
+                      style={{ color: on ? 'rgba(255,255,255,0.58)' : 'rgba(255,255,255,0.34)' }}
+                    >
+                      — {p}
+                    </span>
+                  ))}
+                </span>
+              </button>
+            )
+          })}
+
+          {pendingRwas.length > 0 && liveRwas.length === 0 && (
           <div
             className="relative text-left p-5 rounded-[22px] opacity-60 cursor-not-allowed"
             style={{ background: 'var(--s2)', border: '1px solid var(--hair)' }}
@@ -566,7 +647,7 @@ export function ArcCreateForm({
               RWA paired tokens
             </h3>
             <p className="m-0 text-[13px] font-semibold" style={{ color: 'rgba(255,255,255,0.34)' }}>
-              Coming soon
+              {pendingRwas.map((a) => a.symbol).join(' · ')} — waiting on issuer + Instant factory
             </p>
             <span className="mt-3.5 flex flex-col gap-2">
               {['Pair a launch against a real-world asset', 'Same Instant mint + LP lock mechanics'].map((p) => (
@@ -576,6 +657,7 @@ export function ArcCreateForm({
               ))}
             </span>
           </div>
+          )}
         </div>
 
         <div className="mt-4">
@@ -583,7 +665,12 @@ export function ArcCreateForm({
             kind={isReflection ? 'reflect' : 'meme'}
             notionalUsdc={100}
             showSideToggle={false}
-            legacyOnChain={isReflection || !factoryUsesCrucibleLock(ARC.INSTANT_FACTORY)}
+            legacyOnChain={
+              isReflection ||
+              !factoryUsesCrucibleLock(
+                (rwaQuote?.factory as Address | undefined) || ARC.INSTANT_FACTORY,
+              )
+            }
           />
         </div>
 
@@ -754,7 +841,7 @@ export function ArcCreateForm({
           <div className="flex flex-col gap-0.5 pr-5">
             <span className="text-[15px] font-semibold tracking-tightish">Buy at launch</span>
             <span className="text-[13px] text-t3 leading-snug">
-              Bundle a USDC first buy into the create transaction.
+              Bundle a {quoteSymbol} first buy into the create transaction.
             </span>
           </div>
           <Toggle on={buyAtLaunch} onToggle={() => setBuyAtLaunch((v) => !v)} />
@@ -763,7 +850,7 @@ export function ArcCreateForm({
         {buyAtLaunch && (
           <div className="px-[18px] py-3.5 rounded-[18px] bg-s2 border border-lime-line mt-3 flex items-center justify-between gap-4">
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-semibold text-t3">First buy — USDC</span>
+              <span className="text-xs font-semibold text-t3">First buy — {quoteSymbol}</span>
               <input
                 value={firstBuy}
                 onChange={(e) => setFirstBuy(e.target.value.replace(/[^0-9.]/g, ''))}

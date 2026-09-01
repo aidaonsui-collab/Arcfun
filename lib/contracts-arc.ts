@@ -22,6 +22,7 @@
  */
 import { createPublicClient, createWalletClient, defineChain, fallback, http, isAddress, type Address } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
+import { rwaInstantFactories, rwaLockerForFactory } from './arc-rwa-assets'
 
 /** Strip whitespace / newlines from env addresses (Vercel `echo | env add` can bake in `\n`). */
 function envAddr(raw: string | undefined, fallback: Address): Address {
@@ -492,9 +493,16 @@ function uniqAddrs(addrs: readonly (Address | string | undefined | null)[]): Add
   return out
 }
 
-/** Current Instant factory first, then retired factories so existing tokens stay listed. */
+/** Current Instant factory first, then retired factories so existing tokens stay listed.
+ *  Live RWA Instant factories (TOKEN/USYC etc.) append here so catalog + indexer
+ *  pick them up the moment env points at a deployed factory. */
 export function instantCatalogFactories(): Address[] {
-  return uniqAddrs([ARC.INSTANT_FACTORY, ARC_INSTANT_FACTORY_PREV, ARC_INSTANT_FACTORY_LEGACY])
+  return uniqAddrs([
+    ARC.INSTANT_FACTORY,
+    ARC_INSTANT_FACTORY_PREV,
+    ARC_INSTANT_FACTORY_LEGACY,
+    ...rwaInstantFactories(),
+  ])
 }
 
 /**
@@ -508,6 +516,8 @@ export function instantLockerForFactory(factory?: string | null): Address {
   if (f === ARC_INSTANT_FACTORY_PREV.toLowerCase() || f === ARC_INSTANT_FACTORY_LEGACY.toLowerCase()) {
     return ARC_INSTANT_LOCKER_MONLOCK
   }
+  const rwaLocker = rwaLockerForFactory(factory)
+  if (rwaLocker) return rwaLocker
   return ARC.INSTANT_LOCKER
 }
 
@@ -554,8 +564,8 @@ export function arcReflectionEnabled(): boolean {
  * UI kill switch for public token creates (Meme / Instant + Reflection).
  *
  * Default **on**. Set `NEXT_PUBLIC_ARC_LAUNCHES_ENABLED=0` and redeploy to gate creates
- * as "Soon" again (RWA stays a placeholder either way). Contracts stay live; this only
- * gates the create form.
+ * as "Soon" again. RWA Instant cards stay Soon until their factory env is set
+ * (`lib/arc-rwa-assets.ts`). Contracts stay live; this only gates the create form.
  */
 export function arcLaunchesEnabled(): boolean {
   return process.env.NEXT_PUBLIC_ARC_LAUNCHES_ENABLED !== '0'
