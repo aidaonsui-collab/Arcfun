@@ -9,7 +9,7 @@ import { priceChangeFromTrades, sparkClosesFromTrades } from '@/lib/candles'
 import type { IndexedVolume } from './types'
 import { getVolume, setVolume } from './store'
 import { summarizeRpcError } from '@/lib/rpc-error'
-import { arcPublicClient } from '@/lib/contracts-arc'
+import { arcLogsClient } from '@/lib/contracts-arc'
 import { sumSwapUsd } from '@/lib/arc-trades'
 
 const tradesKvKey = (token: string) => `arcfun:trades:${token.toLowerCase()}`
@@ -56,7 +56,7 @@ export async function computeVolumeWindows(token: Address | string): Promise<Ind
   let upTo = prev?.volumeAllUpTo ? BigInt(prev.volumeAllUpTo) : null
 
   try {
-    const head = await arcPublicClient().getBlockNumber()
+    const head = await arcLogsClient().getBlockNumber()
     if (upTo != null && upTo < head) {
       volumeAll += await sumSwapUsd(token as Address, upTo + 1n, head)
       upTo = head

@@ -158,7 +158,19 @@ export function isArcRpcInfraError(err: unknown): boolean {
     // reverting and baracat was never tried. The endpoint is telling us outright that it did
     // NOT execute the call — that is an infra failure, not a revert.
     raw.includes('could not complete this request') ||
-    raw.includes('no answer was obtained')
+    raw.includes('no answer was obtained') ||
+    // theleak disables eth_getLogs. If that is not treated as infra, fallback() stops
+    // and the indexer never reaches arc-scan — live 2026-09-01: "failed all 1 log chunks"
+    // then trade cursors jumped over the gap and EVE's tape froze.
+    raw.includes('method disabled') ||
+    raw.includes('method not served') ||
+    raw.includes('method_not_served') ||
+    raw.includes('method not found') ||
+    raw.includes('-32005') ||
+    raw.includes('rate limit') ||
+    raw.includes('rate limiting') ||
+    raw.includes('capacity_exhausted') ||
+    raw.includes('too many requests')
   )
 }
 
@@ -669,6 +681,38 @@ export function arcReceiptClient() {
         : http(urls[0] || ARC_SCAN_RPC, { timeout: 3_000 }),
   })
   return _receiptClients[0]
+}
+
+function isGetLogsDisabledRpc(url: string): boolean {
+  return /theleak\.cx/i.test(url)
+}
+
+/**
+ * eth_getLogs client. theleak must not be in this list — it answers chainId then
+ * refuses getLogs, which used to abort the indexer before arc-scan was tried.
+ */
+const _logsClients: ReturnType<typeof createPublicClient>[] = []
+export function arcLogsClient() {
+  if (_logsClients[0]) return _logsClients[0]
+  const infura = serverInfuraRpc()
+  const seen = new Set<string>()
+  const urls: string[] = []
+  for (const u of [ARC_SCAN_RPC, ARC_BARACAT_RPC, infura, ...ARC_SERVER_RPC_CANDIDATES]) {
+    if (!u || isBannedArcRpc(u) || isGetLogsDisabledRpc(u) || seen.has(u)) continue
+    seen.add(u)
+    urls.push(u)
+  }
+  _logsClients[0] = createPublicClient({
+    chain: arcChain,
+    transport:
+      urls.length > 1
+        ? fallback(
+            urls.map((u) => http(u, { retryCount: 0, timeout: 4_000 })),
+            { shouldThrow: (error) => !isArcRpcInfraError(error) },
+          )
+        : http(urls[0] || ARC_SCAN_RPC, { timeout: 4_000 }),
+  })
+  return _logsClients[0]
 }
 
 /**
