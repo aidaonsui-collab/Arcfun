@@ -23,6 +23,7 @@ import {
   type PricePoint,
 } from './evm-trades'
 import { summarizeRpcError } from './rpc-error'
+import { staleTapeRewindFrom, shouldPersistScanCursor, tapeIsStaleTs } from './arc-trades-cursor'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 
@@ -30,8 +31,6 @@ const V3_SWAP = parseAbiItem(
   'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)',
 )
 type V3SwapLog = Log<bigint, number, false, typeof V3_SWAP, true>
-
-const T0 = parseAbiItem('function token0() view returns (address)')
 
 const CHUNK = 9_000n
 /**
@@ -111,18 +110,28 @@ async function resolvePool(
   token: Address,
 ): Promise<{ pool: Address; tokenIs0: boolean; tokenDecimals: number } | null> {
   try {
-    const client = arcPublicClient()
     const t = await fetchArcPoolToken(token)
     const pool = t?.instantMeta?.uniPool as Address | undefined
     if (!pool || pool === ZERO) return null
-    const [token0, tokenDecimals] = await Promise.all([
-      client.readContract({ address: pool, abi: [T0], functionName: 'token0' }) as Promise<Address>,
-      client
-        .readContract({ address: token, abi: erc20DecimalsAbi, functionName: 'decimals' })
-        .then((d) => Number(d))
-        .catch(() => ARC.TOKEN_DECIMALS) as Promise<number>,
-    ])
-    return { pool, tokenIs0: token0.toLowerCase() === token.toLowerCase(), tokenDecimals }
+    // Uni V3 token0 is the lower address. Don't eth_call token0() — Infura's
+    // eth_call quota is exhausted while getLogs still works, and a failed
+    // token0() used to abort the whole tape sync (resolvePool returned null).
+    const usdc = (ARC.USDC_ERC20 || ARC.USDC).toLowerCase()
+    const tokenIs0 = token.toLowerCase() < usdc
+    let tokenDecimals = ARC.TOKEN_DECIMALS
+    try {
+      tokenDecimals = Number(
+        await arcPublicClient().readContract({
+          address: token,
+          abi: erc20DecimalsAbi,
+          functionName: 'decimals',
+        }),
+      )
+      if (!Number.isFinite(tokenDecimals) || tokenDecimals <= 0) tokenDecimals = ARC.TOKEN_DECIMALS
+    } catch {
+      /* Instant tokens are 18 */
+    }
+    return { pool, tokenIs0, tokenDecimals }
   } catch {
     return null
   }
@@ -316,11 +325,9 @@ async function persistTrades(key: string, ascendingNew: EvmTrade[], newCursor: b
  * write the same cursor. Measured live before this fix: one page view, ~5s per request, four
  * times over. Now the first caller pays it once and the rest await that same call.
  */
-const REWIND_BLOCKS = 12_000n
-const REWIND_AFTER_SEC = 20 * 60
 const lastRewindAt = new Map<string, number>()
 
-/** Repair a cursor that jumped over a failed getLogs gap. */
+/** Repair a cursor that jumped over a failed/empty getLogs gap. */
 async function maybeRewindStaleCursor(
   client: ReturnType<typeof arcPublicClient>,
   key: string,
@@ -330,20 +337,34 @@ async function maybeRewindStaleCursor(
   head: bigint,
 ): Promise<void> {
   const prev = lastRewindAt.get(key)
-  if (prev != null && Date.now() - prev < 10 * 60_000) return
-  let newestTs = 0
+  if (prev != null && Date.now() - prev < 60_000) return
+  let last: EvmTrade | undefined
   try {
     const rows = (await kv.lrange<EvmTrade>(tradesKvKey(key), -1, -1)) ?? []
-    newestTs = rows[0]?.ts || 0
+    last = rows[0]
   } catch {
     return
   }
   const now = Math.floor(Date.now() / 1000)
-  if (newestTs > 0 && now - newestTs < REWIND_AFTER_SEC) return
+  const from = staleTapeRewindFrom({
+    head,
+    lastTradeBlock: last?.blockNumber || 0,
+    lastTradeTs: last?.ts || 0,
+    nowSec: now,
+  })
+  if (from == null) return
   lastRewindAt.set(key, Date.now())
-  const from = head > REWIND_BLOCKS ? head - REWIND_BLOCKS + 1n : 0n
   const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, head)
-  if (found.scannedTo >= from) await persistTrades(key, found.trades, found.scannedTo)
+  if (
+    shouldPersistScanCursor({
+      foundTrades: found.trades.length,
+      scannedTo: found.scannedTo,
+      from,
+      tapeIsStale: tapeIsStaleTs(last?.ts || 0, now),
+    })
+  ) {
+    await persistTrades(key, found.trades, found.scannedTo)
+  }
 }
 
 export async function syncTradesToHead(token: Address): Promise<void> {
@@ -368,6 +389,15 @@ export async function syncTradesToHead(token: Address): Promise<void> {
 
     const isColdStart = cursor === null
 
+    let newestTs = 0
+    try {
+      const tail = (await kv.lrange<EvmTrade>(tradesKvKey(key), -1, -1)) ?? []
+      newestTs = tail[0]?.ts || 0
+    } catch {
+      /* rewind still runs */
+    }
+    const stale = tapeIsStaleTs(newestTs)
+
     if (isColdStart) {
       // First time this store has ever seen this token — scan the FULL DEEP_BACKFILL_BLOCKS
       // window in one shot, all the way to `head`, not just a CATCHUP_MAX_BLOCKS-bounded slice of
@@ -380,17 +410,35 @@ export async function syncTradesToHead(token: Address): Promise<void> {
       // recent activity on a cold view.
       const from = head >= DEEP_BACKFILL_BLOCKS ? head - DEEP_BACKFILL_BLOCKS + 1n : 0n
       const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, head)
-      if (found.scannedTo >= from) await persistTrades(key, found.trades, found.scannedTo)
+      if (
+        shouldPersistScanCursor({
+          foundTrades: found.trades.length,
+          scannedTo: found.scannedTo,
+          from,
+          tapeIsStale: stale,
+        })
+      ) {
+        await persistTrades(key, found.trades, found.scannedTo)
+      }
     } else if (cursor! < head) {
       // Warm — only scan the gap since the last time anyone loaded this token, capped per
       // request so a token idle a long time just catches up over however many page loads it takes.
       const from = cursor! + 1n
       const to = from + CATCHUP_MAX_BLOCKS - 1n > head ? head : from + CATCHUP_MAX_BLOCKS - 1n
       const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, to)
-      if (found.scannedTo >= from) await persistTrades(key, found.trades, found.scannedTo)
+      if (
+        shouldPersistScanCursor({
+          foundTrades: found.trades.length,
+          scannedTo: found.scannedTo,
+          from,
+          tapeIsStale: stale,
+        })
+      ) {
+        await persistTrades(key, found.trades, found.scannedTo)
+      }
     }
-    // Cursor at head can still be a lie: a failed getLogs used to persist `to` anyway and
-    // skip the gap. If the tape's newest trade is older than ~20 min, rewind and rescan.
+    // Cursor at head can still be a lie: empty getLogs from a public RPC parks it there.
+    // Rewind from the last persisted fill, not a fixed 12k-block window.
     await maybeRewindStaleCursor(client, key, pool, tokenIs0, tokenDecimals, head)
   })
 
@@ -448,16 +496,22 @@ export async function fetchArcTrades(
     // past SYNC_FRESH_MS (6s), so a page that briefly shows stale/empty data self-heals on its
     // own next poll without any client change.
     let cursorExists = true
+    let newestTs = 0
     try {
       cursorExists = (await kv.get<string | number>(cursorKvKey(key))) != null
+      const tail = (await kv.lrange<EvmTrade>(tradesKvKey(key), -1, -1)) ?? []
+      newestTs = tail[0]?.ts || 0
     } catch {
       cursorExists = true // a failed check must not force the slow cold-start path
     }
 
-    if (cursorExists) {
-      scheduleTradesSync(token)
-    } else {
+    // Cold start has nothing to show. A stale tape (newest fill >20 min) used to
+    // return immediately and refresh in after() — if that scan used a public RPC
+    // that answered [], the page kept serving 3h-old trades forever (EVE 2026-09-01).
+    if (!cursorExists || tapeIsStaleTs(newestTs)) {
       await syncTradesToHead(token)
+    } else {
+      scheduleTradesSync(token)
     }
 
     // Stored ascending (oldest→newest); newest page (offset 0) is the tail of the list. Redis
