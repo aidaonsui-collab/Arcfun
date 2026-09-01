@@ -6,7 +6,8 @@
  * fetch after hydration, so that miss is a spinner in All launches.
  *
  * Serve the last good snapshot immediately (memory, then KV). Refresh in the background
- * when the snapshot is older than FRESH_MS. First-ever miss still waits on RPC.
+ * when the snapshot is older than FRESH_MS. An empty snapshot is treated as a miss and
+ * filled from the indexer so Instant RPC timeouts cannot blank the home grid.
  */
 import { after } from 'next/server'
 import { kv } from '@vercel/kv'
@@ -15,12 +16,21 @@ import { isHiddenToken } from './tokens'
 import { buildArcCatalog } from './arc-instant-tokens'
 import { applyListingMeta } from './arc-listing-overlay'
 import { getArcTokenMeta, getArcTokenMetas } from './arc-token-meta'
+import {
+  catalogId,
+  getIndexedPoolToken,
+  isUsableCatalogSnapshot,
+  mergeCatalogTokens,
+  poolTokensFromIndexed,
+} from './arc-catalog-from-index'
 import { bigintReplacer } from './json-safe'
 import { summarizeRpcError } from './rpc-error'
 
 const KV_KEY = 'arcfun:catalog:home:v5'
 const FRESH_MS = 20_000
-const KV_TTL_SEC = 10 * 60
+/** Last-good home grid. 10 minutes was short enough for an empty Instant
+ *  timeout to expire a real snapshot and latch `tokens: []`. */
+const KV_TTL_SEC = 24 * 60 * 60
 
 export type CatalogSnapshot = {
   tokens: PoolToken[]
@@ -44,7 +54,9 @@ function cloneJson<T>(v: T): T {
 async function readKv(): Promise<CatalogSnapshot | null> {
   try {
     const row = await kv.get<CatalogSnapshot>(KV_KEY)
-    if (row?.tokens && Array.isArray(row.tokens) && row.at) return row
+    // Empty `tokens: []` is a failed Instant pass that got persisted, not a
+    // pad with zero launches. Treat it as a miss so indexer fill can run.
+    if (isUsableCatalogSnapshot(row)) return row
   } catch {
     /* local / KV blip */
   }
@@ -56,6 +68,17 @@ async function writeKv(snap: CatalogSnapshot): Promise<void> {
     await kv.set(KV_KEY, snap, { ex: KV_TTL_SEC })
   } catch {
     /* best-effort */
+  }
+}
+
+async function fromIndexer(): Promise<CatalogSnapshot | null> {
+  try {
+    const tokens = await poolTokensFromIndexed()
+    if (!tokens.length) return null
+    return cloneJson({ tokens, source: 'arc-idx', at: Date.now() })
+  } catch (e) {
+    console.warn('[arc-catalog] indexer fill', summarizeRpcError(e))
+    return null
   }
 }
 
@@ -73,30 +96,34 @@ async function rebuild(): Promise<CatalogSnapshot> {
     } catch {
       /* indexer optional */
     }
-    const prev = memory ?? (await readKv())
+    const prev = isUsableCatalogSnapshot(memory) ? memory : await readKv()
     // A factory timeout (common after adding the Crucible Instant factory) used
     // to throw and freeze the last snapshot, so a just-launched token stayed off
     // home even though /token/[addr] worked. Keep tokens the rebuild missed.
     if (prev && prev.tokens.length > 0) {
-      const byId = new Map<string, PoolToken>()
-      for (const t of tokens) {
-        const id = (t.coinType || t.poolId || t.id || '').toLowerCase()
-        if (id) byId.set(id, t)
+      tokens = mergeCatalogTokens(tokens, prev.tokens.filter((t) => !isHiddenToken(catalogId(t))))
+    }
+    if (tokens.length === 0) {
+      const idx = await fromIndexer()
+      if (idx) {
+        tokens = idx.tokens
+        source = idx.source
       }
-      for (const t of prev.tokens) {
-        const id = (t.coinType || t.poolId || t.id || '').toLowerCase()
-        if (!id || byId.has(id) || isHiddenToken(id)) continue
-        byId.set(id, t)
-      }
-      tokens = [...byId.values()]
+    } else {
+      const idx = await fromIndexer()
+      if (idx?.tokens.length) tokens = mergeCatalogTokens(tokens, idx.tokens)
     }
     const snap: CatalogSnapshot = cloneJson({ tokens, source, at: Date.now() })
     // An empty rebuild is almost always a failed Instant/RPC pass, not a pad
     // with zero launches. Writing it would wipe the home grid until the next
     // successful read (the same [] vs failure collapse as fetchListings).
-    if (snap.tokens.length === 0 && prev && prev.tokens.length > 0) {
-      console.warn('[arc-catalog] empty rebuild, keeping last-known-good', prev.tokens.length)
-      return prev
+    if (snap.tokens.length === 0) {
+      if (prev && prev.tokens.length > 0) {
+        console.warn('[arc-catalog] empty rebuild, keeping last-known-good', prev.tokens.length)
+        return prev
+      }
+      console.warn('[arc-catalog] empty rebuild, not persisting')
+      return snap
     }
     memory = snap
     await writeKv(snap)
@@ -136,33 +163,42 @@ async function overlaySnapshot(snap: CatalogSnapshot): Promise<CatalogSnapshot> 
 }
 
 export async function getArcHomeCatalog(): Promise<CatalogSnapshot> {
-  const snap = memory ?? (await readKv())
-  if (snap) {
+  const snap = isUsableCatalogSnapshot(memory) ? memory : await readKv()
+  if (snap && snap.tokens.length > 0) {
     memory = snap
     if (Date.now() - snap.at > FRESH_MS) scheduleRefresh()
     return overlaySnapshot(snap)
   }
+  // No last-good snapshot (or a persisted empty one). Paint from the indexer
+  // immediately — Instant factory RPC is what emptied the grid — then refresh.
+  const idx = await fromIndexer()
+  if (idx && idx.tokens.length > 0) {
+    memory = idx
+    await writeKv(idx)
+    scheduleRefresh()
+    return overlaySnapshot(idx)
+  }
   return overlaySnapshot(await rebuild())
-}
-
-function catalogId(t: Pick<PoolToken, 'coinType' | 'poolId' | 'id'>): string {
-  return (t.coinType || t.poolId || t.id || '').toLowerCase()
 }
 
 /** KV/memory lookup only — never kicks a catalog rebuild. Token pages and the cheap
  *  `/api/arc/[token]` path use this so first HTML does not wait on Instant RPC. */
 export async function getArcCatalogToken(address: string): Promise<PoolToken | null> {
   const needle = (address || '').toLowerCase()
-  if (!needle) return null
-  const snap = memory ?? (await readKv())
-  if (!snap?.tokens?.length) return null
+  if (!needle || isHiddenToken(needle)) return null
+  const snap = isUsableCatalogSnapshot(memory) ? memory : await readKv()
   const hit =
-    snap.tokens.find((t) =>
+    snap?.tokens.find((t) =>
       [t.coinType, t.poolId, t.id].some((v) => (v || '').toLowerCase() === needle),
     ) ?? null
-  if (!hit) return null
+  if (hit) {
+    const meta = await getArcTokenMeta(needle).catch(() => null)
+    return applyListingMeta(hit, meta)
+  }
+  const indexed = await getIndexedPoolToken(needle).catch(() => null)
+  if (!indexed) return null
   const meta = await getArcTokenMeta(needle).catch(() => null)
-  return applyListingMeta(hit, meta)
+  return applyListingMeta(indexed, meta)
 }
 
 /**
@@ -172,7 +208,7 @@ export async function getArcCatalogToken(address: string): Promise<PoolToken | n
 export async function upsertArcCatalogToken(row: PoolToken): Promise<void> {
   const id = catalogId(row)
   if (!id || isHiddenToken(id)) return
-  const snap = memory ?? (await readKv())
+  const snap = isUsableCatalogSnapshot(memory) ? memory : await readKv()
   const tokens = snap?.tokens ? [...snap.tokens] : []
   const idx = tokens.findIndex((t) => catalogId(t) === id)
   if (idx >= 0) tokens[idx] = { ...tokens[idx], ...row }
