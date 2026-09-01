@@ -144,7 +144,16 @@ export function isArcRpcInfraError(err: unknown): boolean {
     raw.includes('bad gateway') ||
     raw.includes('gateway timeout') ||
     raw.includes('service unavailable') ||
-    /\bstatus:\s*5\d\d\b/.test(raw)
+    /\bstatus:\s*5\d\d\b/.test(raw) ||
+    // 2026-09-01: arc-scan answers a failed eth_call with a 200 + JSON-RPC error reading
+    // "arc-scan.org could not complete this request. No answer was obtained, so nothing about
+    // the result should be assumed." Caught while promoting it to primary: viem rendered that
+    // as `The contract function "balanceOf" reverted with the following reason: …` and
+    // shouldThrow stopped the fallback dead, so a healthy USDC contract looked like it was
+    // reverting and baracat was never tried. The endpoint is telling us outright that it did
+    // NOT execute the call — that is an infra failure, not a revert.
+    raw.includes('could not complete this request') ||
+    raw.includes('no answer was obtained')
   )
 }
 
@@ -157,6 +166,17 @@ export const ARC_RPC_INFRA_HINT =
 /**
  * Primary mainnet default for the browser: baracat. Infura is appended only on the server
  * (see ARC_SERVER_RPC_CANDIDATES). It used to lead the public list and leaked the project id.
+ *
+ * Do NOT promote arc-scan here on eth_blockNumber latency alone. Tried 2026-09-01 and reverted:
+ * a single blockNumber probe made arc-scan look 20x faster (0.63s vs 13.39s), but sampling the
+ * call that actually dominates this app told the opposite story —
+ *
+ *   eth_call x8    arc-scan  4/8 ok, avg 13371ms  (503, -32603 "could not complete", unreachable)
+ *                  baracat   7/8 ok, avg  4038ms  (one transient 522)
+ *
+ * Both endpoints are erratic and these numbers move; the point is that blockNumber latency does
+ * not predict eth_call health, and eth_call is what balances, offers(), and every token read use.
+ * Re-measure eth_call before touching this order.
  */
 const ARC_MAINNET_RPC_DEFAULT = ARC_BARACAT_RPC
 
