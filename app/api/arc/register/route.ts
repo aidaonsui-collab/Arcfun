@@ -8,7 +8,7 @@ import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { parseAuthFields } from '@/lib/arc-auth'
 import { verifyTokenRegisterAuth } from '@/lib/arc-auth-server'
 import { setArcTokenMeta } from '@/lib/arc-token-meta'
-import { invalidateArcHomeCatalog } from '@/lib/arc-catalog-cache'
+import { patchArcCatalogListing } from '@/lib/arc-catalog-cache'
 import { readPadCreator } from '@/lib/port/origin-token'
 import { sanitizeHttpsUrl, sanitizeTelegram, sanitizeTwitter, sanitizeWebsite } from '@/lib/social-href'
 import { limitOr429 } from '@/lib/rate-limit'
@@ -103,9 +103,17 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await invalidateArcHomeCatalog()
+    await patchArcCatalogListing(checksum, {
+      imageUrl: imageUrl || '',
+      logoUrl: imageUrl || '',
+      twitter: payload.twitter ? sanitizeTwitter(payload.twitter) : '',
+      telegram: payload.telegram ? sanitizeTelegram(payload.telegram) : '',
+      website,
+      description: payload.description.trim().slice(0, 280) || '',
+      streamUrl: streamUrl || '',
+    })
   } catch {
-    /* catalog will refresh on TTL */
+    /* overlay on read still picks KV up */
   }
 
   return NextResponse.json({ ok: true, chain: 'arc', token: checksum })

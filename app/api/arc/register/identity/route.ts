@@ -26,6 +26,8 @@ import { erc20Abi, type Address } from 'viem'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { readPadCreator } from '@/lib/port/origin-token'
 import { setArcTokenMeta } from '@/lib/arc-token-meta'
+import { upsertArcCatalogToken } from '@/lib/arc-catalog-cache'
+import { fetchArcPoolToken } from '@/lib/arc-instant-tokens'
 import { arcPublicClient } from '@/lib/contracts-arc'
 import { limitOr429 } from '@/lib/rate-limit'
 
@@ -68,6 +70,13 @@ export async function POST(req: NextRequest) {
     await setArcTokenMeta(token, { name, symbol, creator, pool, instantLaunch: true })
   } catch {
     return NextResponse.json({ ok: false, error: 'could not save token identity' }, { status: 503 })
+  }
+
+  try {
+    const row = await fetchArcPoolToken(token as Address)
+    if (row) await upsertArcCatalogToken(row)
+  } catch {
+    /* indexer cron still picks it up; overlay covers listing fields */
   }
 
   return NextResponse.json({ ok: true, name, symbol, creator })

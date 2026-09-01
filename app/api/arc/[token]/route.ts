@@ -24,9 +24,9 @@ import { summarizeRpcError } from '@/lib/rpc-error'
 export const dynamic = 'force-dynamic'
 
 const TOKEN_API_CACHE = {
-  'Cache-Control': 'public, s-maxage=20, stale-while-revalidate=40',
-  'CDN-Cache-Control': 'public, s-maxage=20, stale-while-revalidate=40',
-  'Vercel-CDN-Cache-Control': 'public, s-maxage=20, stale-while-revalidate=40',
+  'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
+  'CDN-Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
+  'Vercel-CDN-Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
 }
 
 const SLOT0_MS = 800

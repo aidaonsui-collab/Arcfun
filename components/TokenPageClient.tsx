@@ -6,7 +6,7 @@
  * First HTML comes from a catalog snapshot (name/symbol/image/price). Live `/api/arc/[token]`
  * overlays after hydration. Holders RPC and the 400-row chart tape stay off the first paint.
  */
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import nextDynamic from 'next/dynamic'
 import { type Address } from 'viem'
 import Link from 'next/link'
@@ -83,6 +83,7 @@ export function TokenPageClient({
   const [actPage, setActPage] = useState(0)
   const [holdersLoading, setHoldersLoading] = useState(false)
   const [chartReady, setChartReady] = useState(false)
+  const listingEpoch = useRef(0)
 
   const copyAddress = useCallback(() => {
     if (!token) return
@@ -98,8 +99,16 @@ export function TokenPageClient({
   const mergePool = useCallback((next: PoolToken) => {
     setPool((prev) => {
       if (!prev) return next
+      const keep = (n?: string, p?: string) => (n && n.trim()) || p || ''
       return {
         ...next,
+        imageUrl: keep(next.imageUrl, prev.imageUrl),
+        logoUrl: keep(next.logoUrl || next.imageUrl, prev.logoUrl || prev.imageUrl),
+        twitter: keep(next.twitter, prev.twitter),
+        telegram: keep(next.telegram, prev.telegram),
+        website: keep(next.website, prev.website),
+        description: keep(next.description, prev.description),
+        streamUrl: keep(next.streamUrl, prev.streamUrl),
         liquidityUsd: next.liquidityUsd ?? prev.liquidityUsd,
         liquidityQuoteUsd: next.liquidityQuoteUsd ?? prev.liquidityQuoteUsd,
         burnedPct: next.burnedPct ?? prev.burnedPct,
@@ -109,13 +118,15 @@ export function TokenPageClient({
 
   const load = useCallback(async () => {
     if (!token) return
+    const epoch = listingEpoch.current
     try {
       const res = await coalescedFetch(`/api/arc/${token}`)
+      if (listingEpoch.current !== epoch) return
       if (res.ok) mergePool((await res.json()) as PoolToken)
     } catch {
       /* keep prior */
     } finally {
-      setLoading(false)
+      if (listingEpoch.current === epoch) setLoading(false)
     }
   }, [token, mergePool])
 
@@ -435,7 +446,10 @@ export function TokenPageClient({
             <TokenListingEdit
               token={token}
               pool={pool}
-              onSaved={(patch) => setPool((p) => (p ? { ...p, ...patch } : p))}
+              onSaved={(patch) => {
+                listingEpoch.current += 1
+                setPool((p) => (p ? { ...p, ...patch } : p))
+              }}
             />
 
             {/* FDV + change */}
