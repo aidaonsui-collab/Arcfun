@@ -95,8 +95,8 @@ export default function DocsPage() {
                 </span>
               </div>
               <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
-                Same Instant mint + LP lock, quoted against USYC or BUIDL instead of USDC.
-                Wired as a factory swap: when Circle / BlackRock publish a mainnet token and we
+                Same Instant mint + LP lock, quoted against USYC, BUIDL, or tokenized CRCL
+                instead of USDC. Wired as a factory swap: when the issuer token is on Arc and we
                 deploy Instant against it, the create card turns on. TOKEN/USDC trading is
                 unaffected.
               </p>
