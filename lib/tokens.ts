@@ -66,7 +66,7 @@ export interface PoolToken {
     isMeme?: boolean
     isRwaBacked?: boolean
     isMarginBacked?: boolean
-    quote?: 'ETH' | 'ROBIN' | 'USDC'
+    quote?: string
     dexId?: 0 | 1
   }
   dexVenue?: 'v3' | 'v4'

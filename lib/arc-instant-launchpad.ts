@@ -28,6 +28,11 @@ export function parseArcUsdc(v: string | number): bigint {
   return parseUnits(String(v || '0'), 6)
 }
 
+/** First-buy in the Instant factory's quote token (USDC 6dp, BUIDL 18dp, …). */
+export function parseArcQuote(v: string | number, decimals = 6): bigint {
+  return parseUnits(String(v || '0'), decimals)
+}
+
 /**
  * createTokenMemeInstantQuote / createTokenMemeInstantQuoteTo —
  * first buy in USDC (approve factory first when > 0).
@@ -37,28 +42,32 @@ export function parseArcUsdc(v: string | number): bigint {
 export function buildCreateTokenMemeInstantArc(
   name: string,
   symbol: string,
-  firstBuyUsdc6: bigint,
+  firstBuyQuoteRaw: bigint,
   creationFeeWei: bigint,
   creatorRewardsWallet?: Address | null,
+  factory?: Address | null,
 ): ArcInstantWriteCall {
   const rewards = creatorRewardsWallet && creatorRewardsWallet !== '0x0000000000000000000000000000000000000000'
     ? creatorRewardsWallet
     : null
+  const dest = factory && factory !== '0x0000000000000000000000000000000000000000'
+    ? factory
+    : arcInstantFactory()
   if (rewards) {
     return {
-      address: arcInstantFactory(),
+      address: dest,
       abi: INSTANT_QUOTE_FACTORY_ABI,
       functionName: 'createTokenMemeInstantQuoteTo',
-      args: [name, symbol, firstBuyUsdc6, rewards],
+      args: [name, symbol, firstBuyQuoteRaw, rewards],
       value: creationFeeWei > 0n ? creationFeeWei : undefined,
       chainId: ARC_CHAIN_ID,
     }
   }
   return {
-    address: arcInstantFactory(),
+    address: dest,
     abi: INSTANT_QUOTE_FACTORY_ABI,
     functionName: 'createTokenMemeInstantQuote',
-    args: [name, symbol, firstBuyUsdc6],
+    args: [name, symbol, firstBuyQuoteRaw],
     value: creationFeeWei > 0n ? creationFeeWei : undefined,
     chainId: ARC_CHAIN_ID,
   }

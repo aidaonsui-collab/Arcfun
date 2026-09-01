@@ -31,6 +31,7 @@ import {
 } from './evm-trades'
 import { summarizeRpcError } from './rpc-error'
 import { staleTapeRewindFrom, shouldPersistScanCursor, tapeIsStaleTs } from './arc-trades-cursor'
+import { quoteDecimalsForToken, quoteTokenForFactory } from './arc-rwa-assets'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 
@@ -115,26 +116,33 @@ const lastSyncedAt = new Map<string, number>()
  */
 async function resolvePool(
   token: Address,
-): Promise<{ pool: Address; tokenIs0: boolean; tokenDecimals: number } | null> {
+): Promise<{ pool: Address; tokenIs0: boolean; tokenDecimals: number; quoteDecimals: number } | null> {
   try {
     let pool: Address | undefined
+    let factory = ''
     // KV first — no eth_call. Infura quota on getPool/token0 used to make
     // resolvePool return null and skip the whole tape sync.
     try {
       const row = await getToken(token)
       if (row?.pool && row.pool !== ZERO) pool = row.pool as Address
+      factory = row?.factory || ''
     } catch {
       /* fall through to on-chain */
     }
     if (!pool) {
       const t = await fetchArcPoolToken(token)
       pool = t?.instantMeta?.uniPool as Address | undefined
+      factory = t?.moonbagsPackageId || factory
     }
     if (!pool || pool === ZERO) return null
-    // Uni V3 token0 is the lower address.
-    const usdc = (ARC.USDC_ERC20 || ARC.USDC).toLowerCase()
-    const tokenIs0 = token.toLowerCase() < usdc
-    return { pool, tokenIs0, tokenDecimals: ARC.TOKEN_DECIMALS }
+    const quote = (quoteTokenForFactory(factory) || ARC.USDC_ERC20 || ARC.USDC).toLowerCase()
+    const tokenIs0 = token.toLowerCase() < quote
+    return {
+      pool,
+      tokenIs0,
+      tokenDecimals: ARC.TOKEN_DECIMALS,
+      quoteDecimals: quoteDecimalsForToken(quote),
+    }
   } catch {
     return null
   }
@@ -214,6 +222,7 @@ async function scanSwapRange(
   tokenDecimals: number,
   fromBlock: bigint,
   toBlock: bigint,
+  quoteDecimals = 6,
 ): Promise<{ trades: EvmTrade[]; scannedTo: bigint }> {
   const out: EvmTrade[] = []
   let cursor = fromBlock
@@ -256,7 +265,7 @@ async function scanSwapRange(
         if (tokenAmt === 0n || usdcAmt === 0n) continue
 
         const tokenHuman = Number(formatUnits(tokenAmt, tokenDecimals))
-        const usdcHuman = Number(formatUnits(usdcAmt, 6))
+        const usdcHuman = Number(formatUnits(usdcAmt, quoteDecimals))
         const price = tokenHuman > 0 ? usdcHuman / tokenHuman : 0
         const ts = tsMap.get((log.blockNumber ?? 0n).toString()) ?? 0
         const trader = (log.args.recipient as Address) || (log.args.sender as Address) || ZERO
@@ -300,6 +309,7 @@ export async function sumSwapUsd(
     orient.tokenDecimals,
     fromBlock,
     toBlock,
+    orient.quoteDecimals,
   )
   let usd = 0
   for (const t of trades) usd += t.valueUsd || 0
@@ -362,6 +372,7 @@ async function maybeRewindStaleCursor(
   tokenIs0: boolean,
   tokenDecimals: number,
   head: bigint,
+  quoteDecimals = 6,
 ): Promise<void> {
   const prev = lastRewindAt.get(key)
   if (prev != null && Date.now() - prev < 60_000) return
@@ -381,7 +392,7 @@ async function maybeRewindStaleCursor(
   })
   if (from == null) return
   lastRewindAt.set(key, Date.now())
-  const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, head)
+  const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, head, quoteDecimals)
   if (
     shouldPersistScanCursor({
       foundTrades: found.trades.length,
@@ -404,7 +415,7 @@ export async function syncTradesToHead(token: Address): Promise<void> {
     const orient = await resolvePool(token)
     if (!orient) return
     didWork = true
-    const { pool, tokenIs0, tokenDecimals } = orient
+    const { pool, tokenIs0, tokenDecimals, quoteDecimals } = orient
     const client = arcLogsClient()
     const head = await client.getBlockNumber()
 
@@ -438,7 +449,7 @@ export async function syncTradesToHead(token: Address): Promise<void> {
       // ~34 chunked eth_getLogs calls worst case — is worth paying once per token to never miss
       // recent activity on a cold view.
       const from = head >= DEEP_BACKFILL_BLOCKS ? head - DEEP_BACKFILL_BLOCKS + 1n : 0n
-      const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, head)
+      const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, head, quoteDecimals)
       if (
         shouldPersistScanCursor({
           foundTrades: found.trades.length,
@@ -454,7 +465,7 @@ export async function syncTradesToHead(token: Address): Promise<void> {
       // request so a token idle a long time just catches up over however many page loads it takes.
       const from = cursor! + 1n
       const to = from + CATCHUP_MAX_BLOCKS - 1n > head ? head : from + CATCHUP_MAX_BLOCKS - 1n
-      const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, to)
+      const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, to, quoteDecimals)
       if (
         shouldPersistScanCursor({
           foundTrades: found.trades.length,
@@ -468,7 +479,7 @@ export async function syncTradesToHead(token: Address): Promise<void> {
     }
     // Cursor at head can still be a lie: empty getLogs from a public RPC parks it there.
     // Rewind from the last persisted fill, not a fixed 12k-block window.
-    await maybeRewindStaleCursor(client, key, pool, tokenIs0, tokenDecimals, head)
+    await maybeRewindStaleCursor(client, key, pool, tokenIs0, tokenDecimals, head, quoteDecimals)
   })
 
   if (didWork) lastSyncedAt.set(key, Date.now())
