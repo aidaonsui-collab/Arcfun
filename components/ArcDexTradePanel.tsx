@@ -5,7 +5,7 @@
  * Restyled to match redesign: sticky card, buy/sell pill, large amount, USDC chip.
  */
 import { useState, useEffect, useRef } from 'react'
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useAccount, useConnectorClient, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi, formatUnits, type Address } from 'viem'
 import { Loader2, AlertCircle, CheckCircle, ExternalLink } from 'lucide-react'
 import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_SWAP_GAS } from '@/lib/contracts-arc'
@@ -18,6 +18,8 @@ import {
   formatUsdc,
   minOutFromSlippage,
   parseUsdc,
+  quoteArcBuy,
+  quoteArcSell,
   withRecipient,
 } from '@/lib/arc-swap'
 import { formatToken, parseToken } from '@/lib/token-format'
@@ -68,6 +70,7 @@ export function ArcDexTradePanel({
   onTraded?: () => void
 }) {
   const { address, chainId, isConnected } = useAccount()
+  const { data: wallet } = useConnectorClient({ chainId: ARC_CHAIN_ID })
   const { writeContractAsync } = useWriteContract()
 
   const [mode, setMode] = useState<'buy' | 'sell'>('buy')
@@ -141,6 +144,19 @@ export function ArcDexTradePanel({
       setQuoting(true)
       try {
         const ref = mode === 'buy' ? getIncomingReferralCode() : ''
+        // Wallet-first, same as RadarDEX / MAX. Server Infura is often quota-dead.
+        if (wallet) {
+          const local =
+            mode === 'buy'
+              ? await quoteArcBuy(token, parseUsdc(amount), ref, wallet)
+              : await quoteArcSell(token, parseToken(amount, tokDec), wallet)
+          if (cancelled) return
+          if (local != null && local > 0n) {
+            setEstOut(local)
+            setError(null)
+            return
+          }
+        }
         const qs = new URLSearchParams({
           token,
           side: mode,
@@ -154,13 +170,17 @@ export function ArcDexTradePanel({
           error?: string
         } | null
         if (cancelled) return
-        if (!data?.ok || !data.out) {
-          setEstOut(null)
-          setError(data?.error || 'No quote for this size.')
+        if (data?.ok && data.out) {
+          setEstOut(BigInt(data.out))
+          setError(null)
           return
         }
-        setEstOut(BigInt(data.out))
-        setError(null)
+        setEstOut(null)
+        setError(
+          res.status >= 500
+            ? 'Quote RPC is busy — retry. Your wallet is fine.'
+            : data?.error || 'No quote for this size.',
+        )
       } catch {
         if (!cancelled) {
           setEstOut(null)
@@ -175,7 +195,7 @@ export function ArcDexTradePanel({
       cancelled = true
       clearTimeout(t)
     }
-  }, [amount, mode, token, swapOn])
+  }, [amount, mode, token, swapOn, wallet, tokDec])
 
   const needApprove = (() => {
     if (!amount || Number(amount) <= 0) return false
@@ -191,27 +211,34 @@ export function ArcDexTradePanel({
     setBusy(true)
     setStatusMsg('')
     try {
+      if (needApprove) {
+        const inAmt = mode === 'buy' ? parseUsdc(amount) : parseToken(amount, tokDec)
+        setStatusMsg(mode === 'buy' ? 'Approve USDC…' : `Approve ${symbol}…`)
+        await writeContractAsync({
+          address: mode === 'buy' ? ARC.USDC : token,
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [spender, inAmt],
+          chainId: ARC_CHAIN_ID,
+          gas: ARC_ERC20_APPROVE_GAS,
+        })
+        void refetchAllowance()
+        if (estOut == null || estOut <= 0n) {
+          setStatusMsg('Approved. Waiting for a quote…')
+          setBusy(false)
+          submitLock.current = false
+          return
+        }
+      }
       if (estOut == null || estOut <= 0n) {
         throw new Error('No quote yet. Wait a moment or try a smaller amount.')
       }
       if (mode === 'buy') {
         const inAmt = parseUsdc(amount)
         const minOut = minOutFromSlippage(estOut, SLIPPAGE_BPS)
-        if (needApprove) {
-          setStatusMsg('Approve USDC…')
-          await writeContractAsync({
-            address: ARC.USDC,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [spender, inAmt],
-            chainId: ARC_CHAIN_ID,
-            gas: ARC_ERC20_APPROVE_GAS,
-          })
-          void refetchAllowance()
-        }
         setStatusMsg('Confirm in wallet…')
         // Same tier the quote resolved — cached, so this is not an extra RPC round trip.
-        const poolFee = (await findArcPoolFee(token)) ?? undefined
+        const poolFee = (await findArcPoolFee(token, wallet)) ?? undefined
         let call = buildArcBuy(token, inAmt, minOut, poolFee, refCode)
         call = withRecipient(call, address)
         const hash = await writeContractAsync({
@@ -227,20 +254,8 @@ export function ArcDexTradePanel({
       } else {
         const inAmt = parseToken(amount, tokDec)
         const minOut = minOutFromSlippage(estOut, SLIPPAGE_BPS)
-        if (needApprove) {
-          setStatusMsg(`Approve ${symbol}…`)
-          await writeContractAsync({
-            address: token,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [spender, inAmt],
-            chainId: ARC_CHAIN_ID,
-            gas: ARC_ERC20_APPROVE_GAS,
-          })
-          void refetchAllowance()
-        }
         setStatusMsg('Confirm in wallet…')
-        const poolFee = (await findArcPoolFee(token)) ?? undefined
+        const poolFee = (await findArcPoolFee(token, wallet)) ?? undefined
         const call = buildArcSell(token, inAmt, minOut, address, poolFee)
         const hash = await writeContractAsync({
           address: call.address,
@@ -457,7 +472,13 @@ export function ArcDexTradePanel({
 
           <button
             type="button"
-            disabled={busy || quoting || !amount || Number(amount) <= 0 || estOut == null}
+            disabled={
+              busy ||
+              quoting ||
+              !amount ||
+              Number(amount) <= 0 ||
+              (estOut == null && !needApprove)
+            }
             onClick={() => void onSubmit()}
             className="mt-4 w-full h-[56px] rounded-2xl text-[17px] font-bold tracking-wide disabled:opacity-40 transition-opacity"
             style={{

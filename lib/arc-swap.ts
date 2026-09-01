@@ -7,9 +7,11 @@ import {
   formatUnits,
   parseUnits,
   type Address,
+  type Client,
   type Hex,
 } from 'viem'
-import { ARC, ARC_CHAIN_ID, arcPublicClient, arcRobinSwapEnabled } from './contracts-arc'
+import { readContract } from 'viem/actions'
+import { ARC, ARC_CHAIN_ID, arcPublicClient, arcRobinSwapEnabled, isArcRpcInfraError } from './contracts-arc'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 const POOL_FEE = ARC.UNI_POOL_FEE // 10000 — ArcFun's own launch tier, and the fallback
@@ -59,13 +61,48 @@ const poolFeeCache = new Map<string, number>()
  * All four getPool reads go out in a single multicall3 batch — Arc's public RPCs rate-limit
  * under burst, so this must not become four round trips per quote.
  */
-export async function findArcPoolFee(token: Address): Promise<number | null> {
+function rpc(client?: Client): Client {
+  return (client ?? arcPublicClient()) as Client
+}
+
+/** Instant launches are 1%. Try that first on the wallet path (no multicall). */
+const WALLET_FEE_ORDER = [10_000, 100, 500, 3_000] as const
+
+export async function findArcPoolFee(token: Address, client?: Client): Promise<number | null> {
   const key = token.toLowerCase()
   const cached = poolFeeCache.get(key)
   if (cached != null) return cached
   if (token.toLowerCase() === ARC.USDC.toLowerCase()) return null
 
-  const client = arcPublicClient()
+  const c = rpc(client)
+  if (typeof (c as { multicall?: unknown }).multicall === 'function') {
+    return findArcPoolFeeMulticall(token, c as ReturnType<typeof arcPublicClient>)
+  }
+
+  for (const fee of WALLET_FEE_ORDER) {
+    try {
+      const pool = (await readContract(c, {
+        address: ARC.UNI_FACTORY,
+        abi: UNI_V3_FACTORY_ABI,
+        functionName: 'getPool',
+        args: [ARC.USDC, token, fee],
+      })) as Address
+      if (pool && pool !== ZERO) {
+        poolFeeCache.set(key, fee)
+        return fee
+      }
+    } catch {
+      /* next tier */
+    }
+  }
+  return null
+}
+
+async function findArcPoolFeeMulticall(
+  token: Address,
+  client: ReturnType<typeof arcPublicClient>,
+): Promise<number | null> {
+  const key = token.toLowerCase()
   let pools: (Address | null)[]
   try {
     const res = await client.multicall({
@@ -248,8 +285,10 @@ export function minOutFromSlippage(amountOut: bigint, slippageBps: number): bigi
   return (amountOut * BigInt(10_000 - slippageBps)) / 10_000n
 }
 
-async function feeBps(): Promise<number> {
+async function feeBps(client?: Client): Promise<number> {
   if (!useFeeRouter()) return 0
+  // Wallet quotes skip the extra round-trip — live FeeRouter is 100 bps.
+  if (client) return ARC.FEE_BPS || 100
   try {
     const bps = (await arcPublicClient().readContract({
       address: ARC.FEE_ROUTER,
@@ -268,61 +307,66 @@ function netAfterFee(amountIn: bigint, bps: number): bigint {
   return amountIn - (amountIn * BigInt(bps)) / 10_000n
 }
 
+async function quoteExactInput(
+  client: Client,
+  tokenIn: Address,
+  tokenOut: Address,
+  amountIn: bigint,
+  fee: number,
+): Promise<bigint | null> {
+  const res = (await readContract(client, {
+    address: ARC.UNI_QUOTER,
+    abi: QUOTER_ABI,
+    functionName: 'quoteExactInputSingle',
+    args: [
+      {
+        tokenIn,
+        tokenOut,
+        amountIn,
+        fee,
+        sqrtPriceLimitX96: 0n,
+      },
+    ],
+  })) as readonly [bigint, bigint, number, bigint]
+  return res[0] > 0n ? res[0] : null
+}
+
 export async function quoteArcBuy(
   token: Address,
   usdcIn: bigint,
   referralCode = '',
+  client?: Client,
 ): Promise<bigint | null> {
   if (usdcIn <= 0n || !arcSwapConfigured()) return null
-  const bps = await feeBps()
+  const c = rpc(client)
+  const bps = await feeBps(client)
   const afterRef = netAfterReferral(usdcIn, referralCode)
   const swapIn = netAfterFee(afterRef, bps)
   if (swapIn <= 0n) return null
-  const fee = (await findArcPoolFee(token)) ?? POOL_FEE
+  const fee = (await findArcPoolFee(token, c)) ?? POOL_FEE
   try {
-    const res = (await arcPublicClient().readContract({
-      address: ARC.UNI_QUOTER,
-      abi: QUOTER_ABI,
-      functionName: 'quoteExactInputSingle',
-      args: [
-        {
-          tokenIn: ARC.USDC,
-          tokenOut: token,
-          amountIn: swapIn,
-          fee,
-          sqrtPriceLimitX96: 0n,
-        },
-      ],
-    })) as readonly [bigint, bigint, number, bigint]
-    return res[0] > 0n ? res[0] : null
-  } catch {
+    return await quoteExactInput(c, ARC.USDC, token, swapIn, fee)
+  } catch (e) {
+    if (!client && isArcRpcInfraError(e)) throw e
     return null
   }
 }
 
-export async function quoteArcSell(token: Address, tokenIn: bigint): Promise<bigint | null> {
+export async function quoteArcSell(
+  token: Address,
+  tokenIn: bigint,
+  client?: Client,
+): Promise<bigint | null> {
   if (tokenIn <= 0n || !arcSwapConfigured()) return null
-  const bps = await feeBps()
+  const c = rpc(client)
+  const bps = await feeBps(client)
   const swapIn = netAfterFee(tokenIn, bps)
   if (swapIn <= 0n) return null
-  const fee = (await findArcPoolFee(token)) ?? POOL_FEE
+  const fee = (await findArcPoolFee(token, c)) ?? POOL_FEE
   try {
-    const res = (await arcPublicClient().readContract({
-      address: ARC.UNI_QUOTER,
-      abi: QUOTER_ABI,
-      functionName: 'quoteExactInputSingle',
-      args: [
-        {
-          tokenIn: token,
-          tokenOut: ARC.USDC,
-          amountIn: swapIn,
-          fee,
-          sqrtPriceLimitX96: 0n,
-        },
-      ],
-    })) as readonly [bigint, bigint, number, bigint]
-    return res[0] > 0n ? res[0] : null
-  } catch {
+    return await quoteExactInput(c, token, ARC.USDC, swapIn, fee)
+  } catch (e) {
+    if (!client && isArcRpcInfraError(e)) throw e
     return null
   }
 }
