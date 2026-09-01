@@ -118,16 +118,16 @@ async function resolvePool(
     // token0() used to abort the whole tape sync (resolvePool returned null).
     const usdc = (ARC.USDC_ERC20 || ARC.USDC).toLowerCase()
     const tokenIs0 = token.toLowerCase() < usdc
-    let tokenDecimals = ARC.TOKEN_DECIMALS
+    let tokenDecimals: number = ARC.TOKEN_DECIMALS
     try {
-      tokenDecimals = Number(
+      const raw = Number(
         await arcPublicClient().readContract({
           address: token,
           abi: erc20DecimalsAbi,
           functionName: 'decimals',
         }),
       )
-      if (!Number.isFinite(tokenDecimals) || tokenDecimals <= 0) tokenDecimals = ARC.TOKEN_DECIMALS
+      if (Number.isFinite(raw) && raw > 0) tokenDecimals = raw
     } catch {
       /* Instant tokens are 18 */
     }
