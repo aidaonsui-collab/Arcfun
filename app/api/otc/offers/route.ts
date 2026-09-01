@@ -14,7 +14,7 @@ import {
   goldskyOtcConfigured,
 } from '@/lib/goldsky-otc'
 import { getPublicOtcDeskStats } from '@/lib/arc-indexer/otc-desk-stats'
-import { scanLogsChunked } from '@/lib/arc-indexer/logs'
+import { scanLogsChunked, LOG_CHUNK } from '@/lib/arc-indexer/logs'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -29,13 +29,22 @@ const OTC_FLOOR = 14_000_000n
 async function recoverMakerOffers(maker: Address): Promise<number> {
   const client = arcPublicClient()
   const head = await client.getBlockNumber()
-  const from = head > 1_500_000n ? head - 1_500_000n : OTC_FLOOR
+  // scanLogsChunked walks ascending from `fromBlock` and stops after maxChunks
+  // (RECOVER_MAX_CHUNKS * LOG_CHUNK blocks) regardless of how far `toBlock` is.
+  // Anchoring `from` 1.5M blocks back from head — while capping the scan at
+  // 80*9k = 720k blocks — used to scan [head-1.5M, head-780k] and never reach
+  // the blocks near head where a just-broken offer actually lives, so this
+  // backfill could never find it. Anchor the window to head instead so the
+  // freshest blocks are always covered.
+  const RECOVER_MAX_CHUNKS = 80
+  const window = BigInt(RECOVER_MAX_CHUNKS) * LOG_CHUNK
+  const from = head > window ? head - window : OTC_FLOOR
   const { logs } = await scanLogsChunked(client, {
     address: ROBIN_OTC_LIQUIDITY,
     event: OFFER_CREATED,
     fromBlock: from < OTC_FLOOR ? OTC_FLOOR : from,
     toBlock: head,
-    maxChunks: 80,
+    maxChunks: RECOVER_MAX_CHUNKS,
     args: { maker },
   })
   let n = 0
