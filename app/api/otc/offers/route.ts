@@ -2,10 +2,11 @@
  * GET  /api/otc/offers — OTC book (Goldsky preferred → KV indexer fallback).
  * POST /api/otc/offers — optimistic ingest after createOffer (keeps UI instant).
  */
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { getAddress, isAddress, parseAbiItem, type Address, type Hex } from 'viem'
 import { getIndexedOtcBook } from '@/lib/arc-indexer/run'
 import { upsertOtcOffer } from '@/lib/arc-indexer/store'
+import { kv } from '@vercel/kv'
 import { jsonSafe } from '@/lib/json-safe'
 import { ROBIN_OTC_LIQUIDITY, LIQUIDITY_ABI } from '@/lib/bridge/robin-otc'
 import { arcPublicClient } from '@/lib/contracts-arc'
@@ -25,18 +26,40 @@ const OFFER_CREATED = parseAbiItem(
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 const OTC_FLOOR = 14_000_000n
 
+/**
+ * At most one recovery scan per maker per window, across all instances. My orders polls every
+ * 10s, so without this a single open tab queues a fresh scan every poll. Returns true only to
+ * the caller that claims the slot; a KV failure returns false (skip the scan) rather than
+ * letting every poll through.
+ */
+const RECOVER_THROTTLE_SEC = 10 * 60
+
+async function claimRecoverSlot(maker: Address): Promise<boolean> {
+  try {
+    const res = await kv.set(`arcfun:otc:recover:${maker.toLowerCase()}`, Date.now(), {
+      ex: RECOVER_THROTTLE_SEC,
+      nx: true,
+    })
+    return res === 'OK'
+  } catch {
+    return false
+  }
+}
+
 /** Maker-topic OfferCreated backfill when the KV book missed a live offer. */
 async function recoverMakerOffers(maker: Address): Promise<number> {
   const client = arcPublicClient()
   const head = await client.getBlockNumber()
-  // scanLogsChunked walks ascending from `fromBlock` and stops after maxChunks
-  // (RECOVER_MAX_CHUNKS * LOG_CHUNK blocks) regardless of how far `toBlock` is.
-  // Anchoring `from` 1.5M blocks back from head — while capping the scan at
-  // 80*9k = 720k blocks — used to scan [head-1.5M, head-780k] and never reach
-  // the blocks near head where a just-broken offer actually lives, so this
-  // backfill could never find it. Anchor the window to head instead so the
-  // freshest blocks are always covered.
-  const RECOVER_MAX_CHUNKS = 80
+  // scanLogsChunked walks ascending from `fromBlock` and stops after maxChunks * LOG_CHUNK
+  // blocks, regardless of how far `toBlock` is. Anchoring `from` 1.5M blocks back from head
+  // while only ever scanning 720k of them meant the window ended ~780k blocks short of head —
+  // never reaching the recent blocks where a just-dropped offer actually lives, so this could
+  // never recover one. Anchor to head so the freshest blocks are always covered.
+  //
+  // 40 chunks (360k blocks, ~1.7 days of Arc) rather than 80: 80 measured >60s against Arc RPC
+  // and blew maxDuration. after() defers this past the response but does NOT extend
+  // maxDuration, so the scan still has to fit the budget.
+  const RECOVER_MAX_CHUNKS = 40
   const window = BigInt(RECOVER_MAX_CHUNKS) * LOG_CHUNK
   const from = head > window ? head - window : OTC_FLOOR
   const { logs } = await scanLogsChunked(client, {
@@ -111,13 +134,23 @@ export async function GET(req: NextRequest) {
 
     let offers = await getIndexedOtcBook()
     if (maker) {
-      let mine = offers.filter((o) => o.maker.toLowerCase() === maker.toLowerCase())
-      if (mine.length === 0) {
-        await recoverMakerOffers(maker).catch((e) =>
-          console.warn('[otc/offers] maker recover', e instanceof Error ? e.message : e),
-        )
-        offers = await getIndexedOtcBook()
-        mine = offers.filter((o) => o.maker.toLowerCase() === maker.toLowerCase())
+      const mine = offers.filter((o) => o.maker.toLowerCase() === maker.toLowerCase())
+      // Recover AFTER responding, never inline. My orders polls this every 10s
+      // (InstantOtcOrders.tsx), and every maker with no indexed offers — i.e. anyone who has
+      // never posted liquidity — took the recovery branch. The scan outruns maxDuration, so
+      // those callers got a 60s hang ending in FUNCTION_INVOCATION_TIMEOUT (504s observed live)
+      // instead of an instant empty list, while burning the most expensive invocation shape
+      // there is, once per poll. Responding first costs one poll of latency: whatever the scan
+      // re-indexes is served 10s later.
+      if (mine.length === 0 && (await claimRecoverSlot(maker))) {
+        after(async () => {
+          try {
+            const n = await recoverMakerOffers(maker)
+            if (n > 0) console.info('[otc/offers] maker recover found', n, maker)
+          } catch (e) {
+            console.warn('[otc/offers] maker recover', e instanceof Error ? e.message : e)
+          }
+        })
       }
       offers = mine
     }
