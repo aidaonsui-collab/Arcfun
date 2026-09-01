@@ -23,6 +23,18 @@ const OFFER_CREATED = parseAbiItem(
 )
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 const OTC_FLOOR = 14_000_000n
+/**
+ * How long remaining() must read 0 continuously before an offer is actually removed from the
+ * index — see IndexedOtcOffer.remainingZeroSince. 40m: comfortably past the 30m default
+ * reservation TTL (lib/bridge/robin-otc.ts's OTC_RESERVE_TTL_SEC) plus a buffer for someone to
+ * actually call release/refund after expiry, since expiry alone doesn't auto-clear a
+ * reservation. Found live: two real offers with real remaining inventory (20 USDC, 64 USDC)
+ * were permanently deleted from the index — and therefore invisible on both the Trade tab and
+ * My liquidity offers — because a single refresh tick caught them mid-reservation at
+ * remaining === 0 and removed them outright; nothing ever re-adds a removed offer since the
+ * scan cursor has already moved past its OfferCreated block.
+ */
+const OTC_OFFER_ZERO_REMOVE_MS = 40 * 60 * 1000
 
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
@@ -105,8 +117,29 @@ export async function GET(req: NextRequest) {
           args: [o.offerId],
         })) as readonly [Address, Address, number, bigint, boolean]
         const [maker, sellerPayment, premiumBps, remaining, active] = row
-        if (!active || remaining === 0n) {
+        if (!active) {
+          // A hard `active` false is a real, unambiguous signal (unlike remaining === 0n, which
+          // a live reservation produces routinely) — safe to remove immediately.
           await removeOtcOffer(o.offerId)
+        } else if (remaining === 0n) {
+          const zeroSince = o.remainingZeroSince ?? Date.now()
+          if (Date.now() - zeroSince >= OTC_OFFER_ZERO_REMOVE_MS) {
+            await removeOtcOffer(o.offerId)
+          } else {
+            // Keep tracking through the grace window — a reservation resolving (settle or
+            // self-refund) can restore remaining without this offer ever having left the index.
+            await upsertOtcOffer({
+              offerId: o.offerId,
+              maker,
+              sellerPayment,
+              premiumBps: Number(premiumBps),
+              remaining: '0',
+              active,
+              createdBlock: o.createdBlock,
+              updatedAt: Date.now(),
+              remainingZeroSince: zeroSince,
+            })
+          }
         } else {
           await upsertOtcOffer({
             offerId: o.offerId,
@@ -117,6 +150,8 @@ export async function GET(req: NextRequest) {
             active,
             createdBlock: o.createdBlock,
             updatedAt: Date.now(),
+            // remainingZeroSince intentionally omitted — clears the zero streak now that this
+            // offer has real inventory again.
           })
         }
         refreshed++
