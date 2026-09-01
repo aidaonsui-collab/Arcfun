@@ -1,18 +1,13 @@
 /**
- * Arc event indexer cycle — factories, OTC offers, swap catch-up + volume.
+ * Arc event indexer cycle — factories, swap catch-up + volume.
+ * OTC is owned entirely by /api/arc/indexer/otc; see runArcIndexerCycle for why.
  * Designed for Vercel Cron (maxDuration 300): incremental cursors, bounded chunks.
  */
 import { parseAbiItem, type Address, type Hex } from 'viem'
 import { ARC, arcPublicClient, arcInstantEnabled, arcReflectionEnabled } from '@/lib/contracts-arc'
 import { instantCatalogFactories } from '@/lib/arc-instant-tokens'
 import { syncTradesToHead } from '@/lib/arc-trades'
-import {
-  ROBIN_OTC_LIQUIDITY,
-  LIQUIDITY_ABI,
-  robinOtcEnabled,
-  allInMultiplier,
-  fetchOtcFeeBps,
-} from '@/lib/bridge/robin-otc'
+import { allInMultiplier, fetchOtcFeeBps } from '@/lib/bridge/robin-otc'
 import { scanLogsChunked } from './logs'
 import {
   loadState,
@@ -23,15 +18,12 @@ import {
   listTokenAddresses,
   setVolume,
   getVolumesMap,
-  upsertOtcOffer,
-  removeOtcOffer,
   listOtcOffers,
   kvConfigured,
   tokenCount,
   otcOfferCount,
   countOrNull,
 } from './store'
-import { catchUpOtcDeskStats } from './otc-desk-stats'
 import { computeVolumeWindows } from './volume'
 import type { IndexedLaunchKind, IndexedToken, IndexerState } from './types'
 import { summarizeRpcError } from '@/lib/rpc-error'
@@ -44,16 +36,11 @@ const INSTANT_CREATED = parseAbiItem(
 const REFLECTION_CREATED = parseAbiItem(
   'event InstantReflectionCreated(address indexed token, address indexed creator, address rewardToken, address pool, uint256 positionId, address feeSink)',
 )
-const OFFER_CREATED = parseAbiItem(
-  'event OfferCreated(bytes32 indexed offerId, address indexed maker, address sellerPayment, uint32 premiumBps, uint256 amount)',
-)
 
 /** Known floors so first run doesn't scan from genesis. */
 const FACTORY_FLOOR = 14_000_000n
-const OTC_FLOOR = 14_000_000n
 
 const MAX_FACTORY_CHUNKS = 24
-const MAX_OTC_CHUNKS = 24
 /**
  * How many tokens to catch up per cron tick (swap + volume), split two ways.
  *
@@ -239,92 +226,6 @@ async function scanFactoryEvents(
   return { state, found }
 }
 
-async function scanOtcOffers(
-  state: IndexerState,
-  head: bigint,
-): Promise<{ state: IndexerState; offers: number }> {
-  if (!robinOtcEnabled() || ROBIN_OTC_LIQUIDITY === ZERO) {
-    return { state, offers: 0 }
-  }
-  const client = arcPublicClient()
-  let cursor = BigInt(state.otcCursor || '0')
-  if (cursor === 0n) cursor = OTC_FLOOR
-  if (cursor >= head) {
-    // Still refresh remaining on known offers
-    await refreshOtcOfferState()
-    return { state, offers: 0 }
-  }
-
-  const from = cursor + 1n
-  const { logs, scannedTo } = await scanLogsChunked(client, {
-    address: ROBIN_OTC_LIQUIDITY,
-    event: OFFER_CREATED,
-    fromBlock: from,
-    toBlock: head,
-    maxChunks: MAX_OTC_CHUNKS,
-  })
-
-  let n = 0
-  for (const log of logs) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const args = (log as any).args as {
-      offerId?: Hex
-      maker?: Address
-      sellerPayment?: Address
-      premiumBps?: number
-      amount?: bigint
-    }
-    if (!args?.offerId) continue
-    await upsertOtcOffer({
-      offerId: args.offerId,
-      maker: args.maker || ZERO,
-      sellerPayment: args.sellerPayment || ZERO,
-      premiumBps: Number(args.premiumBps ?? 0),
-      remaining: (args.amount ?? 0n).toString(),
-      active: true,
-      createdBlock: Number(log.blockNumber ?? 0n),
-      updatedAt: Date.now(),
-    })
-    n++
-  }
-
-  await refreshOtcOfferState()
-  return { state: { ...state, otcCursor: scannedTo.toString() }, offers: n }
-}
-
-async function refreshOtcOfferState(): Promise<void> {
-  if (!robinOtcEnabled()) return
-  const client = arcPublicClient()
-  const offers = await listOtcOffers()
-  for (const o of offers) {
-    try {
-      const row = (await client.readContract({
-        address: ROBIN_OTC_LIQUIDITY,
-        abi: LIQUIDITY_ABI,
-        functionName: 'offers',
-        args: [o.offerId],
-      })) as readonly [Address, Address, number, bigint, boolean]
-      const [maker, sellerPayment, premiumBps, remaining, active] = row
-      if (!active || remaining === 0n) {
-        await removeOtcOffer(o.offerId)
-        continue
-      }
-      await upsertOtcOffer({
-        offerId: o.offerId,
-        maker,
-        sellerPayment,
-        premiumBps: Number(premiumBps),
-        remaining: remaining.toString(),
-        active,
-        createdBlock: o.createdBlock,
-        updatedAt: Date.now(),
-      })
-    } catch {
-      /* keep prior */
-    }
-  }
-}
-
 async function catchUpSwapsAndVolume(
   state: IndexerState,
 ): Promise<{ state: IndexerState; tokens: number }> {
@@ -401,6 +302,7 @@ export type IndexerRunResult = {
   kvConfigured: boolean
   seeded: number
   factories: number
+  /** Always 0 — this cron no longer scans OTC. Kept so the status/response shape is unchanged. */
   otcOffers: number
   swapsTokens: number
   tokenCount: number
@@ -464,14 +366,18 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
     state = f.state
     factories = f.found
 
-    const o = await scanOtcOffers(state, head)
-    state = o.state
-    otcOffers = o.offers
-
-    await catchUpOtcDeskStats().catch((e) => {
-      console.warn('[arc-indexer] desk stats', e instanceof Error ? e.message : e)
-    })
-
+    // OTC is deliberately NOT touched here — /api/arc/indexer/otc owns it end to end and runs
+    // every minute (this cron every two), so everything below was pure duplicate work, and worse:
+    //
+    //  - Both crons advanced the SAME state.otcCursor with an unsynchronised read-modify-write.
+    //    Two overlapping ticks could each load state, scan, and save — the later save clobbering
+    //    the earlier cursor, re-scanning or skipping OfferCreated ranges.
+    //  - the refreshOtcOfferState() this replaced still removed an offer on a single
+    //    remaining === 0n read — the exact bug fixed in the OTC cron in #123. Keeping it meant
+    //    this cron re-deleted live maker offers every two minutes, silently undoing that fix.
+    //  - catchUpOtcDeskStats() likewise raced its own per-chain settledCursor between the two.
+    //
+    // One owner per dataset: this cron does factories + swaps/volume, the OTC cron does OTC.
     const s = await catchUpSwapsAndVolume(state)
     state = s.state
     swapsTokens = s.tokens
