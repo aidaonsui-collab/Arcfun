@@ -232,21 +232,28 @@ async function catchUpSwapsAndVolume(
   const all = await listIndexedTokens()
   if (!all.length) return { state, tokens: 0 }
 
-  // Hottest first: sort by last-seen trade activity, recomputed fresh every cycle — this is not
-  // meant to be stable across cycles the way the rotation index below is, volumes genuinely
-  // shift. A token with no cached volume yet (never synced) ranks alongside "just traded now"
-  // rather than last: it's the token most in need of a first pass, not one to defer behind
-  // already-known-quiet tokens.
+  // Hottest first, but a tape that stopped updating ranks above a token that
+  // genuinely just traded: lastTradeAt 3h ago with a cursor at head is the EVE
+  // freeze (2026-09-01), and those are the ones that need a getLogs retry.
   const volumes = await getVolumesMap(all.map((t) => t.token))
   const now = Math.floor(Date.now() / 1000)
-  const byRecency = [...all].sort((a, b) => {
-    const ta = volumes[a.token.toLowerCase()]?.lastTradeAt ?? now
-    const tb = volumes[b.token.toLowerCase()]?.lastTradeAt ?? now
+  const STALE_SEC = 20 * 60
+  const lastAt = (t: IndexedToken) => volumes[t.token.toLowerCase()]?.lastTradeAt ?? 0
+  const isStale = (t: IndexedToken) => {
+    const ts = lastAt(t)
+    return ts > 0 && now - ts >= STALE_SEC
+  }
+  const byNeed = [...all].sort((a, b) => {
+    const as = isStale(a)
+    const bs = isStale(b)
+    if (as !== bs) return as ? -1 : 1
+    const ta = lastAt(a) || now
+    const tb = lastAt(b) || now
     return tb - ta
   })
-  const hot = byRecency.slice(0, HOT_BATCH)
+  const hot = byNeed.slice(0, HOT_BATCH)
 
-  // Round-robin over the STABLE listIndexedTokens() order (not byRecency, which reshuffles every
+  // Round-robin over the STABLE listIndexedTokens() order (not byNeed, which reshuffles every
   // cycle as volumes change) — a rotating index into a list that keeps reordering under it would
   // risk skipping tokens or revisiting others, defeating the coverage guarantee this exists for.
   const start = state.swapRotate % all.length

@@ -690,6 +690,13 @@ function isGetLogsDisabledRpc(url: string): boolean {
 /**
  * eth_getLogs client. theleak must not be in this list — it answers chainId then
  * refuses getLogs, which used to abort the indexer before arc-scan was tried.
+ *
+ * Infura is first even when its eth_call quota is exhausted: getLogs still
+ * answers. Verified 2026-09-01 on EVE (pool 0xA4B5…abcD) — Infura returned 10
+ * Swap events in a 24k-block gap while the tape stayed frozen at the last KV
+ * fill. arc-scan / baracat were tried first; viem fallback only moves on
+ * *errors*, so a public node that returns `[]` for a live pool parks the
+ * cursor at head and never retries Infura.
  */
 const _logsClients: ReturnType<typeof createPublicClient>[] = []
 export function arcLogsClient() {
@@ -697,7 +704,14 @@ export function arcLogsClient() {
   const infura = serverInfuraRpc()
   const seen = new Set<string>()
   const urls: string[] = []
-  for (const u of [ARC_SCAN_RPC, ARC_BARACAT_RPC, infura, ...ARC_SERVER_RPC_CANDIDATES]) {
+  const infuraFromCandidates = ARC_SERVER_RPC_CANDIDATES.filter((u) => isKeyedInfuraUrl(u))
+  for (const u of [
+    infura,
+    ...infuraFromCandidates,
+    ARC_BARACAT_RPC,
+    ARC_SCAN_RPC,
+    ...ARC_SERVER_RPC_CANDIDATES,
+  ]) {
     if (!u || isBannedArcRpc(u) || isGetLogsDisabledRpc(u) || seen.has(u)) continue
     seen.add(u)
     urls.push(u)
