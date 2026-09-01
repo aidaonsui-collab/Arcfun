@@ -4,7 +4,7 @@
  * Designed for Vercel Cron (maxDuration 300): incremental cursors, bounded chunks.
  */
 import { parseAbiItem, type Address, type Hex } from 'viem'
-import { ARC, arcPublicClient, arcInstantEnabled, arcReflectionEnabled } from '@/lib/contracts-arc'
+import { ARC, arcPublicClient, arcLogsClient, arcInstantEnabled, arcReflectionEnabled } from '@/lib/contracts-arc'
 import { instantCatalogFactories } from '@/lib/arc-instant-tokens'
 import { syncTradesToHead } from '@/lib/arc-trades'
 import { allInMultiplier, fetchOtcFeeBps } from '@/lib/bridge/robin-otc'
@@ -131,7 +131,7 @@ async function scanFactoryEvents(
   state: IndexerState,
   head: bigint,
 ): Promise<{ state: IndexerState; found: number }> {
-  const client = arcPublicClient()
+  const client = arcLogsClient()
   let cursor = BigInt(state.factoryCursor || '0')
   if (cursor === 0n) cursor = FACTORY_FLOOR > 0n ? FACTORY_FLOOR : 0n
   if (cursor >= head) return { state, found: 0 }
@@ -359,12 +359,18 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
       seeded = await seedTokensFromFactories()
     }
 
-    const client = arcPublicClient()
+    const client = arcLogsClient()
     const head = await client.getBlockNumber()
 
-    const f = await scanFactoryEvents(state, head)
-    state = f.state
-    factories = f.found
+    try {
+      const f = await scanFactoryEvents(state, head)
+      state = f.state
+      factories = f.found
+    } catch (e) {
+      // A dead getLogs must not skip swap catch-up — that froze EVE's tape while RadarDEX
+      // kept filling (2026-09-01: "failed all 1 log chunks" aborted the whole cycle).
+      console.warn('[arc-indexer] factory scan', summarizeRpcError(e))
+    }
 
     // OTC is deliberately NOT touched here — /api/arc/indexer/otc owns it end to end and runs
     // every minute (this cron every two), so everything below was pure duplicate work, and worse:
