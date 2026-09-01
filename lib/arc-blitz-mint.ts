@@ -1,13 +1,14 @@
 /**
  * Instant mint used by the mention bot and the x402 pay-to-launch route.
  */
-import { erc20Abi, parseEventLogs, type Address, type Hex } from 'viem'
+import { erc20Abi, type Address, type Hex } from 'viem'
 import { type BlitzTweet } from './arc-blitz'
 import { blitzTokenImageUrl } from './arc-blitz-image'
 import { buildCreateTokenMemeInstantArc, parseArcUsdc } from './arc-instant-launchpad'
-import { invalidateArcHomeCatalog } from './arc-catalog-cache'
+import { upsertArcCatalogToken } from './arc-catalog-cache'
+import { fetchArcPoolToken } from './arc-instant-tokens'
 import { setArcTokenMeta } from './arc-token-meta'
-import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
+import { waitArcCreateReceipt } from './arc-tx-receipt'
 import {
   ARC,
   ARC_INSTANT_CREATE_GAS,
@@ -63,15 +64,9 @@ export async function mintOnArc(args: {
     gas: ARC_INSTANT_CREATE_GAS,
     chain: wallet.chain,
   })
-  const rcpt = await client.waitForTransactionReceipt({ hash, timeout: 90_000 })
-  const [created] = parseEventLogs({
-    abi: INSTANT_QUOTE_FACTORY_ABI,
-    eventName: 'InstantQuoteTokenCreated',
-    logs: rcpt.logs,
-  })
-  const token = created?.args?.token as Address | undefined
-  const pool = created?.args?.pool as Address | undefined
-  if (!token) throw new Error('minted but InstantQuoteTokenCreated missing')
+  const created = await waitArcCreateReceipt(hash, 90_000)
+  const token = created.token
+  const pool = created.pool
 
   try {
     await setArcTokenMeta(token, {
@@ -89,7 +84,8 @@ export async function mintOnArc(args: {
     console.error('[blitz-bot] meta', e instanceof Error ? e.message : 'meta failed')
   }
   try {
-    await invalidateArcHomeCatalog()
+    const row = await fetchArcPoolToken(token)
+    if (row) await upsertArcCatalogToken(row)
   } catch {
     /* best-effort */
   }

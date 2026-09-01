@@ -13,6 +13,8 @@ import { kv } from '@vercel/kv'
 import type { PoolToken } from './tokens'
 import { isHiddenToken } from './tokens'
 import { buildArcCatalog } from './arc-instant-tokens'
+import { applyListingMeta } from './arc-listing-overlay'
+import { getArcTokenMeta, getArcTokenMetas } from './arc-token-meta'
 import { bigintReplacer } from './json-safe'
 import { summarizeRpcError } from './rpc-error'
 
@@ -117,14 +119,34 @@ function scheduleRefresh(): void {
   }
 }
 
+async function overlaySnapshot(snap: CatalogSnapshot): Promise<CatalogSnapshot> {
+  try {
+    const metas = await getArcTokenMetas(snap.tokens.map((t) => t.coinType || t.poolId || t.id))
+    if (metas.size === 0) return snap
+    return {
+      ...snap,
+      tokens: snap.tokens.map((t) => {
+        const id = (t.coinType || t.poolId || t.id || '').toLowerCase()
+        return applyListingMeta(t, metas.get(id) ?? null)
+      }),
+    }
+  } catch {
+    return snap
+  }
+}
+
 export async function getArcHomeCatalog(): Promise<CatalogSnapshot> {
   const snap = memory ?? (await readKv())
   if (snap) {
     memory = snap
     if (Date.now() - snap.at > FRESH_MS) scheduleRefresh()
-    return snap
+    return overlaySnapshot(snap)
   }
-  return rebuild()
+  return overlaySnapshot(await rebuild())
+}
+
+function catalogId(t: Pick<PoolToken, 'coinType' | 'poolId' | 'id'>): string {
+  return (t.coinType || t.poolId || t.id || '').toLowerCase()
 }
 
 /** KV/memory lookup only — never kicks a catalog rebuild. Token pages and the cheap
@@ -134,11 +156,59 @@ export async function getArcCatalogToken(address: string): Promise<PoolToken | n
   if (!needle) return null
   const snap = memory ?? (await readKv())
   if (!snap?.tokens?.length) return null
-  return (
+  const hit =
     snap.tokens.find((t) =>
       [t.coinType, t.poolId, t.id].some((v) => (v || '').toLowerCase() === needle),
     ) ?? null
-  )
+  if (!hit) return null
+  const meta = await getArcTokenMeta(needle).catch(() => null)
+  return applyListingMeta(hit, meta)
+}
+
+/**
+ * Stamp one token into the home snapshot (new launch or listing edit).
+ * Deleting the whole catalog used to hide a just-launched token until the 2-minute indexer cron.
+ */
+export async function upsertArcCatalogToken(row: PoolToken): Promise<void> {
+  const id = catalogId(row)
+  if (!id || isHiddenToken(id)) return
+  const snap = memory ?? (await readKv())
+  const tokens = snap?.tokens ? [...snap.tokens] : []
+  const idx = tokens.findIndex((t) => catalogId(t) === id)
+  if (idx >= 0) tokens[idx] = { ...tokens[idx], ...row }
+  else tokens.unshift(row)
+  const next: CatalogSnapshot = cloneJson({
+    tokens,
+    source: snap?.source || 'arc-instant',
+    at: Date.now(),
+  })
+  memory = next
+  await writeKv(next)
+}
+
+export async function patchArcCatalogListing(
+  address: string,
+  patch: Partial<Pick<PoolToken, 'imageUrl' | 'logoUrl' | 'twitter' | 'telegram' | 'website' | 'description' | 'streamUrl'>>,
+): Promise<void> {
+  const needle = address.toLowerCase()
+  if (!needle) return
+  const snap = memory ?? (await readKv())
+  if (!snap?.tokens?.length) return
+  const idx = snap.tokens.findIndex((t) => catalogId(t) === needle)
+  if (idx < 0) return
+  const prev = snap.tokens[idx]
+  const imageUrl = patch.imageUrl !== undefined ? patch.imageUrl : prev.imageUrl
+  const nextRow: PoolToken = {
+    ...prev,
+    ...patch,
+    imageUrl,
+    logoUrl: patch.logoUrl ?? patch.imageUrl ?? prev.logoUrl,
+  }
+  const tokens = [...snap.tokens]
+  tokens[idx] = nextRow
+  const next: CatalogSnapshot = cloneJson({ ...snap, tokens, at: Date.now() })
+  memory = next
+  await writeKv(next)
 }
 
 export async function invalidateArcHomeCatalog(): Promise<void> {

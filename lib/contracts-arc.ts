@@ -141,6 +141,11 @@ export function isArcRpcInfraError(err: unknown): boolean {
     // primary-ordering comment was written to fix. A non-2xx HTTP response (502/503/504/522/524,
     // Cloudflare or otherwise) is unambiguously "this endpoint is broken," not "the call reverted."
     raw.includes('http request failed') ||
+    raw.includes('fetch failed') ||
+    raw.includes('econnreset') ||
+    raw.includes('socket hang up') ||
+    raw.includes('wrong version number') ||
+    raw.includes('tlsv1 alert') ||
     raw.includes('bad gateway') ||
     raw.includes('gateway timeout') ||
     raw.includes('service unavailable') ||
@@ -635,6 +640,35 @@ export function arcPublicClient() {
     })
   }
   return _clients[0]
+}
+
+/**
+ * Receipt waits for Instant create. Public nodes lag or hang TLS on
+ * eth_getTransactionReceipt (create form sat on "Waiting for confirmation…" for minutes).
+ * Infura first; public URLs only if Infura is unset or quota-exhausted.
+ */
+const _receiptClients: ReturnType<typeof createPublicClient>[] = []
+export function arcReceiptClient() {
+  if (_receiptClients[0]) return _receiptClients[0]
+  const infura = serverInfuraRpc()
+  const seen = new Set<string>()
+  const urls: string[] = []
+  for (const u of [infura, ARC_SCAN_RPC, ...ARC_SERVER_RPC_CANDIDATES]) {
+    if (!u || isBannedArcRpc(u) || seen.has(u)) continue
+    seen.add(u)
+    urls.push(u)
+  }
+  _receiptClients[0] = createPublicClient({
+    chain: arcChain,
+    transport:
+      urls.length > 1
+        ? fallback(
+            urls.map((u) => http(u, { retryCount: 0, timeout: 3_000 })),
+            { shouldThrow: (error) => !isArcRpcInfraError(error) },
+          )
+        : http(urls[0] || ARC_SCAN_RPC, { timeout: 3_000 }),
+  })
+  return _receiptClients[0]
 }
 
 /**

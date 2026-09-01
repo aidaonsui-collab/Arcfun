@@ -5,8 +5,8 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAccount, useConnect, useSwitchChain, useWriteContract, usePublicClient, useSignMessage } from 'wagmi'
-import { erc20Abi, getAddress, parseEventLogs, isAddress, type Address } from 'viem'
+import { useAccount, useConnect, useSwitchChain, useWriteContract, useSignMessage } from 'wagmi'
+import { erc20Abi, getAddress, isAddress, type Address } from 'viem'
 import { prepareTokenRegisterAuth } from '@/lib/arc-auth'
 import { Loader2, AlertCircle, CheckCircle, ImagePlus } from 'lucide-react'
 import {
@@ -22,13 +22,12 @@ import {
 import {
   buildCreateTokenMemeInstantArc,
   parseArcUsdc,
-  INSTANT_QUOTE_FACTORY_ABI,
 } from '@/lib/arc-instant-launchpad'
 import {
   buildCreateTokenReflectionArc,
-  INSTANT_REFLECTION_FACTORY_ABI,
   ARC_REFLECTION_CREATE_GAS,
 } from '@/lib/arc-reflection-launchpad'
+import { waitArcCreateConfirmed } from '@/lib/arc-wait-create'
 import { uploadImage } from '@/lib/upload-image'
 import { tileGradient } from '@/lib/ui-format'
 import { CrucibleFeePath } from '@/components/CrucibleFeePath'
@@ -83,7 +82,6 @@ export function ArcCreateForm({
   const { switchChain, isPending: switching } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
   const { signMessageAsync } = useSignMessage()
-  const publicClient = usePublicClient({ chainId: ARC_CHAIN_ID })
 
   const [launchType, setLaunchType] = useState<LaunchType>('instant')
   const [name, setName] = useState('')
@@ -287,15 +285,9 @@ export function ArcCreateForm({
           gas: ARC_REFLECTION_CREATE_GAS,
         })
         setStep('confirming')
-        if (!publicClient) throw new Error('No Arc RPC client available to confirm the transaction.')
-        const rcpt = await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 })
-        const [created] = parseEventLogs({
-          abi: INSTANT_REFLECTION_FACTORY_ABI,
-          eventName: 'InstantReflectionCreated',
-          logs: rcpt.logs,
-        })
-        token = created?.args?.token as Address | undefined
-        pool = created?.args?.pool as Address | undefined
+        const created = await waitArcCreateConfirmed(hash)
+        token = created.token
+        pool = created.pool
       } else {
         setStep('creating')
         const call = buildCreateTokenMemeInstantArc(
@@ -315,15 +307,9 @@ export function ArcCreateForm({
           gas: ARC_INSTANT_CREATE_GAS,
         })
         setStep('confirming')
-        if (!publicClient) throw new Error('No Arc RPC client available to confirm the transaction.')
-        const rcpt = await publicClient.waitForTransactionReceipt({ hash, timeout: 90_000 })
-        const [created] = parseEventLogs({
-          abi: INSTANT_QUOTE_FACTORY_ABI,
-          eventName: 'InstantQuoteTokenCreated',
-          logs: rcpt.logs,
-        })
-        token = created?.args?.token as Address | undefined
-        pool = created?.args?.pool as Address | undefined
+        const created = await waitArcCreateConfirmed(hash)
+        token = created.token
+        pool = created.pool
       }
 
       if (!token)
