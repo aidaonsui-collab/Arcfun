@@ -8,6 +8,9 @@ import { jsonSafe } from '@/lib/json-safe'
 import { summarizeRpcError } from '@/lib/rpc-error'
 
 export const dynamic = 'force-dynamic'
+/** Instant factory enumeration can burn the default 15s when public RPCs hang.
+ *  Indexer fill answers first; this budget is for the background rebuild. */
+export const maxDuration = 60
 
 export async function GET() {
   if (!arcInstantEnabled() && !arcCurveEnabled()) {
