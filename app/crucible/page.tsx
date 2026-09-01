@@ -5,6 +5,7 @@ import {
   ARCFUN_TOKEN,
   BURN_ADDRESS,
   CRUCIBLE_CONTRACTS_NOTE,
+  emptyCrucibleStats,
   usesLegacyOnChainSplits,
 } from '@/lib/crucible'
 import { fetchCrucibleStats } from '@/lib/crucible-stats'
@@ -23,6 +24,35 @@ export const metadata: Metadata = {
     'A buy/burn no one has to click. You trade. Fees accrue. When it cooks, Crucible buys $EVE and burns it.',
 }
 
+/**
+ * Hard wall-clock bound for the two Arc reads this page renders with.
+ *
+ * Both already degrade on *error* — liveBurnedPct catches, fetchCrucibleStats falls back to
+ * emptyCrucibleStats — but neither was bounded on *slowness*, and Arc's public RPCs are erratic
+ * (a single eth_call has been measured at 13s). Nothing here is worth blocking a render on:
+ * every field has a defined empty state.
+ *
+ * Found 2026-09-01: this page is prerendered (revalidate = 20), and Next gives a page 60s to
+ * build. Deployment dpl_CLDDk8vq… failed all 3 attempts at exactly that limit. The trigger was
+ * #126 making a failed eth_call fail OVER to the next endpoint rather than throwing immediately —
+ * correct behaviour, but it turned one fast failure into three sequential endpoint attempts and
+ * pushed this page past 60s. The build was only ever passing because the RPC failed fast.
+ * 12s each keeps the pair well inside the budget with room for the retry.
+ */
+const RPC_DEADLINE_MS = 12_000
+
+function withDeadline<T>(work: Promise<T>, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    work.catch(() => fallback),
+    new Promise<T>((resolve) => {
+      timer = setTimeout(() => resolve(fallback), RPC_DEADLINE_MS)
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
 async function liveBurnedPct(): Promise<number | null> {
   if (!ARCFUN_TOKEN || !isAddress(ARCFUN_TOKEN)) return null
   try {
@@ -33,8 +63,8 @@ async function liveBurnedPct(): Promise<number | null> {
 }
 
 export default async function CruciblePage() {
-  const livePct = await liveBurnedPct()
-  const stats = await fetchCrucibleStats(livePct)
+  const livePct = await withDeadline<number | null>(liveBurnedPct(), null)
+  const stats = await withDeadline(fetchCrucibleStats(livePct), emptyCrucibleStats(livePct))
   const explorer = ARC_EXPLORER || 'https://arc-scan.org'
   const burnedHref = ARCFUN_TOKEN
     ? `${explorer}/token/${ARCFUN_TOKEN}?a=${BURN_ADDRESS}`
