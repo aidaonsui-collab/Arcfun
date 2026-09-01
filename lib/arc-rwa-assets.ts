@@ -14,7 +14,8 @@
  *   NEXT_PUBLIC_ARC_RWA_ASSETS=[{"id":"usyc","symbol":"USYC","address":"0x…","factory":"0x…","decimals":6}]
  *
  * Create is ready only when address + factory are both set. Token-only (Circle
- * published USYC, we have not deployed Instant against it) stays Soon.
+ * published USYC / a tokenized CRCL share, we have not deployed Instant against
+ * it) stays Soon.
  * Permissioned MMFs still need Circle to allowlist the factory / NFPM / locker.
  */
 import { isAddress, type Address } from 'viem'
@@ -113,6 +114,9 @@ function builtinCatalog(): ArcRwaAsset[] {
   const buidlAddr = envAddr('NEXT_PUBLIC_ARC_RWA_BUIDL')
   const buidlFactory = envAddr('NEXT_PUBLIC_ARC_RWA_BUIDL_FACTORY')
   const buidlEnabled = envFlag('NEXT_PUBLIC_ARC_RWA_BUIDL_ENABLED')
+  const crclAddr = envAddr('NEXT_PUBLIC_ARC_RWA_CRCL')
+  const crclFactory = envAddr('NEXT_PUBLIC_ARC_RWA_CRCL_FACTORY')
+  const crclEnabled = envFlag('NEXT_PUBLIC_ARC_RWA_CRCL_ENABLED')
 
   return [
     {
@@ -144,6 +148,22 @@ function builtinCatalog(): ArcRwaAsset[] {
       permissioned: true,
       chainId: ARC_CHAIN_ID,
       enabled: buidlEnabled ?? Boolean(buidlFactory),
+    },
+    {
+      id: 'crcl',
+      symbol: 'CRCL',
+      name: 'Circle Internet Group (tokenized)',
+      kind: 'equity',
+      address: crclAddr,
+      // Tokenized-stock issuers usually use 18dp. Override with NEXT_PUBLIC_ARC_RWA_CRCL_DECIMALS.
+      decimals: Number(process.env.NEXT_PUBLIC_ARC_RWA_CRCL_DECIMALS) > 0
+        ? Number(process.env.NEXT_PUBLIC_ARC_RWA_CRCL_DECIMALS)
+        : 18,
+      factory: crclFactory,
+      locker: envAddr('NEXT_PUBLIC_ARC_RWA_CRCL_LOCKER'),
+      permissioned: true,
+      chainId: ARC_CHAIN_ID,
+      enabled: crclEnabled ?? Boolean(crclFactory),
     },
   ]
 }
