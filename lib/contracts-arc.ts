@@ -63,8 +63,19 @@ function isKeyedInfuraUrl(url: string): boolean {
 
 /** Server-only Infura Arc URL. Empty in the browser bundle (no NEXT_PUBLIC_ prefix). */
 function serverInfuraRpc(): string {
-  const key = (process.env.INFURA_API_KEY || process.env.ARC_INFURA_API_KEY || '').trim()
-  return key ? `${ARC_INFURA_HOST}/v3/${key}` : ''
+  const key = (
+    process.env.INFURA_API_KEY ||
+    process.env.ARC_INFURA_API_KEY ||
+    // Already in the client bundle on this project; use it on the server if
+    // the unprefixed keys were never set. getLogs still works on this project
+    // when eth_call is quota-exhausted.
+    process.env.NEXT_PUBLIC_INFURA_API_KEY ||
+    ''
+  ).trim()
+  if (key) return `${ARC_INFURA_HOST}/v3/${key}`
+  const priv = (process.env.ARC_RPC || '').trim()
+  if (priv && isKeyedInfuraUrl(priv)) return priv
+  return ''
 }
 
 /** Public unauthenticated fallbacks when Infura is unset / project lacks Arc / rate-limited. */
@@ -698,9 +709,7 @@ function isGetLogsDisabledRpc(url: string): boolean {
  * *errors*, so a public node that returns `[]` for a live pool parks the
  * cursor at head and never retries Infura.
  */
-const _logsClients: ReturnType<typeof createPublicClient>[] = []
-export function arcLogsClient() {
-  if (_logsClients[0]) return _logsClients[0]
+export function arcLogsRpcUrls(): string[] {
   const infura = serverInfuraRpc()
   const seen = new Set<string>()
   const urls: string[] = []
@@ -716,6 +725,13 @@ export function arcLogsClient() {
     seen.add(u)
     urls.push(u)
   }
+  return urls
+}
+
+const _logsClients: ReturnType<typeof createPublicClient>[] = []
+export function arcLogsClient() {
+  if (_logsClients[0]) return _logsClients[0]
+  const urls = arcLogsRpcUrls()
   _logsClients[0] = createPublicClient({
     chain: arcChain,
     transport:

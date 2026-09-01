@@ -12,9 +12,16 @@
  */
 import { after } from 'next/server'
 import { kv } from '@vercel/kv'
-import { erc20Abi as erc20DecimalsAbi, formatUnits, parseAbiItem, type Address, type Log } from 'viem'
-import { ARC, arcLogsClient, arcPublicClient } from './contracts-arc'
+import { createPublicClient, formatUnits, http, parseAbiItem, type Address, type Log } from 'viem'
+import {
+  ARC,
+  arcChain,
+  arcLogsClient,
+  arcLogsRpcUrls,
+  isArcRpcInfraError,
+} from './contracts-arc'
 import { fetchArcPoolToken } from './arc-instant-tokens'
+import { getToken } from './arc-indexer/store'
 import { coalesceAsync } from './coalesce'
 import {
   type EvmTrade,
@@ -110,28 +117,24 @@ async function resolvePool(
   token: Address,
 ): Promise<{ pool: Address; tokenIs0: boolean; tokenDecimals: number } | null> {
   try {
-    const t = await fetchArcPoolToken(token)
-    const pool = t?.instantMeta?.uniPool as Address | undefined
+    let pool: Address | undefined
+    // KV first — no eth_call. Infura quota on getPool/token0 used to make
+    // resolvePool return null and skip the whole tape sync.
+    try {
+      const row = await getToken(token)
+      if (row?.pool && row.pool !== ZERO) pool = row.pool as Address
+    } catch {
+      /* fall through to on-chain */
+    }
+    if (!pool) {
+      const t = await fetchArcPoolToken(token)
+      pool = t?.instantMeta?.uniPool as Address | undefined
+    }
     if (!pool || pool === ZERO) return null
-    // Uni V3 token0 is the lower address. Don't eth_call token0() — Infura's
-    // eth_call quota is exhausted while getLogs still works, and a failed
-    // token0() used to abort the whole tape sync (resolvePool returned null).
+    // Uni V3 token0 is the lower address.
     const usdc = (ARC.USDC_ERC20 || ARC.USDC).toLowerCase()
     const tokenIs0 = token.toLowerCase() < usdc
-    let tokenDecimals: number = ARC.TOKEN_DECIMALS
-    try {
-      const raw = Number(
-        await arcPublicClient().readContract({
-          address: token,
-          abi: erc20DecimalsAbi,
-          functionName: 'decimals',
-        }),
-      )
-      if (Number.isFinite(raw) && raw > 0) tokenDecimals = raw
-    } catch {
-      /* Instant tokens are 18 */
-    }
-    return { pool, tokenIs0, tokenDecimals }
+    return { pool, tokenIs0, tokenDecimals: ARC.TOKEN_DECIMALS }
   } catch {
     return null
   }
@@ -175,8 +178,37 @@ function buildStats(trades: EvmTrade[]): EvmTradeStats {
 /** Chunked ascending eth_getLogs scan over [fromBlock, toBlock], parsed into EvmTrade rows. Used
  *  for both the one-time cold-start backfill and the warm incremental catch-up — same shape,
  *  different range. */
+async function getSwapLogs(pool: Address, fromBlock: bigint, toBlock: bigint): Promise<V3SwapLog[]> {
+  const urls = arcLogsRpcUrls()
+  let lastEmpty: V3SwapLog[] = []
+  let lastErr: unknown
+  for (let i = 0; i < urls.length; i++) {
+    const client = createPublicClient({
+      chain: arcChain,
+      transport: http(urls[i], { retryCount: 0, timeout: 4_000 }),
+    })
+    try {
+      const logs = (await client.getLogs({
+        address: pool,
+        event: V3_SWAP,
+        fromBlock,
+        toBlock,
+      })) as V3SwapLog[]
+      if (logs.length > 0) return logs
+      lastEmpty = logs
+      // Empty is not success when another URL might still have the fills.
+      continue
+    } catch (e) {
+      lastErr = e
+      if (!isArcRpcInfraError(e) && i === urls.length - 1) throw e
+    }
+  }
+  if (lastEmpty.length === 0 && lastErr) throw lastErr
+  return lastEmpty
+}
+
 async function scanSwapRange(
-  client: ReturnType<typeof arcPublicClient>,
+  client: ReturnType<typeof arcLogsClient>,
   pool: Address,
   tokenIs0: boolean,
   tokenDecimals: number,
@@ -190,12 +222,7 @@ async function scanSwapRange(
     const chunkEnd = cursor + CHUNK - 1n > toBlock ? toBlock : cursor + CHUNK - 1n
     let logs: V3SwapLog[] = []
     try {
-      logs = (await client.getLogs({
-        address: pool,
-        event: V3_SWAP,
-        fromBlock: cursor,
-        toBlock: chunkEnd,
-      })) as V3SwapLog[]
+      logs = await getSwapLogs(pool, cursor, chunkEnd)
     } catch (e) {
       console.warn('[arc-trades] getLogs', summarizeRpcError(e))
       // Do not advance past a failed chunk — persisting `to` used to skip the gap
@@ -329,7 +356,7 @@ const lastRewindAt = new Map<string, number>()
 
 /** Repair a cursor that jumped over a failed/empty getLogs gap. */
 async function maybeRewindStaleCursor(
-  client: ReturnType<typeof arcPublicClient>,
+  client: ReturnType<typeof arcLogsClient>,
   key: string,
   pool: Address,
   tokenIs0: boolean,
@@ -372,9 +399,11 @@ export async function syncTradesToHead(token: Address): Promise<void> {
   const last = lastSyncedAt.get(key)
   if (last != null && Date.now() - last < SYNC_FRESH_MS) return
 
+  let didWork = false
   await coalesceAsync(`sync:${key}`, async () => {
     const orient = await resolvePool(token)
     if (!orient) return
+    didWork = true
     const { pool, tokenIs0, tokenDecimals } = orient
     const client = arcLogsClient()
     const head = await client.getBlockNumber()
@@ -442,7 +471,7 @@ export async function syncTradesToHead(token: Address): Promise<void> {
     await maybeRewindStaleCursor(client, key, pool, tokenIs0, tokenDecimals, head)
   })
 
-  lastSyncedAt.set(key, Date.now())
+  if (didWork) lastSyncedAt.set(key, Date.now())
 }
 
 /**

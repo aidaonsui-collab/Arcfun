@@ -7,6 +7,7 @@ import { fetchArcTrades } from '@/lib/arc-trades'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const EMPTY = {
   trades: [],
