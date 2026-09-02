@@ -10,8 +10,8 @@
  * didn't need editing.
  */
 import { kv } from '@vercel/kv'
-import { erc20Abi, parseAbiItem, type Address, type Log } from 'viem'
-import { ARC, arcPublicClient, instantProtocolAddresses } from './contracts-arc'
+import { encodeAbiParameters, erc20Abi, keccak256, parseAbiItem, toHex, type Address, type Log } from 'viem'
+import { ARC, arcLogsClient, arcPublicClient, instantProtocolAddresses } from './contracts-arc'
 import { mapWithConcurrency } from './concurrency'
 import { withRateLimitRetry } from './rpc-retry'
 
@@ -128,7 +128,42 @@ async function transferRecipients(token: Address, fromBlock: bigint): Promise<Se
 }
 
 
+/** OZ ERC20 `_balances[account]` slot. $EVE layout verified 2026-09-02 (slot 2 = 1e9 * 1e18). */
+function mappingSlot(key: Address, slot: bigint): `0x${string}` {
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: 'address' }, { type: 'uint256' }],
+      [key, slot],
+    ),
+  )
+}
+
+/** Percent with 6 d.p. so 17.6k of 1B (0.00176%) does not integer-round to 0. */
+function burnedPctFromRaw(burned: bigint, totalSupply: bigint): number | null {
+  if (typeof totalSupply !== 'bigint' || totalSupply === 0n) return null
+  return Number((burned * 100_000_000n) / totalSupply) / 1_000_000
+}
+
+async function fetchTokenBurnedPctFromStorage(token: Address): Promise<number | null> {
+  const client = arcLogsClient()
+  try {
+    const [supplyRaw, deadRaw, zeroRaw] = await Promise.all([
+      client.getStorageAt({ address: token, slot: toHex(2n, { size: 32 }) }),
+      client.getStorageAt({ address: token, slot: mappingSlot(DEAD, 0n) }),
+      client.getStorageAt({ address: token, slot: mappingSlot(ZERO, 0n) }),
+    ])
+    const totalSupply = BigInt(supplyRaw ?? '0')
+    const burned = BigInt(deadRaw ?? '0') + BigInt(zeroRaw ?? '0')
+    return burnedPctFromRaw(burned, totalSupply)
+  } catch {
+    return null
+  }
+}
+
 export async function fetchTokenBurnedPct(token: Address): Promise<number | null> {
+  // Storage first: Infura eth_call is quota-dead; arc-scan getStorageAt still answers.
+  const fromStorage = await fetchTokenBurnedPctFromStorage(token)
+  if (fromStorage != null) return fromStorage
   const client = arcPublicClient()
   try {
     const [totalSupply, deadBal, zeroBal] = await Promise.all([
@@ -136,10 +171,9 @@ export async function fetchTokenBurnedPct(token: Address): Promise<number | null
       client.readContract({ address: token, abi: erc20Abi, functionName: 'balanceOf', args: [DEAD] }),
       client.readContract({ address: token, abi: erc20Abi, functionName: 'balanceOf', args: [ZERO] }),
     ])
-    if (typeof totalSupply !== 'bigint' || totalSupply === 0n) return null
     const burned =
       (typeof deadBal === 'bigint' ? deadBal : 0n) + (typeof zeroBal === 'bigint' ? zeroBal : 0n)
-    return toPercent(burned, totalSupply)
+    return burnedPctFromRaw(burned, typeof totalSupply === 'bigint' ? totalSupply : 0n)
   } catch {
     return null
   }

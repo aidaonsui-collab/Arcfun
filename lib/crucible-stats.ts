@@ -86,6 +86,8 @@ function mergeMelts(a: CrucibleMelt[], b: CrucibleMelt[]): CrucibleMelt[] {
   return [...byId.values()].sort((x, y) => y.ts - x.ts || x.id.localeCompare(y.id))
 }
 
+const INSTANT_SUPPLY = 1_000_000_000
+
 function statsFrom(melts: CrucibleMelt[], burnedPctLive: number | null): CrucibleStats {
   const list = mergeMelts(melts, [])
   let usdcIn = 0
@@ -96,11 +98,12 @@ function statsFrom(melts: CrucibleMelt[], burnedPctLive: number | null): Crucibl
     arcfunBought += m.arcfunBought
     arcfunAtDead += m.arcfunBurned
   }
+  const fromTape = arcfunAtDead > 0 ? (arcfunAtDead / INSTANT_SUPPLY) * 100 : null
   return {
     usdcIn,
     arcfunBought,
     arcfunAtDead,
-    burnedPct: burnedPctLive,
+    burnedPct: burnedPctLive ?? fromTape,
     lastMelt: list[0] ?? null,
     melts: list,
     preview: false,
