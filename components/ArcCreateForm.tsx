@@ -446,15 +446,7 @@ export function ArcCreateForm({
               ? 'Fixed supply of 1B. One transaction, straight onto Uniswap V3. Launch-token LP fees auto-burn.'
               : 'Fixed supply of 1B · Uniswap V3 Instant + Reflection paths. Public launches opening soon.'}
         </p>
-        {!compact ? (
-          <p className="mt-2 mb-0 text-[13px] text-t3">
-            Have a tweet?{' '}
-            <a href="/blitz" className="text-lime-t font-semibold hover:text-white">
-              Blitz launch
-            </a>{' '}
-            fills this form from a post.
-          </p>
-        ) : initial?.handle ? (
+        {compact && initial?.handle ? (
           <p className="mt-2 mb-0 text-[13px] text-lime-t font-semibold">From @{initial.handle}</p>
         ) : null}
 

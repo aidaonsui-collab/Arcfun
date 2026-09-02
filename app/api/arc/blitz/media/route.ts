@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { limitOr429 } from '@/lib/rate-limit'
+import { blitzLaunchEnabled } from '@/lib/arc-blitz'
 import { allowedMediaUrl } from '@/lib/arc-blitz-server'
 
 export const dynamic = 'force-dynamic'
@@ -8,6 +9,9 @@ export const maxDuration = 15
 const MAX_BYTES = 4_000_000
 
 export async function GET(req: NextRequest) {
+  if (!blitzLaunchEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   const blocked = await limitOr429(req, 'blitz-media', 40, 60)
   if (blocked) return blocked
   const src = allowedMediaUrl((req.nextUrl.searchParams.get('u') || '').trim())

@@ -17,6 +17,8 @@ const nextConfig = {
     return [
       { source: '/port', destination: '/studio', permanent: true },
       { source: '/port/:path*', destination: '/studio/:path*', permanent: true },
+      { source: '/blitz', destination: '/', permanent: false },
+      { source: '/blitz/:path*', destination: '/', permanent: false },
     ]
   },
   async rewrites() {

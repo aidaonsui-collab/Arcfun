@@ -4,6 +4,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { kv } from '@vercel/kv'
+import { blitzLaunchEnabled } from '@/lib/arc-blitz'
 import {
   BLITZ_AUTHOR_TTL_SEC,
   blitzAuthorKey,
@@ -38,6 +39,9 @@ async function authorSeen(id: string): Promise<boolean> {
 }
 
 export async function GET(req: NextRequest) {
+  if (!blitzLaunchEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   if (!blitzPayEnabled()) {
     return NextResponse.json({ error: 'blitz nanogas pay is not configured' }, { status: 503 })
   }
@@ -62,6 +66,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (!blitzLaunchEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   if (!blitzPayEnabled()) {
     return NextResponse.json({ error: 'blitz nanogas pay is not configured' }, { status: 503 })
   }
