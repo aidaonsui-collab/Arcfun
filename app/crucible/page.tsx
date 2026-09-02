@@ -53,10 +53,15 @@ function withDeadline<T>(work: Promise<T>, fallback: T): Promise<T> {
   })
 }
 
+const EVE_TOKEN = (
+  ARCFUN_TOKEN && isAddress(ARCFUN_TOKEN)
+    ? ARCFUN_TOKEN
+    : '0x19209E55049bc613c5cC8b66B7DF7824096e78CF'
+) as Address
+
 async function liveBurnedPct(): Promise<number | null> {
-  if (!ARCFUN_TOKEN || !isAddress(ARCFUN_TOKEN)) return null
   try {
-    return await fetchTokenBurnedPct(ARCFUN_TOKEN as Address)
+    return await fetchTokenBurnedPct(EVE_TOKEN)
   } catch {
     return null
   }
@@ -66,9 +71,7 @@ export default async function CruciblePage() {
   const livePct = await withDeadline<number | null>(liveBurnedPct(), null)
   const stats = await withDeadline(fetchCrucibleStats(livePct), emptyCrucibleStats(livePct))
   const explorer = ARC_EXPLORER || 'https://arc-scan.org'
-  const burnedHref = ARCFUN_TOKEN
-    ? `${explorer}/token/${ARCFUN_TOKEN}?a=${BURN_ADDRESS}`
-    : `${explorer}/address/${BURN_ADDRESS}`
+  const burnedHref = `${explorer}/token/${EVE_TOKEN}?a=${BURN_ADDRESS}`
   const meltCount = stats.melts.length
   const tiles = [
     {

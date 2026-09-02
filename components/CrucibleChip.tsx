@@ -10,8 +10,10 @@ import { fmtCompact, fmtUsd } from '@/lib/ui-format'
 function fmtBurnedPct(p: number): string {
   if (!Number.isFinite(p)) return '—'
   if (p <= 0) return '0%'
-  if (p < 0.1) return '<0.1%'
   if (p >= 99.95) return '100%'
+  if (p < 0.0001) return '<0.0001%'
+  if (p < 0.01) return `${p.toFixed(4)}%`
+  if (p < 0.1) return `${p.toFixed(3)}%`
   if (p < 1) return `${p.toFixed(2)}%`
   return `${p.toFixed(1)}%`
 }
