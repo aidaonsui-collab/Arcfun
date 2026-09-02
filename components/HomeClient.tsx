@@ -161,12 +161,6 @@ export function HomeClient({
                 Launch a token
               </Link>
               <Link
-                href="/blitz"
-                className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
-              >
-                Blitz launch
-              </Link>
-              <Link
                 href="/docs"
                 className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
               >
@@ -180,12 +174,6 @@ export function HomeClient({
               </Link>
             </div>
             <div className="hidden lg:flex flex-wrap gap-3 pt-1">
-              <Link
-                href="/blitz"
-                className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
-              >
-                Blitz launch
-              </Link>
               <Link
                 href="/docs"
                 className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"

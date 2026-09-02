@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { limitOr429 } from '@/lib/rate-limit'
-import { sanitizeHandle, DEFAULT_WATCH } from '@/lib/arc-blitz'
+import { blitzLaunchEnabled, sanitizeHandle, DEFAULT_WATCH } from '@/lib/arc-blitz'
 import { fetchWatchFeed, blitzWatchLive } from '@/lib/arc-blitz-server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 20
 
 export async function GET(req: NextRequest) {
+  if (!blitzLaunchEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   const blocked = await limitOr429(req, 'blitz-feed', 20, 60)
   if (blocked) return blocked
   const raw = (req.nextUrl.searchParams.get('handles') || '').trim()

@@ -1,18 +1,17 @@
 /**
- * GET|POST /api/arc/blitz/bot — Vercel Cron every minute (see vercel.json).
- * Polls the bot account's X mentions (OAuth 1.0a user context) and Instant-creates
- * matching launch commands on Arc.
- *
- * Auth: Vercel Cron sends `Authorization: Bearer $CRON_SECRET` automatically once
- * CRON_SECRET is set — https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs.
+ * GET|POST /api/arc/blitz/bot — Blitz launch is unwired. Cron removed from vercel.json.
  */
 import { NextRequest, NextResponse } from 'next/server'
+import { blitzLaunchEnabled } from '@/lib/arc-blitz'
 import { runBlitzBotTick } from '@/lib/arc-blitz-bot'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 async function handle(req: NextRequest) {
+  if (!blitzLaunchEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   const cronSecret = process.env.CRON_SECRET
   const auth = req.headers.get('authorization')
   if (!cronSecret || auth !== `Bearer ${cronSecret}`) {

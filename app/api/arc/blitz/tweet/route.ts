@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { limitOr429 } from '@/lib/rate-limit'
-import { draftFromTweet } from '@/lib/arc-blitz'
+import { blitzLaunchEnabled, draftFromTweet } from '@/lib/arc-blitz'
 import { fetchTweetByUrl } from '@/lib/arc-blitz-server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 15
 
 export async function GET(req: NextRequest) {
+  if (!blitzLaunchEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   const blocked = await limitOr429(req, 'blitz-tweet', 30, 60)
   if (blocked) return blocked
   const url = (req.nextUrl.searchParams.get('url') || '').trim()

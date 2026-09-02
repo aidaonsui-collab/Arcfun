@@ -1,7 +1,11 @@
 /**
  * Blitz launch — tweet → Instant TOKEN/USDC create.
+ * Unwired: UI hidden, /api/arc/blitz/* 404, Vercel cron removed.
  * Same factory and pair as /create. This is only the fill path.
  */
+export function blitzLaunchEnabled(): boolean {
+  return false
+}
 import { blitzTokenImageUrl } from './arc-blitz-image'
 
 export const BLITZ_WATCH_KEY = 'arcfun_blitz_watch'
