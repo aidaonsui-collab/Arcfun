@@ -10,8 +10,6 @@ import { TokenCard, TokenRailCard } from '@/components/TokenCard'
 import { PadVolumeTile } from '@/components/PadVolumeTile'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
 
-const EVE_SNIPER_HREF = 'https://t.me/Eve_arc_bot?start=r-r8704728310'
-
 type SortKey = 'Top volume' | 'New' | 'Top MC'
 
 const VOL_WINDOWS: VolumeWindow[] = ['1H', '6H', '12H', '24H']
@@ -144,14 +142,6 @@ export function HomeClient({
                 volume24h={padVolume.volume24h}
                 volumeAll={padVolume.volumeAll}
               />
-              <a
-                href={EVE_SNIPER_HREF}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center px-4 rounded-[14px] bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
-              >
-                Eve sniper
-              </a>
             </div>
             <div className="flex flex-wrap gap-3 pt-1 lg:hidden">
               <Link
