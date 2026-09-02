@@ -15,6 +15,7 @@ import {
 } from '@/lib/arc-instant-tokens'
 import { fetchTokenBurnedPct } from '@/lib/evm-holders'
 import { getArcCatalogToken } from '@/lib/arc-catalog-cache'
+import { lastSparkClose } from '@/lib/arc-catalog-from-index'
 import { arcInstantEnabled, arcCurveEnabled } from '@/lib/contracts-arc'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { isHiddenToken, type PoolToken } from '@/lib/tokens'
@@ -50,14 +51,31 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
 
 async function overlayLivePrice(pool: PoolToken, token: Address): Promise<PoolToken> {
   const uni = pool.instantMeta?.uniPool as Address | undefined
-  if (!uni) return pool
-  const live = await withTimeout(getArcLivePriceUsdc(token, uni), SLOT0_MS)
-  if (live == null || !(live > 0)) return pool
-  return {
-    ...pool,
-    currentPrice: live,
-    marketCap: arcMarketCapUsd(live),
+  if (uni) {
+    const live = await withTimeout(getArcLivePriceUsdc(token, uni), SLOT0_MS)
+    if (live != null && live > 0) {
+      return {
+        ...pool,
+        currentPrice: live,
+        marketCap: arcMarketCapUsd(live),
+      }
+    }
   }
+  try {
+    const { getVolume } = await import('@/lib/arc-indexer/store')
+    const vol = await getVolume(token)
+    const lastPrice = lastSparkClose(vol)
+    if (lastPrice > 0) {
+      return {
+        ...pool,
+        currentPrice: lastPrice,
+        marketCap: arcMarketCapUsd(lastPrice),
+      }
+    }
+  } catch {
+    /* indexer optional — keep catalog/slot0 pool */
+  }
+  return pool
 }
 
 async function overlayPoolStats(pool: PoolToken, token: Address): Promise<PoolToken> {

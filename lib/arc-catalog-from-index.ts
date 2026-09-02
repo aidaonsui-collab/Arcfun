@@ -25,7 +25,16 @@ export function catalogId(t: Pick<PoolToken, 'coinType' | 'poolId' | 'id'>): str
   return (t.coinType || t.poolId || t.id || '').toLowerCase()
 }
 
-/** RPC/catalog rows win; indexer fills ids the rebuild missed. */
+function tradeTs(t: Pick<PoolToken, 'lastTradeAt'>): number {
+  const n = t.lastTradeAt
+  return typeof n === 'number' && n > 0 ? n : 0
+}
+
+/**
+ * RPC/catalog rows win on identity; indexer fills ids the rebuild missed.
+ * When fallback lastTradeAt is newer (or primary has none), take trade/price
+ * fields from fallback and keep Instant metadata (name, image, instantMeta).
+ */
 export function mergeCatalogTokens(primary: PoolToken[], fallback: PoolToken[]): PoolToken[] {
   const byId = new Map<string, PoolToken>()
   for (const t of primary) {
@@ -34,7 +43,29 @@ export function mergeCatalogTokens(primary: PoolToken[], fallback: PoolToken[]):
   }
   for (const t of fallback) {
     const id = catalogId(t)
-    if (id && !byId.has(id)) byId.set(id, t)
+    if (!id) continue
+    const existing = byId.get(id)
+    if (!existing) {
+      byId.set(id, t)
+      continue
+    }
+    const fallbackAt = tradeTs(t)
+    const primaryAt = tradeTs(existing)
+    if (fallbackAt > primaryAt) {
+      byId.set(id, {
+        ...existing,
+        currentPrice: t.currentPrice,
+        marketCap: t.marketCap,
+        lastTradeAt: t.lastTradeAt,
+        volume1h: t.volume1h,
+        volume6h: t.volume6h,
+        volume12h: t.volume12h,
+        volume24h: t.volume24h,
+        volumeAll: t.volumeAll,
+        priceChange24h: t.priceChange24h,
+        sparkCloses: t.sparkCloses,
+      })
+    }
   }
   return [...byId.values()]
 }
@@ -49,7 +80,7 @@ function marketCapUsd(priceUsdc: number): number {
   return priceUsdc * TOTAL_SUPPLY_HUMAN
 }
 
-function lastSparkClose(vol: IndexedVolume | null | undefined): number {
+export function lastSparkClose(vol: IndexedVolume | null | undefined): number {
   const closes = vol?.sparkCloses
   if (!closes?.length) return 0
   const last = closes[closes.length - 1]
