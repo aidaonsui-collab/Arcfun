@@ -2,7 +2,7 @@
 
 /**
  * Sticky nav — brand mark, search, ArcStudio, wallet chip.
- * Mobile: Home, Crucible, ArcStudio, Create collection, Profile, Docs.
+ * Mobile: Home, Crucible, Eve Vault, ArcStudio, Create collection, Profile, Docs.
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -13,6 +13,7 @@ import {
   CircleUser,
   Flame,
   Home,
+  Landmark,
   LayoutGrid,
   Menu,
   PlusCircle,
@@ -219,6 +220,7 @@ export function SiteHeader() {
 
               {navRow('/', 'Home', Home)}
               {navRow('/crucible', 'Crucible', Flame)}
+              {navRow('/vault', 'Eve Vault', Landmark)}
               {navRow('/studio', 'Studio', LayoutGrid)}
               {navRow('/studio/create', 'Create collection', PlusCircle)}
 
