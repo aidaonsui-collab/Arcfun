@@ -8,7 +8,7 @@ import { getIndexedOtcBook } from '@/lib/arc-indexer/run'
 import { upsertOtcOffer } from '@/lib/arc-indexer/store'
 import { kv } from '@vercel/kv'
 import { jsonSafe } from '@/lib/json-safe'
-import { ROBIN_OTC_LIQUIDITY, LIQUIDITY_ABI } from '@/lib/bridge/robin-otc'
+import { ROBIN_OTC_LIQUIDITY, LIQUIDITY_ABI, robinOtcEnabled } from '@/lib/bridge/robin-otc'
 import { arcPublicClient } from '@/lib/contracts-arc'
 import {
   fetchGoldskyOtcOffers,
@@ -103,6 +103,9 @@ async function recoverMakerOffers(maker: Address): Promise<number> {
 }
 
 export async function GET(req: NextRequest) {
+  if (!robinOtcEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   try {
     const stats = await getPublicOtcDeskStats().catch(() => null)
     const headers = {
@@ -183,6 +186,9 @@ export async function GET(req: NextRequest) {
  * Goldsky will catch up via chain events; this keeps create → list instant.
  */
 export async function POST(req: NextRequest) {
+  if (!robinOtcEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   try {
     const body = (await req.json()) as { offerId?: string }
     const offerId = (body.offerId || '').trim() as Hex

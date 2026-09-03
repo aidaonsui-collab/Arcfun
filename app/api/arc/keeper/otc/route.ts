@@ -1,5 +1,5 @@
 /**
- * GET /api/arc/keeper/otc — Vercel Cron hits this every minute (see vercel.json).
+ * GET /api/arc/keeper/otc — OTC desk unwired; cron removed from vercel.json.
  * Settles pending Instant OTC fills (Base/ARB/ETH → Arc) against the shared desk contracts. See
  * lib/arc-otc-keeper.ts for the actual per-fill lock → deliver → settle chain, and its top-of-file
  * comment for why ArcFun runs its own copy of this alongside Robinpad's.
@@ -11,11 +11,15 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { runOtcKeeperTick } from '@/lib/arc-otc-keeper'
+import { robinOtcEnabled } from '@/lib/bridge/robin-otc'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 export async function GET(req: NextRequest) {
+  if (!robinOtcEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   const cronSecret = process.env.CRON_SECRET
   const auth = req.headers.get('authorization')
   if (!cronSecret || auth !== `Bearer ${cronSecret}`) {

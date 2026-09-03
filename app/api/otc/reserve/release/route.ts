@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isHex, type Hex } from 'viem'
 import { arcPublicClient, arcServerWalletClient } from '@/lib/contracts-arc'
-import { ROBIN_OTC_LIQUIDITY, LIQUIDITY_ABI } from '@/lib/bridge/robin-otc'
+import { ROBIN_OTC_LIQUIDITY, LIQUIDITY_ABI, robinOtcEnabled } from '@/lib/bridge/robin-otc'
 import { removeOtcReservation } from '@/lib/arc-indexer/store'
 
 export const dynamic = 'force-dynamic'
@@ -25,6 +25,9 @@ function keeperKey(): Hex | null {
 }
 
 export async function POST(req: NextRequest) {
+  if (!robinOtcEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   let body: { reservationId?: unknown }
   try {
     body = await req.json()

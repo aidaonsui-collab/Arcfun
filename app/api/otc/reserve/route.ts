@@ -34,6 +34,7 @@ import {
   encodeEventTopics,
   livePaymentChains,
   formatUsdc6,
+  robinOtcEnabled,
 } from '@/lib/bridge/robin-otc'
 
 export const dynamic = 'force-dynamic'
@@ -63,6 +64,9 @@ type ReserveBody = {
 }
 
 export async function POST(req: NextRequest) {
+  if (!robinOtcEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   let body: ReserveBody
   try {
     body = await req.json()

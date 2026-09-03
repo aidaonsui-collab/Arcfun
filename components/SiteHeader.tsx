@@ -1,15 +1,14 @@
 'use client'
 
 /**
- * Sticky nav — brand mark, search, ArcStudio, Arc OTC, wallet chip.
- * Mobile: Home, Crucible, ArcStudio, Create collection, Profile, Arc OTC, Docs.
+ * Sticky nav — brand mark, search, ArcStudio, wallet chip.
+ * Mobile: Home, Crucible, ArcStudio, Create collection, Profile, Docs.
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { FormEvent, useEffect, useState } from 'react'
 import { useAccount, useConnect } from 'wagmi'
 import {
-  ArrowLeftRight,
   BookOpen,
   CircleUser,
   Flame,
@@ -150,17 +149,6 @@ export function SiteHeader() {
           Studio
         </Link>
 
-        <Link
-          href="/otc"
-          className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
-            pathname.startsWith('/otc')
-              ? 'border-lime-line bg-s2 text-white'
-              : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
-          }`}
-        >
-          Arc OTC
-        </Link>
-
         {isConnected && address ? (
           <Link
             href={onStudio ? '/studio/me' : `/creator/${address}`}
@@ -257,7 +245,6 @@ export function SiteHeader() {
                   {isPending ? 'Connecting…' : 'Connect wallet'}
                 </button>
               )}
-              {navRow('/otc', 'Arc OTC', ArrowLeftRight)}
               {navRow('/docs', 'Docs', BookOpen)}
             </div>
           </aside>

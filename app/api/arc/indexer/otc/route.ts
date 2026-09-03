@@ -1,6 +1,5 @@
 /**
- * GET /api/arc/indexer/otc — lightweight OTC-only index tick (every minute).
- * Keeps the offer book warm without running full factory/swap catch-up.
+ * GET /api/arc/indexer/otc — OTC desk unwired; cron removed from vercel.json.
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { arcPublicClient } from '@/lib/contracts-arc'
@@ -37,14 +36,13 @@ const OTC_FLOOR = 14_000_000n
 const OTC_OFFER_ZERO_REMOVE_MS = 40 * 60 * 1000
 
 export async function GET(req: NextRequest) {
+  if (!robinOtcEnabled() || ROBIN_OTC_LIQUIDITY === ZERO) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   const cronSecret = process.env.CRON_SECRET
   const auth = req.headers.get('authorization')
   if (!cronSecret || auth !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  }
-
-  if (!robinOtcEnabled() || ROBIN_OTC_LIQUIDITY === ZERO) {
-    return NextResponse.json({ ok: false, error: 'otc not configured' }, { status: 404 })
   }
 
   const t0 = Date.now()
