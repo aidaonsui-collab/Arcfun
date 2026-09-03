@@ -142,7 +142,8 @@ async function loadOne(
   }
 }
 
-export async function listCollections(): Promise<Collection[]> {
+/** Factory scan only. Callers that paint Studio should use listCollections(). */
+export async function fetchPortCollectionsLive(): Promise<Collection[]> {
   if (!arcPortEnabled()) return []
   const client = arcPublicClient()
   const factory = ARC.NFT_FACTORY
@@ -177,29 +178,36 @@ export async function listCollections(): Promise<Collection[]> {
   }
 }
 
+export async function listCollections(): Promise<Collection[]> {
+  if (!arcPortEnabled()) return []
+  const { getPortHomeCatalog } = await import('./catalog-cache')
+  return (await getPortHomeCatalog()).collections
+}
+
 export async function getCollection(id: string): Promise<Collection | undefined> {
   if (!arcPortEnabled()) return undefined
+  const { getPortCatalogCollection, upsertPortCatalogCollection } = await import('./catalog-cache')
   if (isPlausibleEvmAddress(id)) {
-    const client = arcPublicClient()
     try {
+      const client = arcPublicClient()
       const ok = await client.readContract({
         address: ARC.NFT_FACTORY,
         abi: PORT_FACTORY_ABI,
         functionName: 'isCollection',
         args: [id as Address],
       })
-      if (!ok) return undefined
-      const row = await loadOne(id as Address)
-      if (!row) return undefined
-      const listed = await listCollections()
-      return listed.find((c) => c.address.toLowerCase() === id.toLowerCase()) ?? row
+      if (ok) {
+        const row = await loadOne(id as Address)
+        if (row) {
+          await upsertPortCatalogCollection(row)
+          return row
+        }
+      }
     } catch {
-      return undefined
+      /* fall through to last-good snapshot */
     }
   }
-  const key = id.toLowerCase()
-  const listed = await listCollections()
-  return listed.find((c) => c.slug.toLowerCase() === key)
+  return (await getPortCatalogCollection(id)) ?? undefined
 }
 
 function nftFrom(
@@ -244,9 +252,12 @@ export async function getItems(id: string): Promise<NftItem[]> {
   const store = await getPortItems(collection.address)
   const ids = new Set<number>()
   for (let i = 1; i <= collection.minted; i++) ids.add(i)
+  const cap = Math.max(collection.maxSupply, collection.minted, 0)
   for (const key of Object.keys(store.items)) {
     const nid = Number(key)
-    if (Number.isInteger(nid) && nid >= 1 && nid <= collection.maxSupply) ids.add(nid)
+    if (!Number.isInteger(nid) || nid < 1) continue
+    if (cap > 0 && nid > cap) continue
+    ids.add(nid)
   }
   return [...ids]
     .sort((a, b) => a - b)
