@@ -68,7 +68,10 @@ export function publicMintLive(c: Collection): boolean {
 }
 
 export function collectionStatus(c: Collection): 'live' | 'soon' | 'sold' {
-  if (c.minted >= c.maxSupply) return 'sold'
+  const minted = Number(c.minted) || 0
+  const maxSupply = Number(c.maxSupply) || 0
+  // maxSupply 0 is "unknown", not a finished drop. Uploaded metadata is not supply.
+  if (maxSupply > 0 && minted >= maxSupply) return 'sold'
   if (publicMintLive(c) || allowlistWindowLive(c)) return 'live'
   return 'soon'
 }

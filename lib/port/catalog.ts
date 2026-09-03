@@ -184,30 +184,42 @@ export async function listCollections(): Promise<Collection[]> {
   return (await getPortHomeCatalog()).collections
 }
 
+async function loadLiveCollection(address: string): Promise<Collection | undefined> {
+  if (!isPlausibleEvmAddress(address)) return undefined
+  const { upsertPortCatalogCollection } = await import('./catalog-cache')
+  try {
+    const client = arcPublicClient()
+    const ok = await client.readContract({
+      address: ARC.NFT_FACTORY,
+      abi: PORT_FACTORY_ABI,
+      functionName: 'isCollection',
+      args: [address as Address],
+    })
+    if (!ok) return undefined
+    const row = await loadOne(address as Address)
+    if (row) {
+      await upsertPortCatalogCollection(row)
+      return row
+    }
+  } catch {
+    /* last-good snapshot */
+  }
+  return undefined
+}
+
 export async function getCollection(id: string): Promise<Collection | undefined> {
   if (!arcPortEnabled()) return undefined
-  const { getPortCatalogCollection, upsertPortCatalogCollection } = await import('./catalog-cache')
+  const { getPortCatalogCollection } = await import('./catalog-cache')
   if (isPlausibleEvmAddress(id)) {
-    try {
-      const client = arcPublicClient()
-      const ok = await client.readContract({
-        address: ARC.NFT_FACTORY,
-        abi: PORT_FACTORY_ABI,
-        functionName: 'isCollection',
-        args: [id as Address],
-      })
-      if (ok) {
-        const row = await loadOne(id as Address)
-        if (row) {
-          await upsertPortCatalogCollection(row)
-          return row
-        }
-      }
-    } catch {
-      /* fall through to last-good snapshot */
-    }
+    const live = await loadLiveCollection(id)
+    if (live) return live
   }
-  return (await getPortCatalogCollection(id)) ?? undefined
+  const cached = await getPortCatalogCollection(id)
+  if (cached) {
+    const live = await loadLiveCollection(cached.address)
+    if (live) return live
+  }
+  return cached ?? undefined
 }
 
 function nftFrom(
