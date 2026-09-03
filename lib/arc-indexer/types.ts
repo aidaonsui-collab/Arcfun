@@ -76,6 +76,8 @@ export type IndexerState = {
     otcOffers: number
     swapsTokens: number
     error?: string
+    /** `jessica:…` when the home-Mac loop is writing; `vercel-cron` otherwise. */
+    worker?: string
   }
 }
 

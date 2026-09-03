@@ -28,6 +28,27 @@ Requires project env:
 - `CRON_SECRET` (Vercel injects Bearer automatically for crons)
 - `KV_REST_API_URL` / `KV_REST_API_TOKEN` (Upstash)
 
+## Dedicated loop (Jessica / home Mac Air)
+
+The 2-minute cron is a backup. For sharc-style lag, run the same cycle in a tight loop on a machine that stays awake, writing the **production** KV.
+
+On Jessica:
+
+```bash
+cd ~/code/arcfun   # or wherever the repo lives
+git pull
+vercel env pull --environment production .env.local
+caffeinate -dims npm run indexer
+```
+
+Or `./scripts/run-indexer-jessica.sh` (also uses `caffeinate` if you wrap it).
+
+The loop renews KV key `arcfun:idx:lease` every cycle. While that lease is live, the Vercel cron returns `{ skipped: "dedicated-indexer" }` and does not race cursors. If the Air sleeps, the lease expires in ~45s and the cron takes over.
+
+`/api/arc/indexer/status` reports `dedicated: true` and `lease.owner` when Jessica is writing.
+
+Keep the lid open or use `caffeinate -dims`, and leave the Air plugged in. A laptop that sleeps is worse than the 2-minute cron.
+
 ## Manual run
 
 ```bash
