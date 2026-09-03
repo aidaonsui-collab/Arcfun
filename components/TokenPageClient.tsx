@@ -19,6 +19,7 @@ import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import type { TraderMeta } from '@/lib/arc-trader-meta'
 import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
+import { arcMarketCapUsd } from '@/lib/arc-instant-tokens'
 import { priceChangeFromTrades } from '@/lib/candles'
 import { telegramHref, twitterHref, websiteHref } from '@/lib/social-href'
 import { cdnImage } from '@/lib/cdn-image'
@@ -699,11 +700,12 @@ export function TokenPageClient({
 
               {tab === 'Activity' && (
                 <div className="px-3 pb-2 pt-4">
-                  <div className="grid grid-cols-[1.4fr_.7fr_1fr_1fr_.8fr] gap-3 px-3 py-2.5 rounded-xl bg-white/[0.03] text-[11px] font-semibold tracking-[0.06em] uppercase text-t3">
+                  <div className="grid grid-cols-[1.4fr_.7fr_.9fr_.9fr_.8fr_.7fr] gap-3 px-3 py-2.5 rounded-xl bg-white/[0.03] text-[11px] font-semibold tracking-[0.06em] uppercase text-t3">
                     <span>Wallet</span>
                     <span>Type</span>
                     <span>Amount</span>
                     <span>Tokens</span>
+                    <span>MC</span>
                     <span className="text-right">Time</span>
                   </div>
                   {!activityTrades.length ? (
@@ -723,7 +725,7 @@ export function TokenPageClient({
                       return (
                       <div
                         key={`${t.txHash}-${i}`}
-                        className="grid grid-cols-[1.4fr_.7fr_1fr_1fr_.8fr] gap-3 px-3 py-3.5 border-b border-hair2 text-sm items-center tabular-nums hover:bg-white/[0.02]"
+                        className="grid grid-cols-[1.4fr_.7fr_.9fr_.9fr_.8fr_.7fr] gap-3 px-3 py-3.5 border-b border-hair2 text-sm items-center tabular-nums hover:bg-white/[0.02]"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           {tm?.avatarUrl ? (
@@ -765,18 +767,6 @@ export function TokenPageClient({
                             >
                               <Filter className="w-3.5 h-3.5" />
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => copyTrader(t.trader)}
-                              title="Copy address"
-                              className="h-6 w-6 inline-flex items-center justify-center rounded-md text-t3 hover:text-white hover:bg-white/[0.06]"
-                            >
-                              {copiedTrader === traderKey ? (
-                                <Check className="w-3.5 h-3.5 text-lime-t" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
                             <a
                               href={`${explorer}/address/${t.trader}`}
                               target="_blank"
@@ -813,6 +803,15 @@ export function TokenPageClient({
                           className="text-t2 truncate hover:text-white"
                         >
                           {fmtTapeTokens(t.tokenAmount)}
+                        </a>
+                        <a
+                          href={`${explorer}/tx/${t.txHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-t2 hover:text-white"
+                          title="Market cap at this print"
+                        >
+                          {t.priceUsd > 0 ? fmtUsd(arcMarketCapUsd(t.priceUsd)) : '—'}
                         </a>
                         <a
                           href={`${explorer}/tx/${t.txHash}`}
