@@ -189,19 +189,9 @@ export function getPaymentChain(id: OtcPaymentChainId | number): OtcPaymentChain
 }
 
 export function robinOtcEnabled(): boolean {
-  // Rewired back in 2026-08-31 — /otc renders the real desk again (app/otc/page.tsx) and the
-  // header/mobile drawer link to it again, so this defaults back ON. The 2026-08-30 retirement
-  // (see git history) was purely "there's no UI path left to reach this," not a backend fault —
-  // that PR's own check confirmed otcCursor was advancing every indexer cycle and deskStats was
-  // current right up until the flag flipped. Flipping it back resumes exactly where the cursor
-  // and desk-stats KV row were left, per that same PR's design (both freeze, neither reset, when
-  // this is false) — nothing to backfill or reconcile here.
-  //
-  // NEXT_PUBLIC_ROBIN_OTC_ENABLED stays as a bidirectional override (`=1` forces on, `=0` forces
-  // off) if OTC ever needs to come down again without a code change.
-  if (process.env.NEXT_PUBLIC_ROBIN_OTC_ENABLED === '1') return true
-  if (process.env.NEXT_PUBLIC_ROBIN_OTC_ENABLED === '0') return false
-  return true
+  // Unwired: UI hidden, /otc redirects home, /api/otc/* 404, Vercel crons removed.
+  // Implementation stays. Flip this to true to bring the desk back.
+  return false
 }
 
 /** Total open depth across active offers (USDC 6dp) — uses available when present. */

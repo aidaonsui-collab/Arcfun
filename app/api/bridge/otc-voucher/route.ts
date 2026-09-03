@@ -17,6 +17,7 @@ import {
   OTC_DEFAULTS,
   OTC_DEFAULT_FEE_BPS,
   OTC_ROBIN_FEE_BPS,
+  robinOtcEnabled,
 } from '@/lib/bridge/robin-otc'
 
 export const dynamic = 'force-dynamic'
@@ -54,6 +55,9 @@ function paymentForChain(chainId: number): Address {
 }
 
 export async function GET(req: Request) {
+  if (!robinOtcEnabled()) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   const url = new URL(req.url)
   const address = (url.searchParams.get('address') || '').trim()
   const chainId = Number(url.searchParams.get('chainId') || '8453')
