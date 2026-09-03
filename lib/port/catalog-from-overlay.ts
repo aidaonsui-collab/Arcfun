@@ -35,8 +35,10 @@ export function collectionFromOverlay(
   const bannerRaw = meta?.bannerUrl || prev?.banner || ''
   const creator = meta?.creator || prev?.creator || ''
   const originToken = meta?.originToken || prev?.originToken
-  const minted = Math.max(prev?.minted ?? 0, itemCount)
-  const maxSupply = Math.max(prev?.maxSupply ?? 0, minted, itemCount)
+  // Item metadata is art/traits for token ids. It is not totalMinted and not maxSupply.
+  // Using itemCount here marked eve "Sold out" at 100/100 while chain was 12/1000.
+  const minted = Number(prev?.minted) || 0
+  const maxSupply = Number(prev?.maxSupply) || 0
   return {
     address,
     slug: collectionSlug({ address, name, symbol }),
@@ -69,6 +71,28 @@ export function collectionFromOverlay(
     originSymbol:
       prev?.originSymbol ||
       (originToken?.toLowerCase() === '0x19209e55049bc613c5cc8b66b7df7824096e78cf' ? 'EVE' : undefined),
+  }
+}
+
+/** Overlay/register rows often have maxSupply 0. Do not wipe last-good on-chain stats. */
+export function mergePortCollection(prev: Collection | undefined, incoming: Collection): Collection {
+  if (!prev) return incoming
+  const hasSupply = (Number(incoming.maxSupply) || 0) > 0
+  return {
+    ...prev,
+    ...incoming,
+    maxSupply: hasSupply ? incoming.maxSupply : prev.maxSupply,
+    minted: hasSupply ? incoming.minted : prev.minted,
+    maxPerWallet: incoming.maxPerWallet || prev.maxPerWallet,
+    mintPriceUsdc: hasSupply ? incoming.mintPriceUsdc : prev.mintPriceUsdc,
+    publicStart: incoming.publicStart || prev.publicStart,
+    allowlist: incoming.allowlist || prev.allowlist,
+    allowlistStart: incoming.allowlistStart || prev.allowlistStart,
+    allowlistEnd: incoming.allowlistEnd || prev.allowlistEnd,
+    revealed: incoming.revealed || prev.revealed,
+    royalty: incoming.royalty || prev.royalty,
+    creatorRewardsWallet: incoming.creatorRewardsWallet || prev.creatorRewardsWallet,
+    owners: incoming.owners || prev.owners,
   }
 }
 

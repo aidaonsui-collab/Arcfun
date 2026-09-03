@@ -19,9 +19,15 @@ import {
   collectionFromOverlay,
   isUsablePortSnapshot,
   matchPortCollection,
+  mergePortCollection,
 } from './catalog-from-overlay'
 
-export { collectionFromOverlay, isUsablePortSnapshot, matchPortCollection } from './catalog-from-overlay'
+export {
+  collectionFromOverlay,
+  isUsablePortSnapshot,
+  matchPortCollection,
+  mergePortCollection,
+} from './catalog-from-overlay'
 
 const KV_KEY = 'arcfun:port:catalog:v1'
 const SET_KEY = 'arcfun:port:collections'
@@ -99,12 +105,16 @@ export async function rememberPortCollection(address: string): Promise<void> {
 async function fromRegistered(): Promise<Collection[]> {
   const ids = await registeredAddresses()
   if (!ids.length) return []
+  const prev = isUsablePortSnapshot(memory) ? memory : await readKv()
+  const prevById = new Map(
+    (prev?.collections || []).map((c) => [c.address.toLowerCase(), c] as const),
+  )
   const metas = await getPortCollectionMetas(ids)
   const rows: Collection[] = []
   for (const id of ids) {
     const store = await getPortItems(id).catch(() => ({ items: {} as Record<string, never> }))
     const itemCount = Object.keys(store.items || {}).length
-    rows.push(collectionFromOverlay(id, metas.get(id), null, itemCount))
+    rows.push(collectionFromOverlay(id, metas.get(id), prevById.get(id) || null, itemCount))
   }
   return withPublicSlugs(rows)
 }
@@ -182,7 +192,7 @@ export async function upsertPortCatalogCollection(row: Collection): Promise<void
   const collections = snap?.collections ? [...snap.collections] : []
   const id = row.address.toLowerCase()
   const i = collections.findIndex((c) => c.address.toLowerCase() === id)
-  if (i >= 0) collections[i] = { ...collections[i], ...row }
+  if (i >= 0) collections[i] = mergePortCollection(collections[i], row)
   else collections.unshift(row)
   const next: PortCatalogSnapshot = cloneJson({
     collections: withPublicSlugs(collections),
