@@ -7,7 +7,6 @@
  *
  * Serve last-good immediately. Never persist an empty rebuild.
  */
-import { after } from 'next/server'
 import { kv } from '@vercel/kv'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { bigintReplacer } from '@/lib/json-safe'
@@ -155,14 +154,7 @@ async function rebuild(): Promise<PortCatalogSnapshot> {
 
 function scheduleRefresh(): void {
   if (inflight) return
-  const run = () => {
-    void rebuild().catch((e) => console.warn('[port-catalog] refresh', summarizeRpcError(e)))
-  }
-  try {
-    after(run)
-  } catch {
-    run()
-  }
+  void rebuild().catch((e) => console.warn('[port-catalog] refresh', summarizeRpcError(e)))
 }
 
 export async function getPortHomeCatalog(): Promise<PortCatalogSnapshot> {
