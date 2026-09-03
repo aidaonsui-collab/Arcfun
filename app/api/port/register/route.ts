@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await setPortCollectionMeta(address, {
+    const overlay = {
       name: payload.name.trim().slice(0, 64) || undefined,
       symbol: payload.symbol.trim().slice(0, 16) || undefined,
       description: payload.description.trim().slice(0, 280),
@@ -101,7 +101,10 @@ export async function POST(req: NextRequest) {
       website,
       creator: ctx.owner,
       originToken,
-    })
+    }
+    await setPortCollectionMeta(address, overlay)
+    const { collectionFromOverlay, upsertPortCatalogCollection } = await import('@/lib/port/catalog-cache')
+    await upsertPortCatalogCollection(collectionFromOverlay(collection, overlay))
   } catch {
     return NextResponse.json({ error: 'could not save collection' }, { status: 503 })
   }
