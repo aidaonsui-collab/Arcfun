@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useAccount, useBalance, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
+import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
 import { formatUnits } from 'viem'
 import { Loader2 } from 'lucide-react'
-import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
+import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
+import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 import {
   addOrSwitchArc,
   connectToArc,
@@ -18,9 +19,10 @@ function short(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
 }
 
-function fmtBal(raw: bigint | undefined): string {
-  if (raw == null) return '—'
-  const n = Number(formatUnits(raw, 18))
+/** Arc ERC-20 USDC is 6dp; same economic balance as native gas (18dp / 1e12). */
+function fmtBal(raw: bigint | undefined, pending: boolean): string {
+  if (raw == null) return pending ? '…' : '—'
+  const n = Number(formatUnits(raw, 6))
   if (!Number.isFinite(n)) return '—'
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 }
@@ -41,11 +43,9 @@ export function WalletButton({
   const [hint, setHint] = useState('')
   const wrap = useRef<HTMLDivElement>(null)
 
-  const { data: bal } = useBalance({
-    address,
-    chainId: ARC_CHAIN_ID,
-    query: { enabled: !!address && onArc },
-  })
+  // Public wagmi useBalance hangs on baracat (same bug that left MAX at 0).
+  // Wallet RPC balanceOf is the path the trade panel already uses.
+  const usdcQ = useArcErc20Balance(ARC.USDC, onArc ? address : undefined)
 
   useEffect(() => {
     if (!open) return
@@ -210,7 +210,7 @@ export function WalletButton({
         title={wrongChain || !onArc ? 'Wrong network — switch to Arc' : 'Wallet'}
       >
         {onArc ? (
-          <span className="hidden sm:inline">{fmtBal(bal?.value)}</span>
+          <span className="hidden sm:inline">{fmtBal(usdcQ.data, usdcQ.isPending)}</span>
         ) : (
           <span className="text-t3 text-xs">{short(address)}</span>
         )}
