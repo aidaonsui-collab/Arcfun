@@ -12,7 +12,6 @@
 import { kv } from '@vercel/kv'
 import { encodeAbiParameters, erc20Abi, keccak256, parseAbiItem, toHex, type Address, type Log } from 'viem'
 import { ARC, arcLogsClient, arcPublicClient, instantProtocolAddresses } from './contracts-arc'
-import { mapWithConcurrency } from './concurrency'
 import { withRateLimitRetry } from './rpc-retry'
 
 const TRANSFER = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)')
@@ -24,6 +23,22 @@ const TRANSFER_LOG_CHUNK = 9_000n
 /** Wall-clock budget for one request's chunked catch-up scan — see upstream note this was copied
  *  from: keeps a cold cache's full-history backfill from blocking past a serverless timeout. */
 const SCAN_BUDGET_MS = 8_000
+/**
+ * Wall-clock budget for the balanceOf fan-out below. This had NO cap at all — every resolved
+ * candidate pays a full readContract() round trip, and arcPublicClient() only falls through to
+ * the next RPC transport after the current one times out (2.5s each, up to 3 transports), so a
+ * single call can legitimately cost ~7.5s when the primary is degraded. The candidate set is
+ * everyone from opts.seedAddresses PLUS every address the KV-cached transfer scan has ever found
+ * — which only grows across requests — so this got worse with use, not better.
+ *
+ * Confirmed live 2026-09-03: $EVE's /holders took 69.5s end to end while baracat was throwing
+ * 502s (same RPC flakiness visible in the indexer logs at the time). Bounding this phase the same
+ * way SCAN_BUDGET_MS already bounds the transfer scan above — stop starting new lookups once the
+ * budget passes, return whatever resolved. seedAddresses (recent traders) are inserted into
+ * `addresses` before the cached transfer-scan set, so array order already prioritizes the
+ * likeliest real holders first if the budget cuts the tail off.
+ */
+const BALANCE_BUDGET_MS = 15_000
 const TOKEN_DECIMALS = 6 // see lib/token-format.ts note on the ARC.TOKEN_DECIMALS=18 mismatch
 
 interface HolderScanCache {
@@ -78,6 +93,42 @@ function fmtBalance(raw: bigint): string {
 function isExcludedHolder(addr: string, factory: Address): boolean {
   const a = addr.toLowerCase()
   return a === factory.toLowerCase() || a === DEAD.toLowerCase() || a === ZERO.toLowerCase()
+}
+
+type BalanceRow = { address: string; total: bigint; isDev: boolean }
+
+/**
+ * Resolves balanceOf for `candidates` at BALANCE_FANOUT concurrency, stopping once BALANCE_BUDGET_MS
+ * elapses rather than working through the whole list unbounded — see the constant's own comment.
+ * The deadline is checked before starting each new lookup, not mid-flight (viem's readContract has
+ * no cheap cancellation), so worst case this can still run ~one call's latency past the budget —
+ * bounded, not zero, but a fixed cap instead of growing with candidate count.
+ */
+async function fetchBalancesBounded(
+  candidates: string[],
+  token: Address,
+  client: ReturnType<typeof arcPublicClient>,
+  creator: string,
+  budgetMs: number,
+): Promise<BalanceRow[]> {
+  const deadline = Date.now() + budgetMs
+  const results: BalanceRow[] = []
+  let nextIndex = 0
+  const limit = Math.max(1, Math.min(BALANCE_FANOUT, candidates.length))
+  const workers = Array.from({ length: limit }, async () => {
+    for (;;) {
+      if (Date.now() > deadline) return
+      const i = nextIndex++
+      if (i >= candidates.length) return
+      const addr = candidates[i]
+      const bal = await client
+        .readContract({ address: token, abi: erc20Abi, functionName: 'balanceOf', args: [addr as Address] })
+        .catch(() => 0n)
+      results.push({ address: addr, total: bal, isDev: creator ? addr === creator : false })
+    }
+  })
+  await Promise.all(workers)
+  return results
 }
 
 async function scanTransferLogsChunked(
@@ -196,9 +247,15 @@ export async function fetchEvmHolders(
   for (const a of instantProtocolAddresses()) extraExclude.add(a.toLowerCase())
   const skip = (a: string) => isExcludedHolder(a, factory) || extraExclude.has(a)
 
-  const totalSupply = await client
-    .readContract({ address: token, abi: erc20Abi, functionName: 'totalSupply' })
-    .catch(() => 0n)
+  // totalSupply doesn't depend on transferRecipients' scan (or vice versa) — under today's
+  // degraded Arc RPC, a single readContract can itself cost several seconds (arcPublicClient
+  // falls through up to 3 transports at 2.5s each), and this used to pay that sequentially in
+  // front of the scan instead of overlapping it.
+  const scanFrom = opts?.fromBlock ?? 0n
+  const [totalSupply, fromTransfers] = await Promise.all([
+    client.readContract({ address: token, abi: erc20Abi, functionName: 'totalSupply' }).catch(() => 0n),
+    transferRecipients(token, scanFrom),
+  ])
 
   const addresses = new Set<string>()
   for (const a of opts?.seedAddresses ?? []) {
@@ -206,8 +263,6 @@ export async function fetchEvmHolders(
   }
   if (creator) addresses.add(creator)
 
-  const scanFrom = opts?.fromBlock ?? 0n
-  const fromTransfers = await transferRecipients(token, scanFrom)
   for (const a of fromTransfers) {
     if (!skip(a)) addresses.add(a)
   }
@@ -215,12 +270,7 @@ export async function fetchEvmHolders(
   const candidates = [...addresses].filter((a) => !skip(a))
   if (!candidates.length) return { total: 0, holders: [] }
 
-  const rows = await mapWithConcurrency(candidates, BALANCE_FANOUT, async (addr) => {
-    const bal = await client
-      .readContract({ address: token, abi: erc20Abi, functionName: 'balanceOf', args: [addr as Address] })
-      .catch(() => 0n)
-    return { address: addr, total: bal, isDev: creator ? addr === creator : false }
-  })
+  const rows = await fetchBalancesBounded(candidates, token, client, creator, BALANCE_BUDGET_MS)
 
   const nonZero = rows
     .filter((r) => r.total > 0n)
