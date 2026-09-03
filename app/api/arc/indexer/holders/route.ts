@@ -17,7 +17,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { runHoldersLedgerCycle } from '@/lib/evm-holders'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+// batchSize(10) * perTokenBudgetMs(20s) below is a 200s worst case — matches the 300s ceiling
+// /api/arc/indexer/run already uses for the same "many tokens, each potentially slow" shape.
+// Confirmed live: the first-ever tick against a cold registry hit a hard Vercel timeout at 60s
+// (an abrupt kill mid-batch, not this file's own graceful per-token budget deadline) before this
+// fix. Safe either way — each token's progress persists via its own cursor+hset writes as it
+// goes, so a kill mid-batch just leaves the remaining tokens for the next tick — but a hard kill
+// wastes whatever budget the token being killed mid-scan had left, instead of returning cleanly.
+export const maxDuration = 300
 
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
