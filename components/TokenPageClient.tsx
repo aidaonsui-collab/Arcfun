@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import nextDynamic from 'next/dynamic'
 import { type Address } from 'viem'
 import Link from 'next/link'
-import { Loader2, ExternalLink, Copy, Check, Globe } from 'lucide-react'
+import { Loader2, ExternalLink, Copy, Check, Globe, Filter } from 'lucide-react'
 import { type PoolToken } from '@/lib/tokens'
 import type { EvmTrade, EvmTradesResult } from '@/lib/evm-trades'
 import type { EvmHoldersResult } from '@/lib/evm-holders'
@@ -81,6 +81,8 @@ export function TokenPageClient({
   const [volRange, setVolRange] = useState<VolRange>('1H')
   const [copied, setCopied] = useState(false)
   const [actPage, setActPage] = useState(0)
+  const [walletFilter, setWalletFilter] = useState<string | null>(null)
+  const [copiedTrader, setCopiedTrader] = useState<string | null>(null)
   const [holdersLoading, setHoldersLoading] = useState(false)
   const [chartReady, setChartReady] = useState(false)
   const listingEpoch = useRef(0)
@@ -227,11 +229,18 @@ export function TokenPageClient({
   // Opt-in activity PFPs: only wallets with ArcFun profile + avatarUrl
   useEffect(() => {
     const list = trades?.trades ?? []
-    if (list.length === 0) {
+    if (list.length === 0 && !walletFilter) {
       setTraderMeta({})
       return
     }
-    const addrs = Array.from(new Set(list.map((t) => t.trader.toLowerCase()).filter(Boolean)))
+    const addrs = Array.from(
+      new Set(
+        [
+          ...list.map((t) => t.trader.toLowerCase()),
+          ...(walletFilter ? [walletFilter.toLowerCase()] : []),
+        ].filter(Boolean),
+      ),
+    )
     if (addrs.length === 0) return
     let cancelled = false
     ;(async () => {
@@ -251,7 +260,7 @@ export function TokenPageClient({
     return () => {
       cancelled = true
     }
-  }, [trades])
+  }, [trades, walletFilter])
 
   const volWindowSec = useMemo(() => {
     if (volRange === '1H') return 3600
@@ -260,6 +269,38 @@ export function TokenPageClient({
   }, [volRange])
 
   const tape = chartTape.length ? chartTape : (trades?.trades ?? [])
+  const traderCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const t of tape) {
+      const k = t.trader.toLowerCase()
+      m.set(k, (m.get(k) || 0) + 1)
+    }
+    return m
+  }, [tape])
+  const activityTrades = useMemo(() => {
+    const page = trades?.trades ?? []
+    if (!walletFilter) return page
+    const key = walletFilter.toLowerCase()
+    return tape.filter((t) => t.trader.toLowerCase() === key)
+  }, [walletFilter, trades, tape])
+
+  const filterWallet = useCallback((addr: string) => {
+    const key = addr.toLowerCase()
+    setWalletFilter((prev) => (prev === key ? null : key))
+    setActPage(0)
+    setTab('Activity')
+    void loadChartTape()
+  }, [loadChartTape])
+
+  const copyTrader = useCallback((addr: string) => {
+    navigator.clipboard
+      .writeText(addr)
+      .then(() => {
+        setCopiedTrader(addr.toLowerCase())
+        setTimeout(() => setCopiedTrader(null), 1400)
+      })
+      .catch(() => {})
+  }, [])
 
   const { vol, buys, sells, buyUsd, sellUsd } = useMemo(() => {
     const cutoff = Math.floor(Date.now() / 1000) - volWindowSec
@@ -624,6 +665,35 @@ export function TokenPageClient({
                     {a.label}
                   </button>
                 ))}
+                <div className="ml-auto pb-3.5 flex items-center gap-2 shrink-0">
+                  {walletFilter ? (
+                    <button
+                      type="button"
+                      onClick={() => setWalletFilter(null)}
+                      className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg border border-lime-line bg-s2 text-[12px] font-semibold text-white hover:bg-s3"
+                      title="Clear wallet filter"
+                    >
+                      {shortAddr(walletFilter)}
+                      <span className="text-t3">×</span>
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => walletFilter && setWalletFilter(null)}
+                    title={
+                      walletFilter
+                        ? 'Clear wallet filter'
+                        : 'Click the funnel on a wallet to see only its trades'
+                    }
+                    className={`h-7 w-7 inline-flex items-center justify-center rounded-lg border transition-colors ${
+                      walletFilter
+                        ? 'border-lime-line text-lime-t bg-s2'
+                        : 'border-hair text-t3 hover:text-white hover:border-lime-line'
+                    }`}
+                  >
+                    <Filter className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
               <div className="h-px bg-hair2" />
 
@@ -636,25 +706,26 @@ export function TokenPageClient({
                     <span>Tokens</span>
                     <span className="text-right">Time</span>
                   </div>
-                  {!(trades?.trades?.length) ? (
+                  {!activityTrades.length ? (
                     <p className="text-sm text-t3 text-center py-10">
-                      {actPage > 0 ? 'No more trades.' : 'No trades yet.'}
+                      {walletFilter
+                        ? 'No recent trades from this wallet.'
+                        : actPage > 0
+                          ? 'No more trades.'
+                          : 'No trades yet.'}
                     </p>
                   ) : (
-                    trades!.trades.map((t, i) => {
+                    activityTrades.map((t, i) => {
                       const tm = traderMeta[t.trader.toLowerCase()]
+                      const traderKey = t.trader.toLowerCase()
+                      const n = traderCounts.get(traderKey) || 0
+                      const filtered = walletFilter === traderKey
                       return (
                       <div
                         key={`${t.txHash}-${i}`}
                         className="grid grid-cols-[1.4fr_.7fr_1fr_1fr_.8fr] gap-3 px-3 py-3.5 border-b border-hair2 text-sm items-center tabular-nums hover:bg-white/[0.02]"
                       >
-                        <a
-                          href={`${explorer}/address/${t.trader}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2.5 min-w-0 hover:text-white"
-                          title="View wallet on explorer"
-                        >
+                        <div className="flex items-center gap-2 min-w-0">
                           {tm?.avatarUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -671,12 +742,52 @@ export function TokenPageClient({
                               style={{ background: walletHue(t.trader) }}
                             />
                           )}
-                          <span className="text-t2 truncate">
+                          <span className="text-t2 truncate min-w-0">
                             {tm?.twitter
                               ? `@${tm.twitter}`
                               : tm?.displayName || shortAddr(t.trader)}
                           </span>
-                        </a>
+                          {n > 1 ? (
+                            <span className="shrink-0 text-[11px] font-semibold tabular-nums text-t3 bg-s2 border border-hair rounded-md px-1.5 py-0.5">
+                              {n}
+                            </span>
+                          ) : null}
+                          <span className="ml-auto flex items-center gap-0.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => filterWallet(t.trader)}
+                              title={filtered ? 'Clear wallet filter' : 'Show only this wallet'}
+                              className={`h-6 w-6 inline-flex items-center justify-center rounded-md transition-colors ${
+                                filtered
+                                  ? 'text-lime-t bg-white/[0.06]'
+                                  : 'text-t3 hover:text-white hover:bg-white/[0.06]'
+                              }`}
+                            >
+                              <Filter className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => copyTrader(t.trader)}
+                              title="Copy address"
+                              className="h-6 w-6 inline-flex items-center justify-center rounded-md text-t3 hover:text-white hover:bg-white/[0.06]"
+                            >
+                              {copiedTrader === traderKey ? (
+                                <Check className="w-3.5 h-3.5 text-lime-t" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                            <a
+                              href={`${explorer}/address/${t.trader}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="View wallet on explorer"
+                              className="h-6 w-6 inline-flex items-center justify-center rounded-md text-t3 hover:text-white hover:bg-white/[0.06]"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </span>
+                        </div>
                         <a
                           href={`${explorer}/tx/${t.txHash}`}
                           target="_blank"
@@ -714,7 +825,7 @@ export function TokenPageClient({
                       </div>
                     )})
                   )}
-                  {((trades?.trades?.length ?? 0) > 0 || actPage > 0) && (
+                  {!walletFilter && ((trades?.trades?.length ?? 0) > 0 || actPage > 0) && (
                     <div className="flex items-center justify-between pt-3 px-1">
                       <button
                         type="button"
@@ -763,30 +874,73 @@ export function TokenPageClient({
                   ) : !(holders?.holders?.length) ? (
                     <p className="text-sm text-t3 text-center py-10">No holders indexed yet.</p>
                   ) : (
-                    holders!.holders.map((h) => (
-                      <a
+                    holders!.holders.map((h) => {
+                      const key = h.address.toLowerCase()
+                      const n = traderCounts.get(key) || 0
+                      const filtered = walletFilter === key
+                      return (
+                      <div
                         key={h.address}
-                        href={`${explorer}/address/${h.address}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-between px-3 py-3.5 border-b border-hair2 text-sm hover:bg-white/[0.02]"
+                        className="flex items-center justify-between gap-3 px-3 py-3.5 border-b border-hair2 text-sm hover:bg-white/[0.02]"
                       >
-                        <span className="flex items-center gap-3">
-                          <span className="text-t3 tabular-nums w-8">#{h.rank}</span>
+                        <span className="flex items-center gap-3 min-w-0">
+                          <span className="text-t3 tabular-nums w-8 shrink-0">#{h.rank}</span>
                           <span
-                            className="w-[18px] h-[18px] rounded-full"
+                            className="w-[18px] h-[18px] rounded-full shrink-0"
                             style={{ background: walletHue(h.address) }}
                           />
-                          <span className="font-mono text-t2">
+                          <span className="font-mono text-t2 truncate">
                             {shortAddr(h.address)}
                             {h.isDev ? <span className="ml-1.5 text-amber-400">dev</span> : null}
                           </span>
+                          {n > 0 ? (
+                            <span className="shrink-0 text-[11px] font-semibold tabular-nums text-t3 bg-s2 border border-hair rounded-md px-1.5 py-0.5">
+                              {n}
+                            </span>
+                          ) : null}
                         </span>
-                        <span className="tabular-nums text-t2">
-                          {h.balance} · {h.percentage}%
+                        <span className="flex items-center gap-2 shrink-0">
+                          <span className="tabular-nums text-t2">
+                            {h.balance} · {h.percentage}%
+                          </span>
+                          <span className="flex items-center gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => filterWallet(h.address)}
+                              title={filtered ? 'Clear wallet filter' : "Show this wallet's trades"}
+                              className={`h-6 w-6 inline-flex items-center justify-center rounded-md transition-colors ${
+                                filtered
+                                  ? 'text-lime-t bg-white/[0.06]'
+                                  : 'text-t3 hover:text-white hover:bg-white/[0.06]'
+                              }`}
+                            >
+                              <Filter className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => copyTrader(h.address)}
+                              title="Copy address"
+                              className="h-6 w-6 inline-flex items-center justify-center rounded-md text-t3 hover:text-white hover:bg-white/[0.06]"
+                            >
+                              {copiedTrader === key ? (
+                                <Check className="w-3.5 h-3.5 text-lime-t" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                            <a
+                              href={`${explorer}/address/${h.address}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="View wallet on explorer"
+                              className="h-6 w-6 inline-flex items-center justify-center rounded-md text-t3 hover:text-white hover:bg-white/[0.06]"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </span>
                         </span>
-                      </a>
-                    ))
+                      </div>
+                    )})
                   )}
                 </div>
               )}
