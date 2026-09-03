@@ -899,10 +899,10 @@ export function TokenPageClient({
                           ) : null}
                         </span>
                         <span className="flex items-center gap-2 shrink-0">
-                          <span className="tabular-nums text-t2">
+                          <span className="tabular-nums text-t2 text-right">
                             {h.balance} · {h.percentage}%
                           </span>
-                          <span className="flex items-center gap-0.5">
+                          <span className="hidden sm:flex items-center gap-0.5">
                             <button
                               type="button"
                               onClick={() => filterWallet(h.address)}

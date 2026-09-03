@@ -13,6 +13,7 @@ import { kv } from '@vercel/kv'
 import { encodeAbiParameters, erc20Abi, keccak256, parseAbiItem, toHex, type Address, type Log } from 'viem'
 import { ARC, arcLogsClient, arcPublicClient, instantProtocolAddresses } from './contracts-arc'
 import { withRateLimitRetry } from './rpc-retry'
+import { DEFAULT_TOKEN_DECIMALS } from './token-format'
 
 const TRANSFER = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)')
 type TransferLog = Log<bigint, number, false, typeof TRANSFER, true>
@@ -39,7 +40,14 @@ const SCAN_BUDGET_MS = 8_000
  * likeliest real holders first if the budget cuts the tail off.
  */
 const BALANCE_BUDGET_MS = 15_000
-const TOKEN_DECIMALS = 6 // see lib/token-format.ts note on the ARC.TOKEN_DECIMALS=18 mismatch
+/**
+ * Was hardcoded 6 — the exact bug lib/token-format.ts already documents fixing once: this file
+ * was "trimmed from Robinpad's lib/evm-holders.ts" (6dp, USDC-style tokens) and never picked up
+ * Arc's own 18dp LaunchToken18 convention. Inflated every displayed balance ~1e12x — confirmed
+ * live 2026-09-03 on $EVE holders: a real ~15.04M-token (1.5%) position rendered as
+ * "15,043,387,475,695,086,000", which also can't possibly fit a mobile row.
+ */
+const TOKEN_DECIMALS = DEFAULT_TOKEN_DECIMALS
 
 interface HolderScanCache {
   addresses: string[]
