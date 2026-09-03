@@ -4,9 +4,9 @@ import Link from 'next/link'
 export const revalidate = 60
 
 export const metadata: Metadata = {
-  title: 'Eve Vault — Arcfun',
+  title: 'Eve Vault · Arcfun',
   description:
-    'When RWAs land on Arc, Eve creator rewards buy them into a vault. Stub only — no fees move yet.',
+    'When RWAs land on Arc, Eve creator rewards buy them into a vault. Stub only; no fees move yet.',
 }
 
 /**
@@ -14,9 +14,9 @@ export const metadata: Metadata = {
  * Creator USDC still follows Instant / EveBurn / Crucible as today.
  */
 const TILES = [
-  { label: 'TVL', value: '—', sub: 'waiting on Arc RWA' },
-  { label: 'USDC routed', value: '$0', sub: 'creator fees → vault' },
-  { label: 'RWA held', value: '—', sub: 'none approved yet' },
+  { label: 'TVL', value: '…', sub: 'waiting on Arc RWA' },
+  { label: 'USDC routed', value: '$0', sub: 'creator fees to vault' },
+  { label: 'RWA held', value: '…', sub: 'none approved yet' },
   { label: 'Status', value: 'Stub', sub: 'no fees move yet' },
 ] as const
 
@@ -39,12 +39,12 @@ export default function EveVaultPage() {
           Eve Vault
         </h1>
         <p className="m-0 mt-3 text-[18px] font-semibold tracking-tightish text-white">
-          Creator fees into real assets — when Arc has them.
+          Creator fees into real assets, when Arc has them.
         </p>
         <p className="mt-3 mb-0 max-w-2xl text-[16px] text-t2 leading-relaxed">
-          Loopr-style idea, Arcfun-shaped: when tokenized RWAs (e.g. BUIDL) are live on Arc,
-          Eve&apos;s Instant creator USDC can buy into a curated vault instead of sitting idle.
-          This page is a shell. No fee split changes. No money moves.
+          When tokenized RWAs (e.g. BUIDL) are live on Arc, Eve&apos;s Instant creator USDC can buy
+          into a curated vault instead of sitting idle. This page is a shell. No fee split
+          changes. No money moves.
         </p>
 
         <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-px bg-hair2 border border-hair rounded-[24px] overflow-hidden">
@@ -64,7 +64,7 @@ export default function EveVaultPage() {
         <section className="mt-5 border border-hair rounded-[24px] bg-s1 p-5 sm:p-6">
           <h2 className="m-0 text-[17px] font-semibold tracking-tightish">How it would work</h2>
           <ol className="mt-3 mb-0 pl-5 text-[14px] text-t2 leading-relaxed space-y-2">
-            <li>Eve Instant creator fees collect as USDC (today: MonLock 70% creator leg).</li>
+            <li>Eve Instant creator fees collect as USDC.</li>
             <li>When an Arc RWA is approved, a keeper buys it and deposits into an ERC-4626 vault.</li>
             <li>Vault TVL and holdings show here. Optional later: leave a slice cooking $EVE.</li>
           </ol>
@@ -87,7 +87,7 @@ export default function EveVaultPage() {
           <Link href="/crucible" className="text-t2 hover:text-white font-semibold">
             The Crucible
           </Link>{' '}
-          — pad-wide buy/burn of $EVE.
+          (pad-wide buy/burn of $EVE).
         </p>
       </div>
     </main>
