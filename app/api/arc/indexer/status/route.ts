@@ -11,6 +11,7 @@ import {
   kvConfigured,
   loadOtcDeskStats,
 } from '@/lib/arc-indexer/store'
+import { isDedicatedLeaseLive, readIndexerLease } from '@/lib/arc-indexer/lease'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,6 +28,7 @@ export async function GET() {
     stateError = e instanceof KvUnavailableError ? e.message : String(e)
   }
 
+  const lease = await readIndexerLease()
   return NextResponse.json({
     ok: stateError == null,
     kvConfigured: kvConfigured(),
@@ -36,6 +38,8 @@ export async function GET() {
     otcOfferCount: await countOrNull(otcOfferCount),
     deskStats: await loadOtcDeskStats(),
     state,
+    lease,
+    dedicated: isDedicatedLeaseLive(lease),
     ...(stateError ? { error: stateError } : {}),
   })
 }

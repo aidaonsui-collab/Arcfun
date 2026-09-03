@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "indexer": "node --env-file=.env.local --experimental-strip-types --import ./scripts/alias-register.mjs lib/arc-indexer/daemon.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

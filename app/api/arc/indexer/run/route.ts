@@ -4,6 +4,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { runArcIndexerCycle } from '@/lib/arc-indexer/run'
+import { isDedicatedLeaseLive, readIndexerLease } from '@/lib/arc-indexer/lease'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -13,6 +14,15 @@ export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization')
   if (!cronSecret || auth !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+
+  const lease = await readIndexerLease()
+  if (isDedicatedLeaseLive(lease)) {
+    return NextResponse.json({
+      ok: true,
+      skipped: 'dedicated-indexer',
+      lease,
+    })
   }
 
   try {

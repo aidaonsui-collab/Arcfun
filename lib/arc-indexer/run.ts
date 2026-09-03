@@ -27,6 +27,7 @@ import {
 import { computeVolumeWindows } from './volume'
 import type { IndexedLaunchKind, IndexedToken, IndexerState } from './types'
 import { summarizeRpcError } from '@/lib/rpc-error'
+import { indexerWorkerName } from './lease'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 
@@ -405,6 +406,7 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
         factories,
         otcOffers,
         swapsTokens,
+        worker: indexerWorkerName(),
       },
     }
     await saveState(state)
@@ -434,6 +436,7 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
         otcOffers,
         swapsTokens,
         error,
+        worker: indexerWorkerName(),
       },
     }
     await saveState(state)
