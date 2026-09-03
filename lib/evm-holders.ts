@@ -26,7 +26,7 @@ import { encodeAbiParameters, erc20Abi, keccak256, parseAbiItem, toHex, type Add
 import { ARC, arcLogsClient, arcPublicClient, instantProtocolAddresses } from './contracts-arc'
 import { withRateLimitRetry } from './rpc-retry'
 import { DEFAULT_TOKEN_DECIMALS } from './token-format'
-import { listIndexedTokens } from './arc-indexer/store'
+import { getToken, listIndexedTokens } from './arc-indexer/store'
 import { summarizeRpcError } from './rpc-error'
 
 const TRANSFER = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)')
@@ -208,6 +208,50 @@ async function applyTransferDeltas(
 }
 
 /**
+ * Finds a much tighter starting block than CHAIN_FLOOR for a token whose own createdBlock isn't
+ * known — confirmed live 2026-09-04 on $EVE: a ground-truth Transfer scan from CHAIN_FLOOR found
+ * ZERO logs across the first 1,080,000 blocks (two full 60-chunk rounds) before this fix — the
+ * token simply didn't exist yet across that whole range. At the ledger's real per-tick pace
+ * (budget-bounded, one token touched roughly every few cron rotations) that's not "still catching
+ * up," it's "might never realistically reach real activity."
+ *
+ * Prefers createdBlock when the token registry has it (cheap, exact). Falls back to a binary
+ * search over block timestamps against createdAt (which this route call always has, even when
+ * createdBlock doesn't) — bounded to ~log2(head) probes, a one-time cost paid only when a token
+ * has no ledger cursor yet, never on a resumed scan.
+ */
+async function findFloorBlock(
+  token: Address,
+  client: ReturnType<typeof arcPublicClient>,
+  head: bigint,
+): Promise<bigint> {
+  try {
+    const info = await getToken(token)
+    if (info?.createdBlock != null && info.createdBlock > 0) {
+      return BigInt(Math.max(0, info.createdBlock - 100))
+    }
+    if (info?.createdAt != null && info.createdAt > 0) {
+      const targetTs = BigInt(info.createdAt)
+      let lo = 0n
+      let hi = head
+      while (lo < hi) {
+        const mid = (lo + hi) / 2n
+        const block = await withRateLimitRetry(() => client.getBlock({ blockNumber: mid })).catch(() => null)
+        // A probe that fails even after retry: search the earlier half rather than guess — worst
+        // case this makes the floor a bit more conservative (more blocks scanned), never wrong
+        // in the dangerous direction (skipping real activity).
+        if (!block || block.timestamp >= targetTs) hi = mid
+        else lo = mid + 1n
+      }
+      return lo > 200n ? lo - 200n : 0n
+    }
+  } catch (e) {
+    console.warn('[evm-holders] findFloorBlock', token, summarizeRpcError(e))
+  }
+  return CHAIN_FLOOR
+}
+
+/**
  * Catches one token's ledger up to (near) head, resuming from its saved cursor. Safe to call
  * from both the live request path (small budgetMs) and the background cron (larger budgetMs) —
  * claimHolderLock keeps the two from racing the same token's hash concurrently.
@@ -222,7 +266,9 @@ export async function updateHolderLedger(
     const client = arcPublicClient()
     const head = await withRateLimitRetry(() => client.getBlockNumber())
     const meta = await kvGetSafe<HolderScanMeta>(HOLDER_META_KEY(token))
-    const floor = opts?.floorBlock ?? CHAIN_FLOOR
+    // findFloorBlock only runs when there's no cursor yet (meta is null) — once a cursor exists,
+    // `resume` below is always past any reasonable floor, so this stays a one-time cost.
+    const floor = opts?.floorBlock ?? (meta ? CHAIN_FLOOR : await findFloorBlock(token, client, head))
     const resume = meta ? BigInt(meta.lastBlock) + 1n : floor
     const startBlock = resume > floor ? resume : floor
     if (startBlock > head) return { ok: true, scannedTo: head, touched: 0 }
