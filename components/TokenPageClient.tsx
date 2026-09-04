@@ -11,11 +11,10 @@ import nextDynamic from 'next/dynamic'
 import { type Address } from 'viem'
 import Link from 'next/link'
 import { Loader2, ExternalLink, Copy, Check, Globe, Filter } from 'lucide-react'
-import { type PoolToken } from '@/lib/tokens'
+import { isReflectionToken, type PoolToken } from '@/lib/tokens'
 import type { EvmTrade, EvmTradesResult } from '@/lib/evm-trades'
 import type { EvmHoldersResult } from '@/lib/evm-holders'
 import { ArcDexTradePanel } from '@/components/ArcDexTradePanel'
-import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import type { TraderMeta } from '@/lib/arc-trader-meta'
 import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
@@ -30,7 +29,8 @@ const TradingViewChart = nextDynamic(() => import('@/components/TradingViewChart
 })
 import {
   ageLabel,
-  changeParts,
+  fmtCompact,
+  fmtPrice,
   fmtUsd,
   shortAddr,
   tileGradient,
@@ -38,7 +38,6 @@ import {
 } from '@/lib/ui-format'
 
 type Tab = 'Activity' | 'holders'
-type VolRange = '1H' | '6H' | '24H'
 
 
 
@@ -79,7 +78,6 @@ export function TokenPageClient({
   const [traderMeta, setTraderMeta] = useState<Record<string, TraderMeta>>({})
   const [loading, setLoading] = useState(!initialPool)
   const [tab, setTab] = useState<Tab>('Activity')
-  const [volRange, setVolRange] = useState<VolRange>('1H')
   const [copied, setCopied] = useState(false)
   const [actPage, setActPage] = useState(0)
   const [walletFilter, setWalletFilter] = useState<string | null>(null)
@@ -205,10 +203,9 @@ export function TokenPageClient({
   }, [chartReady, loadChartTape])
 
   useEffect(() => {
-    if (tab !== 'holders') return
     if (holders != null) return
     void loadHolders()
-  }, [tab, holders, loadHolders])
+  }, [holders, loadHolders])
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -263,12 +260,6 @@ export function TokenPageClient({
     }
   }, [trades, walletFilter])
 
-  const volWindowSec = useMemo(() => {
-    if (volRange === '1H') return 3600
-    if (volRange === '6H') return 6 * 3600
-    return 86_400
-  }, [volRange])
-
   const tape = chartTape.length ? chartTape : (trades?.trades ?? [])
   const traderCounts = useMemo(() => {
     const m = new Map<string, number>()
@@ -303,27 +294,6 @@ export function TokenPageClient({
       .catch(() => {})
   }, [])
 
-  const { vol, buys, sells, buyUsd, sellUsd } = useMemo(() => {
-    const cutoff = Math.floor(Date.now() / 1000) - volWindowSec
-    let vol = 0
-    let buys = 0
-    let sells = 0
-    let buyUsd = 0
-    let sellUsd = 0
-    for (const t of tape) {
-      if (t.ts < cutoff) continue
-      vol += t.valueUsd
-      if (t.isBuy) {
-        buys++
-        buyUsd += t.valueUsd
-      } else {
-        sells++
-        sellUsd += t.valueUsd
-      }
-    }
-    return { vol, buys, sells, buyUsd, sellUsd }
-  }, [tape, volWindowSec])
-
   const vol24 = useMemo(() => {
     const cutoff = Math.floor(Date.now() / 1000) - 86_400
     let tapeVol = 0
@@ -340,13 +310,10 @@ export function TokenPageClient({
     }
   }, [tape, pool?.volume24h])
 
-  const buyPct = vol > 0 ? (buyUsd / vol) * 100 : 0
-  const sellPct = vol > 0 ? 100 - buyPct : 0
   const explorer = ARC_EXPLORER || 'https://arc-scan.org'
   const seed = token || pool?.symbol || 'arc'
   const { tile, mono } = tileGradient(seed)
   const tapeChange = useMemo(() => priceChangeFromTrades(chartTape), [chartTape])
-  const chg = changeParts(chartTape.length >= 2 ? tapeChange : pool?.priceChange24h)
 
 
   const holderCount = holders?.total ?? holders?.holders?.length ?? 0
@@ -382,22 +349,17 @@ export function TokenPageClient({
   const webUrl = pool.website ? websiteHref(pool.website) : ''
   const hasSocials = !!(xUrl || tgUrl || webUrl)
 
+  const quote = pool.instantMeta?.quote || 'USDC'
+  const pct24 = chartTape.length >= 2 ? tapeChange : pool.priceChange24h
+  const pctUp = (pct24 ?? 0) >= 0
+  const pctLabel = `${pctUp ? '+' : ''}${(pct24 ?? 0).toFixed(1)}% 24h`
+
   return (
     <main className="min-h-screen text-white pt-16 pb-20">
-      <div className="max-w-desk mx-auto px-4 sm:px-10 py-6 sm:py-8">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm font-medium text-t2 hover:text-white mb-5"
-        >
-          ‹ Home
-        </Link>
-
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_384px] gap-7 items-start">
-          <div className="flex flex-col gap-5 min-w-0">
-            {/* Header */}
-            <div className="flex items-center gap-[18px]">
+      <div className="max-w-[1120px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div className="flex flex-wrap items-start gap-4">
               <span
-                className="w-[72px] h-[72px] rounded-[24px] shrink-0 flex items-center justify-center text-[32px] font-bold tracking-[-0.04em] overflow-hidden relative"
+                className="size-14 rounded-full shrink-0 flex items-center justify-center text-lg font-bold overflow-hidden relative border border-hair"
                 style={{ background: img ? undefined : tile, color: mono }}
               >
                 {img ? (
@@ -407,12 +369,32 @@ export function TokenPageClient({
                   initial
                 )}
               </span>
-              <div className="min-w-0 flex flex-col gap-2">
-                <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em] truncate">
-                  {pool.name}
-                </h1>
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <span className="text-sm font-semibold text-t2">${pool.symbol}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="m-0 text-xl font-semibold tracking-tight truncate">{pool.name}</h1>
+                  <span className="text-t2">${pool.symbol}</span>
+                  {isReflectionToken(pool) ? (
+                    <span className="px-2 py-0.5 rounded-full bg-s2 border border-hair text-lime-t text-[10px] font-semibold uppercase tracking-wide">
+                      Reflect
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full bg-s2 border border-hair text-t2 text-[10px] font-semibold uppercase tracking-wide">
+                      Meme
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap items-end gap-3">
+                  <div className="text-4xl font-semibold tracking-tight tabular-nums">
+                    {fmtUsd(pool.marketCap)}
+                  </div>
+                  <div
+                    className="mb-1 text-sm tabular-nums"
+                    style={{ color: pctUp ? 'var(--limeT)' : 'var(--coral)' }}
+                  >
+                    {pctLabel}
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center gap-2.5 flex-wrap">
                   <button
                     type="button"
                     onClick={copyAddress}
@@ -431,7 +413,6 @@ export function TokenPageClient({
                   >
                     <ExternalLink className="w-3 h-3" />
                   </a>
-                  <LaunchKindBadge token={pool} size="md" />
                   {hasSocials && (
                     <span className="inline-flex items-center gap-1">
                       {xUrl ? (
@@ -485,185 +466,84 @@ export function TokenPageClient({
                 </div>
               </div>
             </div>
-            <TokenListingEdit
-              token={token}
-              pool={pool}
-              onSaved={(patch) => {
-                listingEpoch.current += 1
-                setPool((p) => (p ? { ...p, ...patch } : p))
-              }}
-            />
+        <TokenListingEdit
+          token={token}
+          pool={pool}
+          onSaved={(patch) => {
+            listingEpoch.current += 1
+            setPool((p) => (p ? { ...p, ...patch } : p))
+          }}
+        />
 
-            {/* FDV + change */}
-            <div className="flex items-end gap-4 pt-1">
-              <span className="text-[48px] sm:text-[56px] font-bold tracking-display leading-[0.92] tabular-nums">
-                {fmtUsd(pool.marketCap)}
-              </span>
-              <span
-                className="px-3 py-1.5 rounded-[11px] text-[15px] font-bold tabular-nums whitespace-nowrap mb-1"
-                style={{ background: chg.chipBg, color: chg.chipFg }}
-              >
-                {chg.label}
-              </span>
-              <span className="text-[13px] text-t3 mb-2 hidden sm:inline">
-                fully diluted · past 24h
-              </span>
+        <div className="mt-8 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_22rem] gap-6 items-start">
+          <div className="flex flex-col gap-5 min-w-0">
+            <div className="h-64 sm:h-72 rounded-[20px] bg-s1 border border-hair overflow-hidden">
+              <TradingViewChart token={token} symbol={pool.symbol} height={288} />
             </div>
 
-            {/* Stat grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-hair2 border border-hair rounded-[24px] overflow-hidden">
-              {[
-                {
-                  label: 'Burned',
-                  value: fmtBurnedPct(pool.burnedPct),
-                  sub: 'of supply',
-                  subColor: 'var(--limeT)',
-                  bar: pool.burnedPct,
-                  href: `${explorer}/token/${token}?a=${BURN_ADDRESS}`,
-                },
-                {
-                  label: '24H volume',
-                  value: fmtUsd(vol24.vol),
-                  sub: vol24.vol > 0 ? `${vol24.buyPct.toFixed(1)}% buys` : 'no trades',
-                  subColor: 'var(--limeT)',
-                  bar: null,
-                  href: null,
-                },
-                {
-                  label: 'Liquidity',
-                  value:
-                    pool.liquidityQuoteUsd != null && pool.liquidityQuoteUsd > 0
-                      ? fmtUsd(pool.liquidityQuoteUsd)
-                      : '—',
-                  sub: 'USDC in pool',
-                  subColor: 'var(--t3)',
-                  bar: null,
-                  href: null,
-                },
-                {
-                  label: 'Holders',
-                  value: holderCount ? String(holderCount) : '—',
-                  sub: 'on Arc',
-                  subColor: 'var(--limeT)',
-                  bar: null,
-                  href: null,
-                },
-              ].map((m) => {
-                const inner = (
+            <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <TokenStat label="Price" value={fmtPrice(pool.currentPrice)} />
+              <TokenStat label="24h volume" value={fmtUsd(vol24.vol)} />
+              <TokenStat label="Holders" value={holderCount ? String(holderCount) : '—'} />
+              <TokenStat label="Age" value={ageLabel(pool.createdAt)} />
+            </dl>
+
+            <div className="rounded-[20px] bg-s1 border border-hair p-5">
+              <h2 className="m-0 text-sm font-medium">About</h2>
+              {pool.description ? (
+                <p className="mt-2 mb-0 text-sm leading-relaxed text-t2 text-pretty">{pool.description}</p>
+              ) : (
+                <p className="mt-2 mb-0 text-sm text-t3">No description.</p>
+              )}
+              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-t3">
+                <span className="inline-flex items-center gap-1.5">
+                  Paired with
+                  <span className="inline-flex size-3.5 items-center justify-center rounded-full bg-lime-t text-[8px] font-bold text-[var(--bg)]">
+                    $
+                  </span>
+                  {quote}
+                </span>
+                <span>·</span>
+                <span>Supply {fmtCompact(pool.totalSupply)}</span>
+                <span>·</span>
+                <span>1% Uniswap V3 fee</span>
+                {pool.burnedPct != null ? (
                   <>
-                    <span className="text-[11px] font-semibold tracking-[0.06em] uppercase text-t3 whitespace-nowrap inline-flex items-center gap-1">
-                      {m.label}
-                      {m.href ? <ExternalLink className="w-3 h-3" /> : null}
-                    </span>
-                    <span className="text-2xl font-semibold tabular-nums tracking-[-0.028em] leading-tight truncate">
-                      {m.value}
-                    </span>
-                    {m.bar != null && Number.isFinite(m.bar) ? (
-                      <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${Math.min(100, Math.max(0, m.bar))}%`,
-                            background: 'var(--limeT)',
-                          }}
-                        />
-                      </div>
-                    ) : null}
-                    <span className="text-xs font-semibold tabular-nums" style={{ color: m.subColor }}>
-                      {m.sub}
-                    </span>
-                  </>
-                )
-                const cls = 'px-5 py-[18px] bg-s1 flex flex-col gap-1.5 min-w-0'
-                return m.href ? (
-                  <a
-                    key={m.label}
-                    href={m.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="View burned supply on explorer"
-                    className={`${cls} hover:bg-s2 transition-colors`}
-                  >
-                    {inner}
-                  </a>
-                ) : (
-                  <div key={m.label} className={cls}>
-                    {inner}
-                  </div>
-                )
-              })}
-            </div>
-
-            <div className="border border-hair rounded-[28px] bg-[#131313] overflow-hidden">
-              <TradingViewChart token={token} symbol={pool.symbol} height={420} />
-            </div>
-
-            {/* Volume */}
-            <div id="activity" className="border border-hair rounded-[28px] bg-s1 p-[22px] px-6">
-              <div className="flex items-start justify-between gap-5">
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[11px] font-semibold tracking-[0.06em] uppercase text-t3">
-                    Volume
-                  </span>
-                  <span className="text-[30px] font-semibold tabular-nums tracking-[-0.03em]">
-                    {fmtUsd(vol)}
-                  </span>
-                </div>
-                <div className="flex gap-1 p-1 bg-s2 border border-hair rounded-xl">
-                  {(['1H', '6H', '24H'] as VolRange[]).map((v) => (
-                    <button
-                      key={v}
-                      type="button"
-                      onClick={() => setVolRange(v)}
-                      className="px-3.5 py-1.5 rounded-[9px] text-xs font-semibold transition-colors"
-                      style={{
-                        background: volRange === v ? 'rgba(255,255,255,0.12)' : 'transparent',
-                        color: volRange === v ? '#fff' : 'rgba(255,255,255,0.52)',
-                      }}
+                    <span>·</span>
+                    <a
+                      href={`${explorer}/token/${token}?a=${BURN_ADDRESS}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:text-white"
                     >
-                      {v}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="flex gap-1 mt-[18px]">
-                <span
-                  className="h-2 rounded-full bg-lime"
-                  style={{ width: `${Math.max(4, buyPct)}%` }}
-                />
-                <span className="h-2 rounded-full bg-coral flex-1" />
-              </div>
-              <div className="flex justify-between mt-3.5">
-                <div className="flex flex-col gap-1">
-                  <span className="text-sm font-semibold text-lime-t">{buys} buys</span>
-                  <span className="text-[13px] text-t3 tabular-nums">
-                    {fmtUsd(buyUsd)} · {buyPct.toFixed(1)}%
-                  </span>
-                </div>
-                <div className="flex flex-col gap-1 text-right">
-                  <span className="text-sm font-semibold text-coral">{sells} sells</span>
-                  <span className="text-[13px] text-t3 tabular-nums">
-                    {fmtUsd(sellUsd)} · {sellPct.toFixed(1)}%
-                  </span>
-                </div>
+                      Burned {fmtBurnedPct(pool.burnedPct)}
+                    </a>
+                  </>
+                ) : null}
+                {pool.liquidityQuoteUsd != null && pool.liquidityQuoteUsd > 0 ? (
+                  <>
+                    <span>·</span>
+                    <span>Liq {fmtUsd(pool.liquidityQuoteUsd)}</span>
+                  </>
+                ) : null}
               </div>
             </div>
 
             {/* Activity / holders */}
-            <div className="border border-hair rounded-[28px] bg-s1 overflow-hidden">
-              <div className="px-6 pt-5 flex items-center gap-5 sm:gap-6 overflow-x-auto">
+            <div id="activity" className="rounded-[20px] bg-s1 border border-hair overflow-hidden">
+              <div className="px-5 pt-5 flex items-center gap-5 overflow-x-auto">
                 {actTabs.map((a) => (
                   <button
                     key={a.id}
                     type="button"
                     onClick={() => setTab(a.id)}
-                    className="pb-3.5 text-lg sm:text-[19px] font-semibold tracking-tightish whitespace-nowrap border-b-2 transition-colors"
+                    className="pb-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors"
                     style={{
-                      borderColor: tab === a.id ? 'var(--limeT)' : 'transparent',
+                      borderColor: tab === a.id ? 'var(--lime)' : 'transparent',
                       color: tab === a.id ? '#fff' : 'var(--t3)',
                     }}
                   >
-                    {a.label}
+                    {a.id === 'Activity' ? 'Tape' : a.label}
                   </button>
                 ))}
                 <div className="ml-auto pb-3.5 flex items-center gap-2 shrink-0">
@@ -948,20 +828,25 @@ export function TokenPageClient({
             </div>
           </div>
 
-          {/* Trade panel */}
-          <div className="lg:sticky lg:top-[88px]">
+          <div className="lg:sticky lg:top-20 lg:self-start">
             <ArcDexTradePanel
               token={token}
               symbol={pool.symbol}
               imageUrl={pool.imageUrl || pool.logoUrl}
               onTraded={refreshAfterTrade}
             />
-            {pool.description && (
-              <p className="mt-4 px-2 text-[13px] text-t3 leading-relaxed">{pool.description}</p>
-            )}
           </div>
         </div>
       </div>
     </main>
+  )
+}
+
+function TokenStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-s1 border border-hair px-4 py-3">
+      <div className="text-[11px] text-t3">{label}</div>
+      <div className="mt-1 text-sm font-medium tabular-nums">{value}</div>
+    </div>
   )
 }

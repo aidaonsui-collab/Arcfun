@@ -7,7 +7,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAccount, useConnectorClient, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi, formatUnits, type Address } from 'viem'
-import { Loader2, AlertCircle, CheckCircle, ExternalLink } from 'lucide-react'
+import { Loader2, AlertCircle, CheckCircle, ExternalLink, ArrowDownUp } from 'lucide-react'
 import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_SWAP_GAS } from '@/lib/contracts-arc'
 import {
   arcSwapConfigured,
@@ -24,7 +24,7 @@ import {
 } from '@/lib/arc-swap'
 import { formatToken, parseToken } from '@/lib/token-format'
 import { getIncomingReferralCode } from '@/lib/crucible'
-import { tileGradient } from '@/lib/ui-format'
+import { fmtPrice, fmtUsd, tileGradient } from '@/lib/ui-format'
 import { cdnImage } from '@/lib/cdn-image'
 import { WalletButton } from '@/components/WalletButton'
 import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
@@ -297,17 +297,6 @@ export function ArcDexTradePanel({
         : mode === 'buy'
           ? fmtTok(estOut, tokDec)
           : formatUsdc(estOut)
-  const rate = (() => {
-    if (!(amtNum > 0) || estOut == null || estOut <= 0n) return null
-    const out = Number(formatUnits(estOut, mode === 'buy' ? tokDec : 6))
-    if (!(out > 0)) return null
-    const per = out / amtNum
-    const pretty = per.toLocaleString(undefined, {
-      maximumFractionDigits: per >= 1000 ? 0 : per >= 1 ? 4 : 6,
-    })
-    return mode === 'buy' ? `1 USDC = ${pretty} ${symbol}` : `1 ${symbol} = ${pretty} USDC`
-  })()
-
   const TokenChip = ({ kind }: { kind: 'usdc' | 'token' }) =>
     kind === 'usdc' ? (
       <span className="inline-flex items-center gap-2 h-10 pl-1.5 pr-3 rounded-full bg-[#111318] border border-white/10">
@@ -331,173 +320,176 @@ export function ArcDexTradePanel({
       </span>
     )
 
-  return (
-    <div className="rounded-[28px] border border-hair bg-[#0e1016] p-3">
-      {!isConnected || wrongChain ? (
-        <WalletButton variant="panel" />
-      ) : (
-        <>
-          <div className="rounded-[22px] bg-[#16181f] p-4">
-            <div className="flex items-center justify-between text-[13px] text-white/45">
-              <span>You pay</span>
-              <button
-                type="button"
-                disabled={payBalPending || payBal === 0n}
-                onClick={() => {
-                  if (payBalPending || payBal <= 0n) return
-                  setAmount(
-                    mode === 'buy' ? formatUsdc(payBal).replace(/,/g, '') : formatToken(payBal, tokDec),
-                  )
-                }}
-                className="tabular-nums font-medium disabled:opacity-40"
-              >
-                {payBalLabel}{' '}
-                <span className="font-bold text-[#c6f135]">MAX</span>
-              </button>
-            </div>
-            <div className="flex items-center justify-between gap-3 mt-3">
-              <TokenChip kind={mode === 'buy' ? 'usdc' : 'token'} />
-              <input
-                value={amount}
-                onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-                inputMode="decimal"
-                placeholder="0"
-                className="flex-1 min-w-0 bg-transparent border-0 outline-none text-right text-[34px] font-semibold tracking-[-0.04em] tabular-nums placeholder:text-white/20"
-              />
-            </div>
-            {mode === 'buy' && (
-              <div className="flex gap-1.5 mt-3">
-                {BUY_PRESETS.map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setAmount(String(v))}
-                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold tabular-nums text-white/45 bg-white/5 hover:text-white"
-                  >
-                    ${v}
-                  </button>
-                ))}
-              </div>
-            )}
-            {mode === 'sell' && (
-              <div className="flex gap-1.5 mt-3">
-                {SELL_PCTS.filter((p) => p !== 100).map((pct) => (
-                  <button
-                    key={pct}
-                    type="button"
-                    disabled={payBalPending || payBal === 0n}
-                    onClick={() => {
-                      const pctAmt = (payBal * BigInt(pct)) / 100n
-                      if (pctAmt > 0n) setAmount(formatToken(pctAmt, tokDec))
-                    }}
-                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold tabular-nums text-white/45 bg-white/5 hover:text-white disabled:opacity-40"
-                  >
-                    {pct}%
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+  const feeUsd =
+    mode === 'buy'
+      ? amtNum * 0.01
+      : estOut != null && estOut > 0n
+        ? Number(formatUnits(estOut, 6)) * (0.01 / 0.99)
+        : 0
+  const pricePer =
+    amtNum > 0 && estOut != null && estOut > 0n
+      ? mode === 'buy'
+        ? amtNum / Number(formatUnits(estOut, tokDec))
+        : Number(formatUnits(estOut, 6)) / amtNum
+      : null
 
-          <div className="relative z-10 -my-3 flex justify-center">
+  return (
+    <div className="rounded-[20px] bg-s1 border border-hair p-5">
+      <div className="flex rounded-full bg-s2 p-1">
+        {(['buy', 'sell'] as const).map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => {
+              setMode(s)
+              setAmount('')
+              setEstOut(null)
+              setError(null)
+            }}
+            className={`h-9 flex-1 rounded-full text-sm font-medium capitalize transition-colors duration-150 ${
+              mode === s ? 'bg-lime text-white' : 'text-t3 hover:text-white'
+            }`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+
+      <label className="mt-5 block text-xs text-t3">
+            {mode === 'buy' ? 'You pay · USDC' : `You sell · $${symbol}`}
+          </label>
+          <div className="mt-2 flex items-center gap-2 h-12 rounded-xl bg-s2 border border-hair px-3">
+            <input
+              value={amount}
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+              inputMode="decimal"
+              placeholder="0"
+              className="flex-1 min-w-0 bg-transparent border-0 outline-none text-lg tabular-nums placeholder:text-t3"
+            />
+            <TokenChip kind={mode === 'buy' ? 'usdc' : 'token'} />
+          </div>
+          <div className="mt-2 flex justify-between text-xs text-t3">
+            <span>Wallet {payBalLabel}</span>
             <button
               type="button"
-              aria-label="Switch buy and sell"
+              disabled={payBalPending || payBal === 0n}
               onClick={() => {
-                setMode((m) => (m === 'buy' ? 'sell' : 'buy'))
-                setAmount('')
-                setEstOut(null)
-                setError(null)
+                if (payBalPending || payBal <= 0n) return
+                setAmount(
+                  mode === 'buy' ? formatUsdc(payBal).replace(/,/g, '') : formatToken(payBal, tokDec),
+                )
               }}
-              className="w-10 h-10 rounded-[12px] bg-[#16181f] border border-[#0e1016] shadow-[0_0_0_4px_#0e1016] text-white/70 hover:text-white flex items-center justify-center"
+              className="text-white/80 hover:text-white disabled:opacity-40"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
-                <path d="M12 5v14M6 13l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              Max
             </button>
           </div>
-
-          <div className="rounded-[22px] bg-[#16181f] p-4">
-            <div className="flex items-center justify-between text-[13px] text-white/45">
-              <span>You receive</span>
-              {estOut != null && !quoting && (
-                <span className="tabular-nums text-white/35 truncate max-w-[55%]">
-                  {mode === 'buy' ? formatToken(estOut, tokDec) : formatUsdc(estOut)}
-                </span>
-              )}
+          {mode === 'buy' ? (
+            <div className="mt-2 flex gap-1.5">
+              {BUY_PRESETS.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setAmount(String(v))}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold tabular-nums text-t3 bg-s2 hover:text-white"
+                >
+                  ${v}
+                </button>
+              ))}
             </div>
-            <div className="flex items-center justify-between gap-3 mt-3">
-              <TokenChip kind={mode === 'buy' ? 'token' : 'usdc'} />
-              <span className="flex-1 min-w-0 text-right text-[34px] font-semibold tracking-[-0.04em] tabular-nums truncate">
-                {receiveAmt}
-              </span>
+          ) : (
+            <div className="mt-2 flex gap-1.5">
+              {SELL_PCTS.filter((p) => p !== 100).map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  disabled={payBalPending || payBal === 0n}
+                  onClick={() => {
+                    const pctAmt = (payBal * BigInt(pct)) / 100n
+                    if (pctAmt > 0n) setAmount(formatToken(pctAmt, tokDec))
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold tabular-nums text-t3 bg-s2 hover:text-white disabled:opacity-40"
+                >
+                  {pct}%
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="my-4 flex justify-center text-t3">
+            <ArrowDownUp className="size-4" />
+          </div>
+
+          <div className="rounded-xl bg-s2 px-4 py-3">
+            <div className="text-xs text-t3">You receive</div>
+            <div className="mt-1 text-lg font-medium tabular-nums">
+              {receiveAmt}{' '}
+              <span className="text-sm text-t3">{mode === 'buy' ? symbol : 'USDC'}</span>
             </div>
           </div>
 
-          <div className="px-1 pt-3 flex flex-col gap-2">
-            {rate && <p className="text-[13px] text-white/45 m-0">{rate}</p>}
-            <div className="flex items-center gap-2 text-[12px] text-white/45">
-              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-black font-bold text-[#c6f135] tracking-wide">
-                DEX V3
-              </span>
-              <span>1% fee</span>
-              <span className="ml-auto inline-flex items-center gap-1">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1" />
-                </svg>
-                {SLIPPAGE_BPS / 100}%
-              </span>
-            </div>
+          <div className="mt-3 flex justify-between text-xs text-t3">
+            <span>Price</span>
+            <span className="tabular-nums">
+              {pricePer != null ? `${fmtPrice(pricePer)} / token` : '—'}
+            </span>
+          </div>
+          <div className="mt-1 flex justify-between text-xs text-t3">
+            <span>1% fee</span>
+            <span className="tabular-nums">{amtNum > 0 ? fmtUsd(feeUsd) : '$0'}</span>
           </div>
 
           {error && (
-            <p className="mt-3 text-xs text-coral flex items-start gap-1 px-1">
+            <p className="mt-3 mb-0 text-xs text-coral flex items-start gap-1">
               <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {error}
             </p>
           )}
           {statusMsg && !error && (
-            <p className="mt-3 text-xs text-[#c6f135] flex items-center gap-1 px-1">
+            <p className="mt-3 mb-0 text-xs text-lime-t flex items-center gap-1">
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
               {statusMsg}
             </p>
           )}
 
           {mode === 'buy' && refCode ? (
-            <p className="mt-3 mb-0 px-1 text-[12px] text-white/45">
+            <p className="mt-3 mb-0 text-[12px] text-t3">
               Buying through <span className="text-white/80 font-semibold">{refCode}</span>
               {' · '}0.05% of this buy goes to that link
             </p>
           ) : null}
 
-          <button
-            type="button"
-            disabled={
-              busy ||
-              quoting ||
-              !amount ||
-              Number(amount) <= 0 ||
-              (estOut == null && !needApprove)
-            }
-            onClick={() => void onSubmit()}
-            className="mt-4 w-full h-[56px] rounded-2xl text-[17px] font-bold tracking-wide disabled:opacity-40 transition-opacity"
-            style={{
-              background: mode === 'buy' ? '#c6f135' : 'var(--coral)',
-              color: mode === 'buy' ? '#111' : '#fff',
-            }}
-          >
-            {busy ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" /> Working…
-              </span>
-            ) : needApprove ? (
-              mode === 'buy' ? 'APPROVE & BUY' : `APPROVE & SELL`
-            ) : mode === 'buy' ? (
-              'BUY'
-            ) : (
-              'SELL'
-            )}
-          </button>
+          {!isConnected || wrongChain ? (
+            <div className="mt-5">
+              <WalletButton variant="panel" />
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={
+                busy ||
+                quoting ||
+                !amount ||
+                Number(amount) <= 0 ||
+                (estOut == null && !needApprove)
+              }
+              onClick={() => void onSubmit()}
+              className={`mt-5 w-full h-11 rounded-full text-sm font-semibold tracking-tightish disabled:opacity-40 transition-colors ${
+                mode === 'buy' ? 'bg-lime text-white hover:bg-lime-2' : 'bg-coral text-white'
+              }`}
+            >
+              {busy ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Working…
+                </span>
+              ) : needApprove ? (
+                mode === 'buy' ? `Approve & buy $${symbol}` : `Approve & sell $${symbol}`
+              ) : mode === 'buy' ? (
+                `Buy $${symbol}`
+              ) : (
+                `Sell $${symbol}`
+              )}
+            </button>
+          )}
 
           {txHash && (
             <a
@@ -509,8 +501,10 @@ export function ArcDexTradePanel({
               View tx <ExternalLink className="w-3 h-3" />
             </a>
           )}
-        </>
-      )}
+
+          <p className="mt-3 mb-0 text-center text-[11px] text-t3">
+            1% quote fee into Crucible, creator, burn, platform.
+          </p>
     </div>
   )
 }
