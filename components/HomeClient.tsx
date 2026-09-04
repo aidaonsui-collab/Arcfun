@@ -1,18 +1,23 @@
 'use client'
 
-import { Suspense, useEffect, useState, useCallback, useMemo } from 'react'
+import { Suspense, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { Loader2 } from 'lucide-react'
-import type { PoolToken, VolumeWindow } from '@/lib/tokens'
-import { volumeForWindow } from '@/lib/tokens'
-import { TokenCard, TokenRailCard } from '@/components/TokenCard'
-import { PadVolumeTile } from '@/components/PadVolumeTile'
+import { Loader2, Search, SlidersHorizontal } from 'lucide-react'
+import type { PoolToken } from '@/lib/tokens'
+import { isReflectionToken, volumeForWindow } from '@/lib/tokens'
+import { TokenCard } from '@/components/TokenCard'
+import { HeroBanners } from '@/components/HeroBanners'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
 
 type SortKey = 'Top volume' | 'New' | 'Top MC'
+type KindFilter = 'all' | 'meme' | 'reflect'
 
-const VOL_WINDOWS: VolumeWindow[] = ['1H', '6H', '12H', '24H']
+const SORT_TABS: { key: SortKey; label: string }[] = [
+  { key: 'Top volume', label: '24 Volume' },
+  { key: 'New', label: 'Recent' },
+  { key: 'Top MC', label: 'Market cap' },
+]
 
 /**
  * Reads `?q=` and renders nothing.
@@ -43,12 +48,14 @@ export function HomeClient({
 
   const [tokens, setTokens] = useState<PoolToken[]>(initialTokens)
   const [loading, setLoading] = useState(initialTokens.length === 0)
-  const [sort, setSort] = useState<SortKey>('Top MC')
-  const [volWindow, setVolWindow] = useState<VolumeWindow>('24H')
+  const [sort, setSort] = useState<SortKey>('Top volume')
   // Seed from initialQ if a caller passed one. URL `?q=` is applied by QuerySync.
   // Do not sync `q` in an effect — it is '' when HomePage omits initialQ and would
   // wipe QuerySync on mount.
   const [filter, setFilter] = useState(q)
+  const [kind, setKind] = useState<KindFilter>('all')
+  const [kindOpen, setKindOpen] = useState(false)
+  const kindWrap = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setTokens(initialTokens)
@@ -86,6 +93,8 @@ export function HomeClient({
         return hay.includes(filter)
       })
     }
+    if (kind === 'reflect') list = list.filter((t) => isReflectionToken(t))
+    if (kind === 'meme') list = list.filter((t) => !isReflectionToken(t))
     if (sort === 'New') {
       list.sort((a, b) => {
         const ta = a.createdAt ?? 0
@@ -97,8 +106,8 @@ export function HomeClient({
       list.sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0))
     } else {
       list.sort((a, b) => {
-        const va = volumeForWindow(a, volWindow)
-        const vb = volumeForWindow(b, volWindow)
+        const va = volumeForWindow(a, '24H')
+        const vb = volumeForWindow(b, '24H')
         if (va !== vb) return vb - va
         const ta = a.lastTradeAt ?? a.createdAt ?? 0
         const tb = b.lastTradeAt ?? b.createdAt ?? 0
@@ -107,118 +116,91 @@ export function HomeClient({
       })
     }
     return list
-  }, [tokens, filter, sort, volWindow])
+  }, [tokens, filter, sort, kind])
 
-  const rail = useMemo(() => {
-    return [...tokens].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 3)
-  }, [tokens])
-
-  const padVolume = useMemo(() => {
-    let volume24h = 0
-    let volumeAll = 0
-    for (const t of tokens) {
-      volume24h += t.volume24h ?? 0
-      volumeAll += t.volumeAll ?? 0
+  useEffect(() => {
+    if (!kindOpen) return
+    const onDoc = (e: MouseEvent) => {
+      if (!kindWrap.current?.contains(e.target as Node)) setKindOpen(false)
     }
-    return { volume24h, volumeAll }
-  }, [tokens])
-
-  const sortTabs: SortKey[] = ['Top volume', 'New', 'Top MC']
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [kindOpen])
 
   return (
-    <main className="relative min-h-screen text-white pt-16 pb-16 overflow-hidden">
+    <main className="relative min-h-screen text-white pt-16 pb-16">
       <Suspense fallback={null}>
         <QuerySync onChange={setFilter} />
       </Suspense>
-      <div aria-hidden="true" className="hero-grid-fade" />
-      <div className="relative z-10 max-w-desk mx-auto px-4 sm:px-10">
-        <section className="relative mt-6">
-          <div className="relative max-w-[600px] flex flex-col gap-3">
-            <h1 className="m-0 text-[26px] sm:text-[32px] leading-[1.15] font-bold tracking-display text-pretty text-white">
-              Tokenize the World
-            </h1>
-            <div className="flex flex-wrap items-stretch gap-2.5 pt-1">
-              <PadVolumeTile
-                volume24h={padVolume.volume24h}
-                volumeAll={padVolume.volumeAll}
-              />
-            </div>
-            <div className="pt-1">
-              <Link
-                href="/create"
-                className="inline-flex h-[42px] items-center px-6 rounded-full bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
-              >
-                Launch a token
-              </Link>
-            </div>
-          </div>
+      <div className="relative z-10 max-w-[1120px] mx-auto px-4 sm:px-6">
+        <section className="pt-6 md:pt-8">
+          <HeroBanners />
         </section>
 
-        {rail.length > 0 && (
-          <section className="mt-11">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2.5">
-                <h2 className="m-0 text-[21px] font-semibold tracking-tightish">Top Memes</h2>
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-lime-t">
-                  <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot" />
-                  live
-                </span>
-              </div>
+        <section id="all-launches" className="mt-8">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-t3" />
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Type token name or ticker"
+                aria-label="Search tokens"
+                className="w-full h-11 pl-11 pr-4 rounded-full bg-s1 border border-hair text-sm tracking-tightish outline-none placeholder:text-white/30 focus:border-lime-line"
+              />
             </div>
-            <div className="rail-scroll flex gap-3 pb-1">
-              {rail.map((t) => (
-                <TokenRailCard key={t.id || t.coinType || t.poolId} token={t} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        <section id="all-launches" className="mt-11">
-          <div className="flex items-center justify-between gap-5 flex-wrap">
-            <h2 className="m-0 text-[21px] font-semibold tracking-tightish">All launches</h2>
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <div className="flex gap-1 p-1 bg-s1 border border-hair rounded-[14px]">
-                {sortTabs.map((s) => (
+            <div className="flex items-center gap-2">
+              <span className="hidden text-xs text-t3 sm:inline">Sort</span>
+              <div className="flex rounded-full bg-s1 p-1 border border-hair">
+                {SORT_TABS.map(({ key, label }) => (
                   <button
-                    key={s}
+                    key={key}
                     type="button"
-                    onClick={() => setSort(s)}
-                    className="px-[15px] py-[7px] rounded-[10px] text-[13px] font-medium tracking-tightish transition-colors"
+                    onClick={() => setSort(key)}
+                    className="h-8 rounded-full px-3 text-xs font-medium transition-colors duration-150"
                     style={{
-                      background: sort === s ? 'var(--lime)' : 'transparent',
-                      color: sort === s ? '#fff' : 'rgba(255,255,255,0.52)',
+                      background: sort === key ? 'var(--lime)' : 'transparent',
+                      color: sort === key ? '#fff' : 'rgba(255,255,255,0.55)',
                     }}
                   >
-                    {s}
+                    {label}
                   </button>
                 ))}
               </div>
-              {sort === 'Top volume' && (
-                <div className="flex items-center gap-1 p-1 bg-s1 border border-hair rounded-[14px]">
-                  {VOL_WINDOWS.map((w) => (
-                    <button
-                      key={w}
-                      type="button"
-                      onClick={() => setVolWindow(w)}
-                      className="min-w-[40px] px-2.5 py-[7px] rounded-[10px] text-[13px] font-medium tabular-nums tracking-tightish transition-colors"
-                      style={{
-                        background: volWindow === w ? 'rgba(255,255,255,0.12)' : 'transparent',
-                        color: volWindow === w ? '#fff' : 'rgba(255,255,255,0.52)',
-                      }}
-                    >
-                      {w}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="h-[38px] flex items-center gap-2 px-3 bg-s1 border border-hair rounded-[14px]">
-                <span className="w-[13px] h-[13px] border-[1.6px] border-t3 rounded-full" />
-                <input
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                  placeholder="Filter"
-                  className="w-[110px] bg-transparent border-0 outline-none text-[13px] placeholder:text-white/25"
-                />
+              <div className="relative" ref={kindWrap}>
+                <button
+                  type="button"
+                  onClick={() => setKindOpen((o) => !o)}
+                  className="inline-flex h-9 items-center gap-1.5 px-3 rounded-full bg-s1 border border-hair text-xs font-medium text-t2 hover:text-white hover:border-lime-line"
+                >
+                  <SlidersHorizontal className="size-3.5" />
+                  Filter
+                </button>
+                {kindOpen && (
+                  <div className="absolute right-0 top-[calc(100%+6px)] z-20 min-w-[160px] rounded-2xl border border-hair bg-s1 p-1 shadow-[0_12px_40px_rgba(10,20,40,0.45)]">
+                    {(
+                      [
+                        ['all', 'All launches'],
+                        ['meme', 'Meme'],
+                        ['reflect', 'Reflect'],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          setKind(key)
+                          setKindOpen(false)
+                        }}
+                        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-left hover:bg-white/5"
+                        style={{ color: kind === key ? '#fff' : 'rgba(255,255,255,0.7)' }}
+                      >
+                        {label}
+                        {kind === key ? <span className="text-lime-t">·</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -228,23 +210,21 @@ export function HomeClient({
               <Loader2 className="w-6 h-6 animate-spin text-lime-t" />
             </div>
           ) : filtered.length === 0 ? (
-            <div className="mt-[18px] rounded-[24px] border border-hair bg-s2 p-12 text-center text-t2 text-sm shadow-[0_12px_40px_rgba(10,20,40,0.35)]">
-              Nothing launched yet — be the first.
+            <div className="mt-16 text-center text-sm text-t2">
+              No launches match that search.
               <div className="mt-4">
                 <Link
                   href="/create"
-                  className="inline-flex h-11 items-center px-6 rounded-2xl bg-lime text-white text-sm font-semibold shadow-[0_8px_24px_rgba(47,132,219,0.3)]"
+                  className="inline-flex h-11 items-center px-6 rounded-full bg-lime text-white text-sm font-semibold hover:bg-lime-2"
                 >
                   Launch a token
                 </Link>
               </div>
             </div>
           ) : (
-            <div className="mt-[18px] grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 overflow-visible">
+            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map((t, i) => (
-                <div key={i} className="min-w-0">
-                  <TokenCard token={t} rank={i} />
-                </div>
+                <TokenCard key={i} token={t} />
               ))}
             </div>
           )}

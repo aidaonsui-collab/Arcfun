@@ -21,7 +21,6 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
-import { CrucibleChip } from '@/components/CrucibleChip'
 import { WalletButton } from '@/components/WalletButton'
 import { connectToArc } from '@/lib/arc-wallet'
 import { ARC } from '@/lib/contracts-arc'
@@ -102,12 +101,11 @@ export function SiteHeader() {
 
   return (
     <>
-      <header className="fixed top-0 inset-x-0 z-40 h-16 flex items-center gap-3 sm:gap-6 px-4 sm:px-10 bg-[rgba(10,15,24,0.82)] backdrop-blur-[28px] saturate-150 border-b border-hair2">
-        {/* Menu button sits LEFT of the brand on mobile, matching OpenSea. Desktop is unchanged —
-            it shows the real nav links instead, so this is sm:hidden. */}
+      <header className="fixed top-0 inset-x-0 z-40 h-16 bg-[rgba(10,15,24,0.85)] backdrop-blur-[28px] saturate-150">
+        <div className="mx-auto flex h-16 max-w-[1120px] items-center gap-3 px-4 sm:px-6">
         <button
           type="button"
-          className="sm:hidden h-9 w-9 -ml-1 shrink-0 inline-flex items-center justify-center rounded-xl text-white active:bg-white/10 transition-colors"
+          className="md:hidden h-9 w-9 -ml-1 shrink-0 inline-flex items-center justify-center rounded-xl text-white active:bg-white/10 transition-colors"
           aria-label={menuOpen ? 'Close menu' : 'Open menu'}
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((o) => !o)}
@@ -115,79 +113,50 @@ export function SiteHeader() {
           {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-6 h-6" />}
         </button>
 
-        <Link href="/" className="flex items-center gap-2.5 shrink-0">
-          <BrandMark />
-          <span className="text-[17px] font-semibold tracking-tightish text-white">Arcfun</span>
+        <Link href="/" className="flex items-center gap-2 shrink-0">
+          <BrandMark className="w-6 h-6" />
+          <span className="text-[17px] font-semibold tracking-tight text-white">arcfun</span>
         </Link>
 
-        <form
-          onSubmit={onSearch}
-          className="hidden md:flex flex-1 max-w-[460px] h-9 items-center gap-2.5 px-3.5 bg-s2 border border-hair rounded-xl"
-        >
-          <span className="w-3.5 h-3.5 border-[1.6px] border-t3 rounded-full shrink-0" aria-hidden />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search tokens, collections, addresses"
-            className="flex-1 bg-transparent border-0 outline-none text-sm tracking-tightish placeholder:text-white/25"
-          />
-          <span className="text-[11px] font-semibold text-t3 border border-hair rounded px-1.5 py-0.5">
-            /
+        <nav className="ml-4 hidden items-center gap-1 md:flex">
+          {(
+            [
+              ['/crucible', 'Crucible', pathname.startsWith('/crucible')],
+              ['/studio', 'Studio', onStudio],
+              ['/otc', 'OTC', onOtc],
+            ] as const
+          ).map(([href, label, on]) => (
+            <Link
+              key={href}
+              href={href}
+              className={`rounded-full px-3 py-1.5 text-sm transition-colors duration-150 ${
+                on ? 'text-white' : 'text-t2 hover:text-white'
+              }`}
+            >
+              {label}
+            </Link>
+          ))}
+        </nav>
+
+        <div className="ml-auto flex items-center gap-2">
+          <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-s2 px-3 py-1.5 text-xs text-t2 border border-hair">
+            <span className="size-1.5 rounded-full bg-lime-t live-dot" />
+            Arc
           </span>
-        </form>
-
-        <div className="flex-1" />
-
-        <CrucibleChip compact className="hidden lg:inline-flex" />
-
-        <Link
-          href="/studio"
-          className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
-            onStudio
-              ? 'border-lime-line bg-s2 text-white'
-              : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
-          }`}
-        >
-          Studio
-        </Link>
-
-        <Link
-          href="/otc"
-          className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
-            onOtc
-              ? 'border-lime-line bg-s2 text-white'
-              : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
-          }`}
-        >
-          Arc OTC
-        </Link>
-
-        {isConnected && address ? (
-          <Link
-            href={onStudio ? '/studio/me' : `/creator/${address}`}
-            className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
-              pathname.startsWith('/portfolio') ||
-              pathname.toLowerCase() === `/creator/${address.toLowerCase()}` ||
-              (onStudio && pathname.startsWith('/studio/me'))
-                ? 'border-lime-line bg-s2 text-white'
-                : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
-            }`}
-          >
-            Profile
-          </Link>
-        ) : null}
-        <WalletButton />
+          <WalletButton />
+        </div>
 
         <span className="hidden" aria-hidden>
           {ARC.USDC}
         </span>
+        </div>
       </header>
 
       {/* Mobile nav drawer — full-width right slide-in, matching OpenSea's mobile menu:
           brand top-left, close top-right, icon+label rows separated by dividers, and a rule
           between the site nav and the account group. */}
       {menuOpen && (
-        <div className="sm:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Menu">
+        <div className="md:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Menu">
           <aside
             className="nav-drawer absolute inset-0 w-full flex flex-col bg-[var(--bg)]"
             style={{
