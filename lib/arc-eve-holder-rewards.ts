@@ -72,8 +72,15 @@ const LOG_KEY = 'arcfun:everewards:log'
 const LOG_CAP = 200
 
 export interface EveRewardsState {
-  startedAt: number
-  expiresAt: number
+  /** True once a tick has actually observed the on-chain beneficiary equal to this keeper. Before
+   *  that, a beneficiary mismatch means "setup isn't done yet," not "someone pulled the safety
+   *  net" — see the armed-gate comment in runEveHolderRewardsCycle for why conflating those two
+   *  used to be able to permanently brick the program on a mistimed first tick. */
+  armed: boolean
+  /** Set the moment `armed` flips true — not at KV-state creation — so the 14-day clock starts
+   *  from the real redirect, not from whatever tick happened to run first. */
+  startedAt?: number
+  expiresAt?: number
   ended: boolean
   endedAt?: number
   endedReason?: string
@@ -210,11 +217,19 @@ const DISPERSE_ABI = [
 
 async function loadState(keeper: Address): Promise<EveRewardsState> {
   const existing = await kv.get<EveRewardsState>(STATE_KEY)
-  if (existing) return existing
-  const now = Date.now()
+  if (existing) {
+    // Migrate state written before the `armed` flag existed. Anything with cycles already run or
+    // a stamped startedAt was already live and correctly armed under the old logic — treat it as
+    // armed as-is, WITHOUT touching its existing startedAt/expiresAt (the live program's 14-day
+    // clock must not reset just because this field didn't exist yet when it started).
+    if (existing.armed == null) {
+      existing.armed = existing.cycles > 0 || existing.startedAt != null
+      await saveState(existing)
+    }
+    return existing
+  }
   const fresh: EveRewardsState = {
-    startedAt: now,
-    expiresAt: now + PROGRAM_DAYS * 24 * 60 * 60 * 1000,
+    armed: false,
     ended: false,
     cycles: 0,
     totalCollectedUsdc: '0',
@@ -348,10 +363,6 @@ export async function runEveHolderRewardsCycle(privateKey: `0x${string}`): Promi
     return { ok: true, ended: true, state }
   }
 
-  // Safety check: has someone already moved the beneficiary off this keeper by hand (e.g. the
-  // manual cast-send safety net documented in docs/EVE-HOLDER-REWARDS.md)? Treat that exactly
-  // like reaching the expiry — pay out whatever's left, mark ended, never call setLockBeneficiary
-  // ourselves (we no longer have the right to).
   let onChainBeneficiary: Address | null = null
   try {
     const lock = (await client.readContract({
@@ -367,8 +378,36 @@ export async function runEveHolderRewardsCycle(privateKey: `0x${string}`): Promi
     return { ok: false, error: state.lastError, state }
   }
 
-  const externallyReverted = onChainBeneficiary.toLowerCase() !== keeper.toLowerCase()
-  const expired = now >= state.expiresAt
+  const beneficiaryIsKeeper = onChainBeneficiary.toLowerCase() === keeper.toLowerCase()
+
+  if (!beneficiaryIsKeeper && !state.armed) {
+    // Manual setLockBeneficiary hasn't landed yet — this is the pre-arming state, not the
+    // "someone pulled the safety net" state below. Conflating the two used to be the bug here: a
+    // tick landing even one cron cycle before the manual redirect would stamp startedAt/expiresAt
+    // and then immediately mark the whole program permanently ended, having never actually run
+    // (see docs/EVE-HOLDER-REWARDS.md's "point of no return" warning, added after that was
+    // caught before it happened live). Wait quietly instead — no clock started, no cycle
+    // counted, nothing ended, every future tick just checks again.
+    state.lastRunAt = now
+    await saveState(state)
+    await appendLog({ at: now, error: 'not armed yet — on-chain beneficiary is not the keeper' })
+    return { ok: true, state, skippedDistribute: 'not armed yet — on-chain beneficiary is not the keeper' }
+  }
+
+  if (beneficiaryIsKeeper && !state.armed) {
+    // First tick to actually see the redirect live — start the 14-day clock from here, not from
+    // whichever earlier (premature) tick happened to create the KV state.
+    state.armed = true
+    state.startedAt = now
+    state.expiresAt = now + PROGRAM_DAYS * 24 * 60 * 60 * 1000
+  }
+
+  // Once armed, a beneficiary that's no longer the keeper means someone used the manual
+  // cast-send safety net (docs/EVE-HOLDER-REWARDS.md) — treat exactly like reaching the expiry:
+  // pay out whatever's left, mark ended, never call setLockBeneficiary ourselves again (we no
+  // longer have the right to).
+  const externallyReverted = !beneficiaryIsKeeper
+  const expired = state.expiresAt != null && now >= state.expiresAt
 
   let revertTx: string | undefined
   if (expired && !externallyReverted) {
