@@ -33,11 +33,12 @@ export function HeroBanners() {
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              'radial-gradient(ellipse 78% 86% at 92% 78%, rgba(47, 132, 219, 0.22) 0%, rgba(47, 132, 219, 0.08) 42%, transparent 70%), radial-gradient(ellipse 55% 70% at 88% 50%, rgba(126, 192, 247, 0.10) 0%, transparent 62%)',
+              'radial-gradient(ellipse 62% 88% at 84% 54%, rgba(47, 132, 219, 0.26) 0%, rgba(47, 132, 219, 0.10) 38%, transparent 70%), radial-gradient(ellipse 42% 58% at 90% 46%, rgba(126, 192, 247, 0.12) 0%, transparent 62%)',
           }}
         />
-        <div className="relative z-10 md:max-w-[19rem]">
-          <h1 className="m-0 text-[1.7rem] leading-tight font-semibold tracking-tight text-pretty md:text-[1.9rem]">
+        {/* Do not make this inner column `relative`: DealDeck is md:absolute against the banner. */}
+        <div className="md:max-w-[19rem]">
+          <h1 className="relative z-10 m-0 text-[1.7rem] leading-tight font-semibold tracking-tight text-pretty md:text-[1.9rem]">
             Launch on Arc.
             <br />
             Pair it to Stocks.
@@ -45,7 +46,7 @@ export function HeroBanners() {
           <div className="mt-6 flex items-center justify-between gap-3 md:block">
             <Link
               href="/create"
-              className="inline-flex h-11 shrink-0 items-center px-6 rounded-full bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
+              className="relative z-10 inline-flex h-11 shrink-0 items-center px-6 rounded-full bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
             >
               Launch now
             </Link>
