@@ -18,6 +18,7 @@ ADDRS=(
   "MonLockProxy|0x84F486d7254aEDc89986bce392771D88bf5828EA"
   "MonLockImpl|0x701ba347bbd231e604fbc4303d5a2dce8abe52ed"
   "ArcBpsSource|0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE"
+  "EveToken|0x19209E55049bc613c5cC8b66B7DF7824096e78CF"
   "EveBurn|0x292C8Fd478eC224aAC5CAf338c4d3B67203e899E"
   "CrucibleLock|0xE522907807CdDF006b433a103356d2c30ac39209"
   "InstantLockerAdapter|0x9deBd8d2CFa7dA789257146D325Af4094B1c1c5f"
@@ -96,6 +97,31 @@ PY
   status_one EveBurn 0x292C8Fd478eC224aAC5CAf338c4d3B67203e899E
 }
 
+cmd_submit_eve_token() {
+  local src="$ROOT/scripts/verify-artifacts/LaunchToken18.flattened.OZ-v5.0.0.sol"
+  python3 - "$src" <<'PY' > /tmp/verify-eve-token.json
+import json,sys
+src=open(sys.argv[1]).read()
+payload={
+  "address":"0x19209E55049bc613c5cC8b66B7DF7824096e78CF",
+  "compilerVersion":"0.8.26+commit.8a97fa7a",
+  "contractPath":"LaunchToken18.sol",
+  "contractName":"LaunchToken18",
+  "sources":{"LaunchToken18.sol":{"content":src}},
+  "settings":{
+    "optimizer":{"enabled":True,"runs":200},
+    "evmVersion":"cancun",
+    "viaIR":True,
+    "metadata":{"bytecodeHash":"ipfs"},
+  },
+}
+json.dump(payload, sys.stdout)
+PY
+  echo "Submitting EVE LaunchToken18 (OZ v5.0.0, private TOTAL_SUPPLY, viaIR/200/cancun)…"
+  post_verify /tmp/verify-eve-token.json
+  status_one EveToken 0x19209E55049bc613c5cC8b66B7DF7824096e78CF
+}
+
 cmd_submit_crucible() {
   cd "$ARC_INSTANT"
   # Emit standard-json with cancun/viaIR/200 (body-matches on-chain; CID may still differ)
@@ -164,11 +190,12 @@ cmd_impl_slots() {
 
 usage() {
   cat <<USAGE
-Usage: $0 <status|impl-slots|submit-eve|submit-crucible>
-  status          Check arcexplorer + arcscan getsourcecode for inventory
-  impl-slots      Print EIP-1967 implementation slots
-  submit-eve      POST EveBurn to arcexplorer (counts against 5/hr)
-  submit-crucible POST CrucibleLock multi-file (counts against 5/hr)
+Usage: $0 <status|impl-slots|submit-eve|submit-eve-token|submit-crucible>
+  status           Check arcexplorer + arcscan getsourcecode for inventory
+  impl-slots       Print EIP-1967 implementation slots
+  submit-eve       POST EveBurn to arcexplorer (counts against 5/hr)
+  submit-eve-token POST $EVE LaunchToken18 flattened (counts against 5/hr)
+  submit-crucible  POST CrucibleLock multi-file (counts against 5/hr)
 USAGE
 }
 
@@ -178,6 +205,7 @@ main() {
     status) cmd_status ;;
     impl-slots) cmd_impl_slots ;;
     submit-eve) cmd_submit_eve ;;
+    submit-eve-token) cmd_submit_eve_token ;;
     submit-crucible) cmd_submit_crucible ;;
     -h|--help|help) usage ;;
     *) usage; exit 2 ;;
