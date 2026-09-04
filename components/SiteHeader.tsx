@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * Sticky nav — brand mark, search, ArcStudio, wallet chip.
+ * Sticky nav — Arcfun brand mark + wordmark, search, Vault, ArcStudio, wallet chip.
  * Mobile: Home, Crucible, Eve Vault, ArcStudio, Create collection, Profile, Docs.
  */
 import Link from 'next/link'
@@ -68,6 +68,7 @@ export function SiteHeader() {
   }, [menuOpen])
 
   const onStudio = pathname.startsWith('/studio')
+  const onVault = pathname.startsWith('/vault')
 
   const onSearch = (e: FormEvent) => {
     e.preventDefault()
@@ -138,6 +139,17 @@ export function SiteHeader() {
         <div className="flex-1" />
 
         <CrucibleChip compact className="hidden lg:inline-flex" />
+
+        <Link
+          href="/vault"
+          className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
+            onVault
+              ? 'border-lime-line bg-s2 text-white'
+              : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
+          }`}
+        >
+          Vault
+        </Link>
 
         <Link
           href="/studio"
