@@ -4,7 +4,7 @@
 import { NextResponse } from 'next/server'
 import { type Address } from 'viem'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
-import { fetchEvmHolders } from '@/lib/evm-holders'
+import { fetchEvmHolders, resetHolderLedger } from '@/lib/evm-holders'
 import { fetchArcTrades } from '@/lib/arc-trades'
 import { fetchArcPoolToken } from '@/lib/arc-instant-tokens'
 import { ARC, arcInstantEnabled, instantLockerForFactory, instantProtocolAddresses } from '@/lib/contracts-arc'
@@ -25,7 +25,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ token: s
   // background cron shares its time across every known token, so a token can lag noticeably
   // between its cursor being established and full catch-up. Bounded well under maxDuration to
   // leave room for the pool/trades fetch above it; never used unless explicitly requested.
-  const catchup = new URL(req.url).searchParams.get('catchup') === '1'
+  const url = new URL(req.url)
+  const reset = url.searchParams.get('reset') === '1'
+  // Recovery for a cursor that already reached head while under-counting — see
+  // applyTransferDeltas's comment on the chunk-failure bug this undoes. Wipes the ledger and
+  // cursor for this one token; the catch-up budget below always applies alongside it too, so
+  // this same request also starts rebuilding rather than just returning a freshly emptied
+  // ledger.
+  if (reset) await resetHolderLedger(token as Address)
+  const catchup = reset || url.searchParams.get('catchup') === '1'
 
   try {
     // fetchArcPoolToken (not the Instant-only variant) so Reflection and graduated-curve tokens

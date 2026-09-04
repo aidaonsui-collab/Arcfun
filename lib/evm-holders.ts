@@ -151,9 +151,26 @@ async function applyTransferDeltas(
   for (let lo = fromBlock; lo <= head; lo += TRANSFER_LOG_CHUNK + 1n) {
     if (Date.now() > deadline) break
     const hi = lo + TRANSFER_LOG_CHUNK > head ? head : lo + TRANSFER_LOG_CHUNK
-    const logs = await withRateLimitRetry(
-      () => client.getLogs({ address: token, event: TRANSFER, fromBlock: lo, toBlock: hi }) as Promise<TransferLog[]>,
-    ).catch(() => [] as TransferLog[])
+    let logs: TransferLog[]
+    try {
+      logs = (await withRateLimitRetry(() =>
+        client.getLogs({ address: token, event: TRANSFER, fromBlock: lo, toBlock: hi }),
+      )) as TransferLog[]
+    } catch (e) {
+      // Do NOT advance lastBlock past a chunk whose getLogs call genuinely failed — the
+      // `.catch(() => [])` this replaced treated a failure identically to "zero transfers
+      // here" and still advanced the cursor past it regardless, so a chunk that failed even
+      // once was silently and PERMANENTLY written off as empty. Confirmed live 2026-09-04:
+      // $EVE's ledger cursor reached head (repeated 45s catch-up calls made zero further
+      // progress) while still showing only 47 of a real 195 holders — under tonight's RPC
+      // volatility, enough of the ~263 chunks needed to cover its history failed at least
+      // once that the losses added up to more than 3/4 of its real holders, forever. Same
+      // fix already applied to the trade tape's scanSwapRange (see that function's comment)
+      // — stop here, keep whatever this call already persisted, and let the NEXT call retry
+      // this exact chunk instead of skipping it.
+      console.warn('[evm-holders] getLogs', token, summarizeRpcError(e))
+      break
+    }
     chunksScanned++
     if (logs.length) {
       const touchedAddrs = new Set<string>()
@@ -249,6 +266,23 @@ async function findFloorBlock(
     console.warn('[evm-holders] findFloorBlock', token, summarizeRpcError(e))
   }
   return CHAIN_FLOOR
+}
+
+/**
+ * Wipes a token's ledger and cursor so the next update starts completely fresh. Only correct
+ * fix for a cursor that already advanced past chunks whose real transfers were silently lost —
+ * see applyTransferDeltas's own comment on the chunk-failure bug this recovers from. A cursor
+ * reset ALONE (keeping the ledger hash) would double-count: it would re-apply deltas for every
+ * chunk that already succeeded on top of balances that already reflect them. Must clear both
+ * together or not at all.
+ */
+export async function resetHolderLedger(token: Address): Promise<void> {
+  try {
+    await kv.del(HOLDER_LEDGER_KEY(token))
+    await kv.del(HOLDER_META_KEY(token))
+  } catch (e) {
+    console.warn('[evm-holders] resetHolderLedger', token, summarizeRpcError(e))
+  }
 }
 
 /**
