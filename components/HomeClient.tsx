@@ -1,7 +1,6 @@
 'use client'
 
 import { Suspense, useEffect, useState, useCallback, useMemo } from 'react'
-import { useFlipGrid } from '@/components/useFlipGrid'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
@@ -12,11 +11,6 @@ import { PadVolumeTile } from '@/components/PadVolumeTile'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
 
 type SortKey = 'Top volume' | 'New' | 'Top MC'
-
-function tokenKey(t: PoolToken) {
-  return (t.id || t.coinType || t.poolId || '').toLowerCase()
-}
-
 
 const VOL_WINDOWS: VolumeWindow[] = ['1H', '6H', '12H', '24H']
 
@@ -114,9 +108,6 @@ export function HomeClient({
     }
     return list
   }, [tokens, filter, sort, volWindow])
-
-  const flipIds = useMemo(() => filtered.map(tokenKey), [filtered])
-  const gridRef = useFlipGrid(flipIds)
 
   const rail = useMemo(() => {
     return [...tokens].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 3)
@@ -249,18 +240,12 @@ export function HomeClient({
               </div>
             </div>
           ) : (
-            <div
-              ref={gridRef}
-              className="mt-[18px] grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3"
-            >
-              {filtered.map((t, i) => {
-                const id = tokenKey(t)
-                return (
-                  <div key={id || i} data-flip-id={id || String(i)} className="min-w-0">
-                    <TokenCard token={t} rank={i} />
-                  </div>
-                )
-              })}
+            <div className="mt-[18px] grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 overflow-visible">
+              {filtered.map((t, i) => (
+                <div key={i} className="min-w-0">
+                  <TokenCard token={t} rank={i} />
+                </div>
+              ))}
             </div>
           )}
         </section>
