@@ -17,7 +17,6 @@ import {
   arcReflectionEnabled,
   arcLaunchesEnabled,
   arcCreationFeeWeiFor,
-  factoryUsesCrucibleLock,
 } from '@/lib/contracts-arc'
 import {
   buildCreateTokenMemeInstantArc,
@@ -31,7 +30,6 @@ import {
 import { waitArcCreateConfirmed } from '@/lib/arc-wait-create'
 import { uploadImage } from '@/lib/upload-image'
 import { fmtUsd } from '@/lib/ui-format'
-import { CrucibleFeePath } from '@/components/CrucibleFeePath'
 import { TokenCard } from '@/components/TokenCard'
 import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 import type { PoolToken } from '@/lib/tokens'
@@ -42,32 +40,18 @@ type LaunchType = 'instant' | 'reflection'
 
 const LAUNCH_TYPES: {
   key: LaunchType
-  icon: string
   title: string
-  tagline: string
-  points: string[]
+  body: string
 }[] = [
   {
     key: 'instant',
-    icon: '⚡',
-    title: 'Meme Launch',
-    tagline: 'Tradable from block one',
-    points: [
-      'Full supply onto Uniswap V3 at creation',
-      'Crucible buys and burns $EVE from quote fees',
-      'Launch-token LP fees auto-burned',
-    ],
+    title: 'Meme',
+    body: 'Tradable from block one. Quote fees: creator 50 · Crucible 25 · burn 10 · platform 10 · referrer 5.',
   },
   {
     key: 'reflection',
-    icon: '◈',
-    title: 'Reflection token',
-    tagline: 'LP fees pay your holders',
-    points: [
-      'Holders earn a 20% quote-fee leg via reflect()',
-      'Crucible is the $EVE holder reward — not pad-wide USDC',
-      'Instant TOKEN/USDC pool from block one',
-    ],
+    title: 'Reflect',
+    body: 'Holders earn 20% of the quote-fee leg. Crucible is the $EVE holder reward.',
   },
 ]
 
@@ -477,15 +461,17 @@ export function ArcCreateForm({
   }
 
   const typePicker = (
-    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-2 ${compact ? 'hidden' : ''}`}>
+    <div className={compact ? 'hidden' : ''}>
+      <div className="mb-2 text-xs text-t3">Type</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       {LAUNCH_TYPES.map((lt) => (
         <TypeCard
           key={lt.key}
           active={launchType === lt.key && (lt.key !== 'instant' || quoteId === 'usdc')}
           disabled={!launchesLive}
           soon={!launchesLive}
-          title={lt.key === 'instant' ? 'Meme' : 'Reflect'}
-          body={lt.points.join(' ')}
+          title={lt.title}
+          body={lt.body}
           onClick={
             launchesLive
               ? () => {
@@ -520,6 +506,7 @@ export function ArcCreateForm({
           body={`${pendingRwas.map((a) => a.symbol).join(' · ')} — waiting on issuer + Instant factory.`}
         />
       ) : null}
+      </div>
     </div>
   )
 
@@ -530,22 +517,6 @@ export function ArcCreateForm({
         ) : null}
 
         {typePicker}
-
-        {!compact && (
-          <div className="mt-4">
-            <CrucibleFeePath
-              kind={isReflection ? 'reflect' : 'meme'}
-              notionalUsdc={100}
-              showSideToggle={false}
-              legacyOnChain={
-                isReflection ||
-                !factoryUsesCrucibleLock(
-                  (rwaQuote?.factory as Address | undefined) || ARC.INSTANT_FACTORY,
-                )
-              }
-            />
-          </div>
-        )}
 
         {!launchesLive ? (
           <div className="mt-6 rounded-[22px] border border-hair bg-s1 px-5 py-6 text-center">
