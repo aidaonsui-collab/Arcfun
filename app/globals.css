@@ -187,7 +187,11 @@
   .crucible-in,
   .tape-row,
   .crucible-bar,
-  .live-dot {
+  .live-dot,
+  .vault-orbit-spin,
+  .vault-orbit-core-dot,
+  .vault-orbit-core-ring,
+  .vault-orbit-sat {
     animation: none;
   }
   .crucible-xfade {
@@ -358,4 +362,33 @@
   [data-flip-id] {
     transition: none;
   }
+}
+
+
+/* Eve Vault orbit diagram */
+.vault-orbit-spin {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  animation: vault-orbit-spin 14s linear infinite;
+}
+.vault-orbit-core-dot {
+  animation: vault-orbit-pulse 2.4s ease-in-out infinite;
+}
+.vault-orbit-core-ring {
+  animation: vault-orbit-ring 2.4s ease-in-out infinite;
+}
+.vault-orbit-sat {
+  animation: vault-orbit-pulse 2.4s ease-in-out infinite;
+}
+@keyframes vault-orbit-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes vault-orbit-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@keyframes vault-orbit-ring {
+  0%, 100% { stroke-opacity: 0.85; }
+  50% { stroke-opacity: 0.35; }
 }

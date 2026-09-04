@@ -136,8 +136,8 @@ export function VaultPageClient() {
                   : `To Circle window · ${clock.d}d ${String(clock.h).padStart(2, '0')}h ${String(clock.m).padStart(2, '0')}m`}
             </p>
           </div>
-          <div className="hidden lg:block">
-            <VaultDiagram />
+          <div className="mt-8 lg:mt-0 flex justify-center lg:justify-end">
+            <VaultDiagram className="max-w-[280px] sm:max-w-[320px] lg:max-w-[360px]" />
           </div>
         </div>
 
