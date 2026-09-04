@@ -35,7 +35,7 @@ export const metadata: Metadata = {
         url: '/og.png',
         width: 1200,
         height: 630,
-        alt: 'Arcfun — Launch on Arc. Trade in USDC.',
+        alt: 'Arcfun — Launch on Arc. Pair it to Stocks.',
       },
     ],
   },
