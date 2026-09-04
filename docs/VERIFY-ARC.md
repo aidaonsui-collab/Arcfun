@@ -22,7 +22,25 @@ Rate limit on arcexplorer verify: **5 requests / hour** per IP (`ratelimit: "5-i
 | CrucibleLock | `0xE522…928EA` → `0xE522907807CdDF006b433a103356d2c30ac39209` | `verified=true`, `verificationStatus=metadata_match` |
 | ReferralRegistry | `0x1E61c1DBcD0E2147Ae2247285B6788dAa4564033` | `verified=true`, `verificationStatus=metadata_match` |
 
-Still unverified (needs another hour of rate-limit budget and/or ctor-arg support): EveBurn, ArcBpsSource, Crucible, InstantLockerAdapter, Instant/MonLock impls, Robin OTC.
+Still unverified: **EveBurn** (ctor-arg / immutable blocker — not rate limit alone), ArcBpsSource, Crucible, InstantLockerAdapter, Instant/MonLock impls, Robin OTC.
+
+### EveBurn retry (2026-09-04 ~15:25–15:40 CT)
+
+Flattened single-file POST (same method as CrucibleLock/ReferralRegistry). Confirmed locally:
+
+- `forge` artifact creation bytecode **byte-identical** to creation tx `0x47ff…e394` prefix; suffix = ABI-encoded ctor `(0x3600…0000, SwapRouter02, 0x1920…78CF, 10000)`.
+- Runtime length 3030; metadata CBOR/IPFS CID **identical** to on-chain; only immutable slots (`usdc`, `eve`) differ until ctor args are applied.
+- UI verify form sends only `{address, compilerVersion, contractPath, contractName, sources, settings.optimizer}` — **no** `constructorArguments` / `viaIR` / `evmVersion`.
+
+API responses (all HTTP **422**, `verificationStatus` stays `failed`, `verified=false`):
+
+```text
+{"error":"Error: Compiled runtime bytecode does not match the deployed contract\n    at main (file:///app/src/verify-worker.js:68:41)\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)"}
+```
+
+Tried (each counted against 5/hr): hex `constructorArguments` (no/`0x` prefix); `constructorArguements` + `constructorArgs`; `autodetectConstructorArguments: true`; JSON-array decoded args; extra `creationBytecode`/`deployedBytecode` fields. Same 422 body every time.
+
+Also: `api.arc-scan.org` `verifysourcecode` refuses chain 5042 (Sourcify `provider_supported: false`). Blocker is **arcexplorer verify-worker not applying constructor args / immutableReferences** — not local bytecode mismatch. Contracts without runtime immutables (CrucibleLock, ReferralRegistry) still verify via flattened POST → `metadata_match`.
 
 ## Inventory (5042)
 
@@ -35,7 +53,7 @@ Still unverified (needs another hour of rate-limit budget and/or ctor-arg suppor
 | MonLock (locker for PREV/LEGACY) | `0x84F486d7254aEDc89986bce392771D88bf5828EA` | EIP-1967 proxy | [link](https://www.arcexplorer.org/contract/0x84F486d7254aEDc89986bce392771D88bf5828EA) | OZ TUP | n/a | no | impl → `0x701ba347bbd231e604fbc4303d5a2dce8abe52ed` |
 | MonLock impl | `0x701ba347bbd231e604fbc4303d5a2dce8abe52ed` | implementation | [link](https://www.arcexplorer.org/contract/0x701ba347bbd231e604fbc4303d5a2dce8abe52ed) | `src/MonLock.sol` / `MonLockUUPS.sol` | no match in matrix (prologue differs; on-chain has **no** solc metadata trailer) | no | Likely different compile flags / bytecode_hash=none strip |
 | ArcBpsSource | `0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE` | plain | [link](https://www.arcexplorer.org/contract/0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE) | `src/ArcBpsSource.sol` | **body** = cancun + viaIR + opt 200 + `bytecode_hash=none` **with metadata trailer stripped on-chain** | no | On-chain runtime is 1109 B; local same body + 13 B solc CBOR. arcexplorer exact-match fails |
-| EveBurn | `0x292C8Fd478eC224aAC5CAf338c4d3B67203e899E` | plain | [link](https://www.arcexplorer.org/contract/0x292C8Fd478eC224aAC5CAf338c4d3B67203e899E) | `contracts/eve-burn/src/EveBurn.sol` | **exact**: solc 0.8.26, **viaIR false**, opt 200, cancun, ipfs; ctor `(usdc, swapRouter, eve, 10000)` | attempted — fail | Local anvil deploy == on-chain. Explorer UI/API does **not** document `constructorArguments`; without them immutables (`usdc`,`eve`) diverge. First API attempt counted against 5/hr |
+| EveBurn | `0x292C8Fd478eC224aAC5CAf338c4d3B67203e899E` | plain | [link](https://www.arcexplorer.org/contract/0x292C8Fd478eC224aAC5CAf338c4d3B67203e899E) | `contracts/eve-burn/src/EveBurn.sol` | **exact**: solc 0.8.26, **viaIR false**, opt 200, cancun, ipfs; ctor `(usdc, swapRouter, eve, 10000)` | **no** (blocked) | Local creation bytecode == creation tx; metadata CID identical. Worker ignores ctor args → immutables mismatch. See “EveBurn retry” below |
 | CrucibleLock (`NEXT_PUBLIC_ARC_INSTANT_LOCKER`) | `0xE522907807CdDF006b433a103356d2c30ac39209` | plain | [link](https://www.arcexplorer.org/contract/0xE522907807CdDF006b433a103356d2c30ac39209) | `script/vendor-crucible/src/CrucibleLock.sol` | **body** match: cancun + viaIR + opt 200 + ipfs (only metadata IPFS CID differs) | **yes** (`metadata_match`, 2026-09-04) | Flattened single-file submit succeeded. Multi-file std-json returned HTTP 500 |
 | InstantLockerAdapter | `0x9deBd8d2CFa7dA789257146D325Af4094B1c1c5f` | plain | [link](https://www.arcexplorer.org/contract/0x9deBd8d2CFa7dA789257146D325Af4094B1c1c5f) | `script/vendor-crucible/src/InstantLockerAdapter.sol` | **body** match same settings (CID differs) | pending | Immutables: CrucibleLock + NFPM |
 | Crucible (burn sink) | `0x0B3Eb6Cef8B2b3b158c560898Ead0127f08AE6B6` | plain | [link](https://www.arcexplorer.org/contract/0x0B3Eb6Cef8B2b3b158c560898Ead0127f08AE6B6) | `script/vendor-crucible/src/Crucible.sol` | **body** match same settings (CID differs) | pending | From CrucibleLock.crucible() |
@@ -65,7 +83,7 @@ Still unverified (needs another hour of rate-limit budget and/or ctor-arg suppor
 ```bash
 # from repo root
 ./scripts/verify-arc.sh status          # getsource / arcexplorer status for inventory
-./scripts/verify-arc.sh submit-eve      # EveBurn (needs ctor args if API accepts them)
+./scripts/verify-arc.sh submit-eve      # EveBurn — blocked until explorer applies ctor/immutables
 ./scripts/verify-arc.sh submit-crucible # CrucibleLock multi-file standard-json
 ```
 
