@@ -12,6 +12,7 @@ import {
   fetchArcPoolToken,
   getArcLivePriceUsdc,
   getArcPoolLiquidityUsdc,
+  healIndexedSpotUsdc,
 } from '@/lib/arc-instant-tokens'
 import { fetchTokenBurnedPct } from '@/lib/evm-holders'
 import { getArcCatalogToken } from '@/lib/arc-catalog-cache'
@@ -64,7 +65,7 @@ async function overlayLivePrice(pool: PoolToken, token: Address): Promise<PoolTo
   try {
     const { getVolume } = await import('@/lib/arc-indexer/store')
     const vol = await getVolume(token)
-    const lastPrice = lastSparkClose(vol)
+    const lastPrice = healIndexedSpotUsdc(lastSparkClose(vol))
     if (lastPrice > 0) {
       return {
         ...pool,

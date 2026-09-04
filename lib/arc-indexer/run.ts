@@ -5,7 +5,7 @@
  */
 import { parseAbiItem, type Address, type Hex } from 'viem'
 import { ARC, arcPublicClient, arcLogsClient, arcInstantEnabled, arcReflectionEnabled } from '@/lib/contracts-arc'
-import { arcMarketCapUsd, instantCatalogFactories } from '@/lib/arc-instant-tokens'
+import { arcMarketCapUsd, healIndexedSpotUsdc, instantCatalogFactories } from '@/lib/arc-instant-tokens'
 import { lastSparkClose } from '@/lib/arc-catalog-from-index'
 import { syncTradesToHead } from '@/lib/arc-trades'
 import { allInMultiplier, fetchOtcFeeBps } from '@/lib/bridge/robin-otc'
@@ -472,7 +472,7 @@ export async function enrichTokensWithIndexVolume<
     const id = (t.coinType || t.poolId || '').toLowerCase()
     const v = id ? map[id] : undefined
     if (!v) return t
-    const lastPrice = lastSparkClose(v)
+    const lastPrice = healIndexedSpotUsdc(lastSparkClose(v))
     return {
       ...t,
       volume1h: v.volume1h,

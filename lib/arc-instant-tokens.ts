@@ -244,6 +244,24 @@ export function arcMarketCapUsd(priceUsdc: number): number {
   return priceUsdc * TOTAL_SUPPLY_HUMAN
 }
 
+/**
+ * Instant tape used to decode every launch as 18dp. Pre–LaunchToken18 (6dp) swaps then
+ * stored priceUsd 1e12 too high (AMG home tile: $7K FDV printed as $7019179560.70M).
+ */
+const DP6_AS_18 = 1e12
+const MAX_PLAUSIBLE_FDV_USD = 1_000_000_000
+
+export function isPlausibleSpotUsdc(priceUsdc: number): boolean {
+  if (!(priceUsdc > 0) || !Number.isFinite(priceUsdc)) return false
+  return arcMarketCapUsd(priceUsdc) <= MAX_PLAUSIBLE_FDV_USD
+}
+
+export function healIndexedSpotUsdc(priceUsdc: number): number {
+  if (isPlausibleSpotUsdc(priceUsdc)) return priceUsdc
+  const healed = priceUsdc / DP6_AS_18
+  return isPlausibleSpotUsdc(healed) ? healed : 0
+}
+
 /** Price of 1 whole token in USDC, from Uni V3 slot0. Reads token.decimals() for 6 vs 18 dp. */
 export async function getArcLivePriceUsdc(token: Address, uniPool?: Address): Promise<number | null> {
   try {

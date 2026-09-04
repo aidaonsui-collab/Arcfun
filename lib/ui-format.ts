@@ -6,6 +6,8 @@
 export function fmtUsd(n: number | undefined | null): string {
   if (n == null || !Number.isFinite(n) || n === 0) return '$0'
   const abs = Math.abs(n)
+  if (abs >= 1_000_000_000_000) return `$${(n / 1_000_000_000_000).toFixed(2)}T`
+  if (abs >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`
   if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
   if (abs >= 1_000) return `$${(n / 1_000).toFixed(1)}K`
   if (abs >= 1) return `$${n.toFixed(2)}`
