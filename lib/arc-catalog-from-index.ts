@@ -7,6 +7,7 @@
  * empty rebuild was persisted. An empty snapshot is not "the pad has zero launches".
  */
 import type { Address } from 'viem'
+import { healIndexedSpotUsdc } from './arc-instant-tokens'
 import type { ArcTokenMeta } from './arc-token-meta'
 import type { IndexedToken, IndexedVolume } from './arc-indexer/types'
 import type { PoolToken } from './tokens'
@@ -100,7 +101,7 @@ export function indexedRowToPoolToken(
       : ((meta?.creator as Address | undefined) ?? ZERO)
   const symbol = meta?.symbol || ''
   const name = meta?.name || symbol || shortAddr(token) || token
-  const price = lastSparkClose(vol)
+  const price = healIndexedSpotUsdc(lastSparkClose(vol))
   const factory = (row.factory || '') as Address
   const isReflection =
     row.kind === 'reflection' || factory.toLowerCase() === REFLECTION_FACTORY

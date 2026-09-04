@@ -12,12 +12,13 @@
  */
 import { after } from 'next/server'
 import { kv } from '@vercel/kv'
-import { createPublicClient, formatUnits, http, parseAbiItem, type Address, type Log } from 'viem'
+import { createPublicClient, erc20Abi, formatUnits, http, parseAbiItem, type Address, type Log } from 'viem'
 import {
   ARC,
   arcChain,
   arcLogsClient,
   arcLogsRpcUrls,
+  arcPublicClient,
   isArcRpcInfraError,
 } from './contracts-arc'
 import { fetchArcPoolToken } from './arc-instant-tokens'
@@ -34,6 +35,28 @@ import { staleTapeRewindFrom, shouldPersistScanCursor, tapeIsStaleTs } from './a
 import { quoteDecimalsForToken, quoteTokenForFactory } from './arc-rwa-assets'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
+
+const tokenDecimalsCache = new Map<string, number>()
+
+async function tokenDecimalsOf(token: Address): Promise<number> {
+  const k = token.toLowerCase()
+  const hit = tokenDecimalsCache.get(k)
+  if (hit) return hit
+  try {
+    const d = Number(
+      await arcPublicClient().readContract({
+        address: token,
+        abi: erc20Abi,
+        functionName: 'decimals',
+      }),
+    )
+    const n = Number.isFinite(d) && d > 0 && d <= 18 ? d : ARC.TOKEN_DECIMALS
+    tokenDecimalsCache.set(k, n)
+    return n
+  } catch {
+    return ARC.TOKEN_DECIMALS
+  }
+}
 
 const V3_SWAP = parseAbiItem(
   'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)',
@@ -140,7 +163,7 @@ async function resolvePool(
     return {
       pool,
       tokenIs0,
-      tokenDecimals: ARC.TOKEN_DECIMALS,
+      tokenDecimals: await tokenDecimalsOf(token),
       quoteDecimals: quoteDecimalsForToken(quote),
     }
   } catch {
