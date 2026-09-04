@@ -346,21 +346,21 @@
 }
 
 
-/* Vicefun-style FLIP on All launches tiles */
-[data-flip-id] {
-  transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.32s ease;
+/* Long.xyz-style in-place art fade when a home tile's token swaps */
+@keyframes tile-media-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
-[data-flip-id].flip-move {
-  z-index: 2;
-  will-change: transform;
-}
-[data-flip-id].flip-enter {
-  opacity: 0;
-  transform: translateY(-14px) scale(0.96);
+.tile-media-in {
+  animation: tile-media-in 220ms ease;
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-flip-id] {
-    transition: none;
+  .tile-media-in {
+    animation: none;
   }
 }
 

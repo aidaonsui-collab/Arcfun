@@ -22,10 +22,11 @@ export function TokenCard({
   const age = ageLabel(token.createdAt)
 
   return (
-    <div className="group relative text-left border border-hair rounded-[20px] overflow-hidden bg-s1 flex flex-col transition-colors hover:border-lime-line">
+    <div className="group relative text-left border border-hair rounded-[20px] overflow-hidden bg-s1 flex flex-col transition-[transform,border-color] duration-200 ease-out hover:border-lime-line hover:scale-[1.03] hover:z-[3]">
       <Link href={`/token/${address}`} className="absolute inset-0 z-0" aria-label={token.name || 'Token'} />
       <span
-        className="relative block aspect-square flex items-center justify-center pointer-events-none"
+        key={address || seed}
+        className="relative block aspect-square flex items-center justify-center pointer-events-none tile-media-in"
         style={{ background: img ? undefined : tile }}
       >
         {img ? (
