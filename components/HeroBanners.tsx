@@ -28,7 +28,15 @@ export function HeroBanners() {
   return (
     <div className="grid gap-3 md:grid-cols-2">
       <div className="relative overflow-hidden rounded-[24px] bg-s1 px-5 py-7 sm:px-7 sm:py-8 min-h-52 border border-hair">
-        <div className="md:max-w-[19rem]">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(ellipse 78% 86% at 92% 78%, rgba(47, 132, 219, 0.22) 0%, rgba(47, 132, 219, 0.08) 42%, transparent 70%), radial-gradient(ellipse 55% 70% at 88% 50%, rgba(126, 192, 247, 0.10) 0%, transparent 62%)',
+          }}
+        />
+        <div className="relative z-10 md:max-w-[19rem]">
           <h1 className="m-0 text-[1.7rem] leading-tight font-semibold tracking-tight text-pretty md:text-[1.9rem]">
             Launch on Arc.
             <br />
