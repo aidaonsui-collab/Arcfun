@@ -13,7 +13,7 @@ until the platform owner finishes the one-time setup below (beneficiary still po
 treasury until then). Once armed, the platform's 30% leg is redirected from the treasury to a
 dedicated keeper wallet that collects it, swaps it into **$COOL**
 (`0xeb64987643db71c76b2a2be7e723decc995e5b37`), and pro-rata disperses it to every current EVE
-holder every ~15 minutes. After 14 days — counted from the first successful keeper tick that
+holder about once an hour. After 14 days — counted from the first successful keeper tick that
 stamps KV state — the keeper automatically hands the beneficiary back to the treasury and stops.
 See [lib/arc-eve-holder-rewards.ts](../lib/arc-eve-holder-rewards.ts) for the exact mechanics.
 
@@ -45,7 +45,7 @@ the first collect.
 
 ## One-time manual setup (platform owner)
 
-> **Do not merge or deploy this PR (and do not let the `*/15` cron in `vercel.json` fire) until
+> **Do not merge or deploy this PR (and do not let a second timer (Vercel no longer schedules this route) fire) until
 > steps 1–3 below are done.** The first cron tick that runs stamps `startedAt` / `expiresAt` in
 > KV. If on-chain beneficiary is still the treasury (or anything other than the keeper), that
 > tick treats the program as “externally reverted,” pays out nothing, and **marks it permanently
@@ -85,7 +85,7 @@ the first collect.
    Ensure `CRON_SECRET` is also set (Vercel Cron sends `Authorization: Bearer $CRON_SECRET` on
    the mutating path). Deploy / merge **only after** steps 1–2.
 
-4. **Confirm it's running.** After the next cron tick (every 15 min), check:
+4. **Confirm it's running.** After the next Air tick (hourly `com.eve.holder-rewards`), check:
    ```
    https://www.arcfun.co/api/arc/keeper/eve-holder-rewards?status=1
    ```
