@@ -6,7 +6,7 @@
  * disconnect → reconnect stayed on Base with no picker and no add-chain path.
  */
 import type { Connector } from 'wagmi'
-import { ARC_CHAIN_ID, ARC_EXPLORER, ARC_RPC_URLS, arcChain } from './contracts-arc'
+import { ARC_CHAIN_ID, ARC_EXPLORER, arcBrowserRpcUrls, arcChain } from './contracts-arc'
 
 export const ARC_CHAIN_HEX = `0x${ARC_CHAIN_ID.toString(16)}` as const
 
@@ -78,7 +78,10 @@ export async function addOrSwitchArc(): Promise<void> {
     const code = (err as { code?: number })?.code
     if (code !== 4902 && code !== -32603) throw new Error(switchErrorMessage(err))
   }
-  const rpcUrls = ARC_RPC_URLS.length ? ARC_RPC_URLS : [arcChain.rpcUrls.default.http[0]].filter(Boolean)
+  // arcBrowserRpcUrls(), not ARC_RPC_URLS directly — that list is baracat-first, and this is
+  // exactly the RPC list the wallet itself will keep using for this chain from here on (see
+  // arcBrowserRpcUrls's doc comment for the live incident this caused).
+  const rpcUrls = arcBrowserRpcUrls()
   await eth.request({
     method: 'wallet_addEthereumChain',
     params: [

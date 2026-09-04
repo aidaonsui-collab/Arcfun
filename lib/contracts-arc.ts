@@ -249,8 +249,19 @@ export const ARC_RPC_URLS: string[] = (() => {
 
 export const ARC_RPC = ARC_RPC_URLS[0] || ''
 
-/** Browser wagmi transport. Baracat hangs in the wallet path; try scan/theleak first so MAX is not stuck 4s. Fail over in 2.5s. */
-export function arcBrowserTransport() {
+/**
+ * Same URLs as ARC_RPC_URLS, but with scan/theleak ordered ahead of baracat. Baracat hangs in
+ * the wallet path — and, confirmed live 2026-09-04 (currently 502ing), that's not just wagmi's
+ * own browser transport: `addOrSwitchArc` (lib/arc-wallet.ts) hands this same list to
+ * `wallet_addEthereumChain`, and at least one wallet (Rabby, mobile, reported live) appears to
+ * only ever use rpcUrls[0] for a custom chain going forward — permanently, since the chain is
+ * added once and the bad RPC then lives in the *wallet's* own config, not this app's session
+ * state. A user in that state sees $0 balances everywhere the app reads through their wallet's
+ * own connector client, even after a full reload, until they manually fix the network in their
+ * wallet. Exported so both the transport below and addOrSwitchArc use the same non-baracat-first
+ * order — new connections should never reproduce this.
+ */
+export function arcBrowserRpcUrls(): string[] {
   const seen = new Set<string>()
   const urls: string[] = []
   const ordered = ARC_IS_TESTNET
@@ -261,13 +272,19 @@ export function arcBrowserTransport() {
     seen.add(u)
     urls.push(u)
   }
+  return urls.length ? urls : [ARC_SCAN_RPC]
+}
+
+/** Browser wagmi transport. Baracat hangs in the wallet path; try scan/theleak first so MAX is not stuck 4s. Fail over in 2.5s. */
+export function arcBrowserTransport() {
+  const urls = arcBrowserRpcUrls()
   if (urls.length > 1) {
     return fallback(
       urls.map((u) => http(u, { retryCount: 0, timeout: 2_500 })),
       { shouldThrow: (error) => !isArcRpcInfraError(error) },
     )
   }
-  return http(urls[0] || ARC_SCAN_RPC, { retryCount: 0, timeout: 2_500 })
+  return http(urls[0], { retryCount: 0, timeout: 2_500 })
 }
 
 /** Server-only RPC override. Empty → same as ARC_RPC. */
