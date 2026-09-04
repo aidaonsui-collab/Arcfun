@@ -189,6 +189,9 @@ function buildStats(trades: EvmTrade[]): EvmTradeStats {
 async function getSwapLogs(pool: Address, fromBlock: bigint, toBlock: bigint): Promise<V3SwapLog[]> {
   const urls = arcLogsRpcUrls()
   let lastEmpty: V3SwapLog[] = []
+  // Tracks whether ANY url gave a definitive answer (even an empty one) — separate from
+  // lastErr, which used to survive past a later success and get thrown anyway.
+  let gotSuccess = false
   let lastErr: unknown
   for (let i = 0; i < urls.length; i++) {
     const client = createPublicClient({
@@ -204,15 +207,30 @@ async function getSwapLogs(pool: Address, fromBlock: bigint, toBlock: bigint): P
       })) as V3SwapLog[]
       if (logs.length > 0) return logs
       lastEmpty = logs
-      // Empty is not success when another URL might still have the fills.
+      gotSuccess = true
+      // Empty is not final when another URL might still have the fills — try the rest, but
+      // this IS a real, trustworthy answer if nothing better turns up.
       continue
     } catch (e) {
       lastErr = e
       if (!isArcRpcInfraError(e) && i === urls.length - 1) throw e
     }
   }
-  if (lastEmpty.length === 0 && lastErr) throw lastErr
-  return lastEmpty
+  // Root cause of EVE's trade tape freezing for ~2.8h (2026-09-04): this used to be
+  // `if (lastEmpty.length === 0 && lastErr) throw lastErr` — throwing lastErr whenever the
+  // final tally was empty, with no regard for WHEN that error happened relative to a real
+  // success. The gap's first 9k-block chunk legitimately has zero swaps; baracat was failing
+  // on nearly every attempt; arc-scan correctly answered "0 logs" for that same chunk — a
+  // real, trustworthy empty result — but the stale baracat error from earlier in the SAME
+  // loop got thrown instead, discarding it. scanSwapRange treats any throw from here as
+  // "chunk failed, stop, do not advance" (deliberately, to never skip a gap — a real prior
+  // EVE bug), so this one wrong throw silently refused to ever get past that first chunk,
+  // no matter how many times it was retried, for as long as baracat stayed down.
+  //
+  // A url that answered — even empty — is a real answer. Only throw when EVERY url failed
+  // outright and none ever produced one.
+  if (gotSuccess) return lastEmpty
+  throw lastErr
 }
 
 async function scanSwapRange(
