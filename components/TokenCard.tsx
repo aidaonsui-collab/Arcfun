@@ -26,9 +26,11 @@ function QuoteMark() {
 
 export function TokenCard({
   token,
+  preview = false,
 }: {
   token: PoolToken
   rank?: number
+  preview?: boolean
 }) {
   const address = token.coinType || token.poolId
   const seed = address || token.symbol || token.name
@@ -40,12 +42,11 @@ export function TokenCard({
   const quote = token.instantMeta?.quote || 'USDC'
   const pct = token.priceChange24h ?? 0
   const pctLabel = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
+  const frame =
+    'group relative block overflow-hidden rounded-[20px] bg-s1 p-5 border border-hair transition-[border-color,transform] duration-200 ease-out hover:border-lime-line hover:z-[3]'
 
-  return (
-    <Link
-      href={`/token/${address}`}
-      className="group relative block overflow-hidden rounded-[20px] bg-s1 p-5 border border-hair transition-[border-color,transform] duration-200 ease-out hover:border-lime-line hover:z-[3]"
-    >
+  const body = (
+    <>
       {img ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -111,6 +112,15 @@ export function TokenCard({
           </span>
         </span>
       </span>
+    </>
+  )
+
+  if (preview || !address) {
+    return <div className={frame}>{body}</div>
+  }
+  return (
+    <Link href={`/token/${address}`} className={frame}>
+      {body}
     </Link>
   )
 }

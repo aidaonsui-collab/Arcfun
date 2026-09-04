@@ -3,10 +3,10 @@
 /**
  * Launch on Arc — Instant or Instant Reflection (both TOKEN/USDC + holder rewards path).
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount, useConnect, useSwitchChain, useWriteContract, useSignMessage } from 'wagmi'
-import { erc20Abi, getAddress, isAddress, type Address } from 'viem'
+import { erc20Abi, formatUnits, getAddress, isAddress, type Address } from 'viem'
 import { prepareTokenRegisterAuth } from '@/lib/arc-auth'
 import { Loader2, AlertCircle, CheckCircle, ImagePlus } from 'lucide-react'
 import {
@@ -30,8 +30,11 @@ import {
 } from '@/lib/arc-reflection-launchpad'
 import { waitArcCreateConfirmed } from '@/lib/arc-wait-create'
 import { uploadImage } from '@/lib/upload-image'
-import { tileGradient } from '@/lib/ui-format'
+import { fmtUsd } from '@/lib/ui-format'
 import { CrucibleFeePath } from '@/components/CrucibleFeePath'
+import { TokenCard } from '@/components/TokenCard'
+import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
+import type { PoolToken } from '@/lib/tokens'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
 
 type Step = 'idle' | 'uploading' | 'approving' | 'creating' | 'confirming' | 'registering' | 'done'
@@ -115,6 +118,7 @@ export function ArcCreateForm({
   const [registerError, setRegisterError] = useState<string | null>(null)
   const [registering, setRegistering] = useState(false)
 
+  const usdcQ = useArcErc20Balance(ARC.USDC, isConnected && chainId === ARC_CHAIN_ID ? address : undefined)
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
   const configured = arcInstantEnabled()
   const reflectionLive = arcReflectionEnabled()
@@ -129,10 +133,6 @@ export function ArcCreateForm({
   const rewardsOk =
     !rewardsWallet.trim() || isAddress(rewardsWallet.trim() as Address)
   const rewardTokenOk = isAddress(rewardToken)
-
-  const seed = symbol || name || 'new'
-  const { tile, mono } = useMemo(() => tileGradient(seed), [seed])
-  const previewInitial = (symbol || name || '?').charAt(0).toUpperCase()
 
   const onPickImage = (f: File | null) => {
     setImageFile(f)
@@ -411,263 +411,144 @@ export function ArcCreateForm({
     rewardsWallet.trim() && isAddress(rewardsWallet.trim() as Address)
       ? `${rewardsWallet.trim().slice(0, 6)}…${rewardsWallet.trim().slice(-4)}`
       : 'Your wallet'
-  const shipRows = [
-    { k: 'Type', v: isReflection ? 'Reflection' : 'Meme' },
-    { k: 'Supply', v: '1,000,000,000' },
-    { k: 'Pair', v: 'USDC · 1% fee' },
-    {
-      k: 'LP fees',
-      v: isReflection
-        ? 'Holders 20 · Crucible 35 · Creator 20 · burn 15 · platform 10'
-        : 'Creator 50 · Crucible 30 · burn 10 · platform 10',
-    },
-    { k: 'Rewards to', v: rewardsPreview },
-  ]
+  const feeUsd = Number(arcCreationFeeWeiFor(address)) / 1e18
+  const buyUsd = buyAtLaunch ? Number(firstBuy) || 0 : 0
+  const payUsd = feeUsd + buyUsd
+  const walletUsd =
+    usdcQ.data != null ? Number(formatUnits(usdcQ.data, 6)) : null
+  const previewToken: PoolToken = {
+    id: 'preview',
+    poolId: '',
+    coinType: '',
+    name: name.trim() || 'Untitled',
+    symbol: (symbol || 'TICKER').toUpperCase(),
+    description: description.trim(),
+    imageUrl: imagePreview || '',
+    logoUrl: imagePreview || '',
+    twitter: twitter.trim(),
+    telegram: telegram.trim(),
+    website: website.trim(),
+    creator: address || '',
+    creatorShort: '',
+    creatorFull: address || '',
+    currentPrice: 0,
+    realSuiRaised: 0,
+    threshold: 0,
+    progress: 100,
+    isCompleted: true,
+    volume1h: 0,
+    priceChange24h: 0,
+    age: '0s',
+    marketCap: buyUsd,
+    totalSupply: 1_000_000_000,
+    bondingProgress: 100,
+    createdAt: Date.now(),
+    instant: true,
+    instantLaunch: true,
+    reflection: isReflection,
+    launchKind: isReflection ? 'reflection' : 'instant',
+    instantMeta: { quote: quoteSymbol, isMeme: !isReflection, isRwaBacked: Boolean(rwaQuote) },
+  }
 
-  return (
-    <div
-      className={
-        compact
-          ? 'grid grid-cols-1 gap-0'
-          : launchesLive
-            ? 'grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-7 items-start'
-            : 'grid grid-cols-1 gap-7 items-start max-w-3xl'
-      }
-    >
-      {/* Main form card */}
-      <div className="border border-hair rounded-[28px] bg-s1 p-6 sm:p-8">
-        <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em]">
-          {compact ? 'Launch this' : 'Launch your token'}
-        </h1>
-        <p className="mt-2.5 mb-0 text-[15px] text-t2 leading-relaxed">
-          {compact
-            ? 'Instant TOKEN/USDC. 1B supply, LP locked. Confirm to mint. We do not send the tx for you.'
-            : launchesLive
-              ? 'Fixed supply of 1B. One transaction, straight onto Uniswap V3. Launch-token LP fees auto-burn.'
-              : 'Fixed supply of 1B · Uniswap V3 Instant + Reflection paths. Public launches opening soon.'}
-        </p>
+  const launchCta = !isConnected
+    ? connecting
+      ? 'Connecting…'
+      : 'Connect to launch'
+    : wrongChain
+      ? switching
+        ? 'Switching…'
+        : 'Switch to Arc'
+      : busy
+        ? stepLabel(step)
+        : step === 'done'
+          ? 'Launched'
+          : 'Launch token'
+
+  const onCta = () => {
+    if (!isConnected) {
+      connect({ connector: connectors[0] })
+      return
+    }
+    if (wrongChain) {
+      switchChain({ chainId: ARC_CHAIN_ID })
+      return
+    }
+    void onSubmit()
+  }
+
+  const typePicker = (
+    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-2 ${compact ? 'hidden' : ''}`}>
+      {LAUNCH_TYPES.map((lt) => (
+        <TypeCard
+          key={lt.key}
+          active={launchType === lt.key && (lt.key !== 'instant' || quoteId === 'usdc')}
+          disabled={!launchesLive}
+          soon={!launchesLive}
+          title={lt.key === 'instant' ? 'Meme' : 'Reflect'}
+          body={lt.points.join(' ')}
+          onClick={
+            launchesLive
+              ? () => {
+                  setLaunchType(lt.key)
+                  setQuoteId('usdc')
+                }
+              : undefined
+          }
+        />
+      ))}
+      {liveRwas.map((a) => (
+        <TypeCard
+          key={a.id}
+          active={launchType === 'instant' && quoteId === a.id}
+          title={`${a.symbol} paired`}
+          body={
+            a.permissioned
+              ? `Instant TOKEN/${a.symbol}. Permissioned — wallet must be allowlisted.`
+              : `Same Instant mint + LP lock, quoted in ${a.symbol}.`
+          }
+          onClick={() => {
+            setLaunchType('instant')
+            setQuoteId(a.id)
+          }}
+        />
+      ))}
+      {pendingRwas.length > 0 && liveRwas.length === 0 ? (
+        <TypeCard
+          soon
+          disabled
+          title="RWA paired tokens"
+          body={`${pendingRwas.map((a) => a.symbol).join(' · ')} — waiting on issuer + Instant factory.`}
+        />
+      ) : null}
+    </div>
+  )
+
+  const fields = (
+    <>
         {compact && initial?.handle ? (
           <p className="mt-2 mb-0 text-[13px] text-lime-t font-semibold">From @{initial.handle}</p>
         ) : null}
 
-        {/* Launch type cards — Meme + Reflection live; set LAUNCHES_ENABLED=0 to gate */}
-        <div className={`grid grid-cols-1 sm:grid-cols-3 gap-3 mt-[26px] ${compact ? 'hidden' : ''}`}>
-          {LAUNCH_TYPES.map((lt) => {
-            if (!launchesLive) {
-              return (
-                <div
-                  key={lt.key}
-                  className="relative text-left p-5 rounded-[22px] opacity-60 cursor-not-allowed"
-                  style={{ background: 'var(--s2)', border: '1px solid var(--hair)' }}
-                >
-                  <span
-                    className="absolute top-4 right-4 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide"
-                    style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.5)' }}
-                  >
-                    Soon
-                  </span>
-                  <span
-                    className="flex items-center justify-center w-[38px] h-[38px] rounded-xl text-[17px]"
-                    style={{ background: 'rgba(255,255,255,0.06)' }}
-                  >
-                    {lt.icon}
-                  </span>
-                  <h3 className="mt-3.5 mb-1 text-[17px] font-semibold tracking-tightish text-white">
-                    {lt.title}
-                  </h3>
-                  <p className="m-0 text-[13px] font-semibold" style={{ color: 'rgba(255,255,255,0.34)' }}>
-                    {lt.tagline}
-                  </p>
-                  <span className="mt-3.5 flex flex-col gap-2">
-                    {lt.points.map((p) => (
-                      <span
-                        key={p}
-                        className="text-[13px] leading-snug"
-                        style={{ color: 'rgba(255,255,255,0.34)' }}
-                      >
-                        — {p}
-                      </span>
-                    ))}
-                  </span>
-                </div>
-              )
-            }
-            const on = launchType === lt.key && (lt.key !== 'instant' || quoteId === 'usdc')
-            return (
-              <button
-                key={lt.key}
-                type="button"
-                onClick={() => {
-                  setLaunchType(lt.key)
-                  setQuoteId('usdc')
-                }}
-                className="relative text-left p-5 rounded-[22px] transition-all"
-                style={{
-                  background: on ? '#000' : 'var(--s2)',
-                  border: `1px solid ${on ? 'var(--lime)' : 'var(--hair)'}`,
-                  boxShadow: on
-                    ? '0 0 0 1px var(--lime), 0 14px 44px rgba(38,118,202,0.20)'
-                    : 'none',
-                }}
-              >
-                <span
-                  className="absolute top-4 right-4 w-[22px] h-[22px] rounded-full flex items-center justify-center text-xs font-extrabold border-[1.5px]"
-                  style={{
-                    background: on ? 'var(--lime)' : 'transparent',
-                    color: on ? '#fff' : 'transparent',
-                    borderColor: on ? 'var(--lime)' : 'rgba(255,255,255,0.18)',
-                  }}
-                >
-                  ✓
-                </span>
-                <span
-                  className="flex items-center justify-center w-[38px] h-[38px] rounded-xl text-[17px]"
-                  style={{
-                    background: on ? 'var(--limeSoft)' : 'rgba(255,255,255,0.06)',
-                  }}
-                >
-                  {lt.icon}
-                </span>
-                <h3 className="mt-3.5 mb-1 text-[17px] font-semibold tracking-tightish text-white">
-                  {lt.title}
-                </h3>
-                <p
-                  className="m-0 text-[13px] font-semibold"
-                  style={{ color: on ? 'var(--limeT)' : 'rgba(255,255,255,0.34)' }}
-                >
-                  {lt.tagline}
-                </p>
-                <span className="mt-3.5 flex flex-col gap-2">
-                  {lt.points.map((p) => (
-                    <span
-                      key={p}
-                      className="text-[13px] leading-snug"
-                      style={{
-                        color: on ? 'rgba(255,255,255,0.58)' : 'rgba(255,255,255,0.34)',
-                      }}
-                    >
-                      — {p}
-                    </span>
-                  ))}
-                </span>
-              </button>
-            )
-          })}
+        {typePicker}
 
-          {liveRwas.map((a) => {
-            const on = launchType === 'instant' && quoteId === a.id
-            return (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => {
-                  setLaunchType('instant')
-                  setQuoteId(a.id)
-                }}
-                className="relative text-left p-5 rounded-[22px] transition-all"
-                style={{
-                  background: on ? '#000' : 'var(--s2)',
-                  border: `1px solid ${on ? 'var(--lime)' : 'var(--hair)'}`,
-                  boxShadow: on
-                    ? '0 0 0 1px var(--lime), 0 14px 44px rgba(38,118,202,0.20)'
-                    : 'none',
-                }}
-              >
-                <span
-                  className="absolute top-4 right-4 w-[22px] h-[22px] rounded-full flex items-center justify-center text-xs font-extrabold border-[1.5px]"
-                  style={{
-                    background: on ? 'var(--lime)' : 'transparent',
-                    color: on ? '#fff' : 'transparent',
-                    borderColor: on ? 'var(--lime)' : 'rgba(255,255,255,0.18)',
-                  }}
-                >
-                  ✓
-                </span>
-                <span
-                  className="flex items-center justify-center w-[38px] h-[38px] rounded-xl text-[17px]"
-                  style={{ background: on ? 'var(--limeSoft)' : 'rgba(255,255,255,0.06)' }}
-                >
-                  🏛
-                </span>
-                <h3 className="mt-3.5 mb-1 text-[17px] font-semibold tracking-tightish text-white">
-                  {a.symbol} paired
-                </h3>
-                <p
-                  className="m-0 text-[13px] font-semibold"
-                  style={{ color: on ? 'var(--limeT)' : 'rgba(255,255,255,0.34)' }}
-                >
-                  Instant TOKEN/{a.symbol}
-                </p>
-                <span className="mt-3.5 flex flex-col gap-2">
-                  {[
-                    `Same Instant mint + LP lock, quoted in ${a.symbol}`,
-                    a.permissioned
-                      ? `Permissioned — wallet must be allowlisted for ${a.symbol}`
-                      : 'Same create transaction as USDC Instant',
-                  ].map((p) => (
-                    <span
-                      key={p}
-                      className="text-[13px] leading-snug"
-                      style={{ color: on ? 'rgba(255,255,255,0.58)' : 'rgba(255,255,255,0.34)' }}
-                    >
-                      — {p}
-                    </span>
-                  ))}
-                </span>
-              </button>
-            )
-          })}
-
-          {pendingRwas.length > 0 && liveRwas.length === 0 && (
-          <div
-            className="relative text-left p-5 rounded-[22px] opacity-60 cursor-not-allowed"
-            style={{ background: 'var(--s2)', border: '1px solid var(--hair)' }}
-          >
-            <span
-              className="absolute top-4 right-4 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide"
-              style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.5)' }}
-            >
-              Soon
-            </span>
-            <span
-              className="flex items-center justify-center w-[38px] h-[38px] rounded-xl text-[17px]"
-              style={{ background: 'rgba(255,255,255,0.06)' }}
-            >
-              🏛
-            </span>
-            <h3 className="mt-3.5 mb-1 text-[17px] font-semibold tracking-tightish text-white">
-              RWA paired tokens
-            </h3>
-            <p className="m-0 text-[13px] font-semibold" style={{ color: 'rgba(255,255,255,0.34)' }}>
-              {pendingRwas.map((a) => a.symbol).join(' · ')} — waiting on issuer + Instant factory
-            </p>
-            <span className="mt-3.5 flex flex-col gap-2">
-              {['Pair a launch against a real-world asset', 'Same Instant mint + LP lock mechanics'].map((p) => (
-                <span key={p} className="text-[13px] leading-snug" style={{ color: 'rgba(255,255,255,0.34)' }}>
-                  — {p}
-                </span>
-              ))}
-            </span>
+        {!compact && (
+          <div className="mt-4">
+            <CrucibleFeePath
+              kind={isReflection ? 'reflect' : 'meme'}
+              notionalUsdc={100}
+              showSideToggle={false}
+              legacyOnChain={
+                isReflection ||
+                !factoryUsesCrucibleLock(
+                  (rwaQuote?.factory as Address | undefined) || ARC.INSTANT_FACTORY,
+                )
+              }
+            />
           </div>
-          )}
-        </div>
-
-        <div className="mt-4">
-          <CrucibleFeePath
-            kind={isReflection ? 'reflect' : 'meme'}
-            notionalUsdc={100}
-            showSideToggle={false}
-            legacyOnChain={
-              isReflection ||
-              !factoryUsesCrucibleLock(
-                (rwaQuote?.factory as Address | undefined) || ARC.INSTANT_FACTORY,
-              )
-            }
-          />
-        </div>
+        )}
 
         {!launchesLive ? (
-          <div className="mt-6 rounded-[22px] border border-hair bg-s2 px-5 py-6 text-center">
+          <div className="mt-6 rounded-[22px] border border-hair bg-s1 px-5 py-6 text-center">
             <p className="m-0 text-[15px] font-semibold tracking-tightish text-white">
               Launches coming soon
             </p>
@@ -678,334 +559,337 @@ export function ArcCreateForm({
           </div>
         ) : (
           <>
-        {isReflection && (
-          <div className="mt-3 p-5 rounded-[22px] bg-s2 border border-lime-line space-y-4">
-            <div className="flex flex-col gap-1">
-              <span className="text-[15px] font-semibold tracking-tightish">LP fee split</span>
-              <span className="text-[13px] text-t2 leading-snug">
-                Quote-side LP fees: <strong className="text-white">20% holders</strong> ·{' '}
-                <strong className="text-white">35% Crucible</strong> ·{' '}
-                <strong className="text-white">20% creator</strong> ·{' '}
-                <strong className="text-white">15% project burn</strong> ·{' '}
-                <strong className="text-white">10% platform</strong>. Referrals pay 0.05% on
-                Arcfun buys, not from this collect. Launch-token fees burn.
-              </span>
-              {!reflectionLive ? (
-                <span className="text-[12px] text-coral mt-1">
-                  Reflection factory not configured — switch to Meme Launch.
-                </span>
-              ) : (
-                <span className="text-[12px] text-lime-t mt-1">
-                  Live · TOKEN/USDC pool · factory {ARC.REFLECTION_FACTORY.slice(0, 10)}…
-                </span>
-              )}
-            </div>
-            <div>
-              <span className="block text-xs font-semibold text-t3 mb-1.5">
-                Holder reward token <span className="text-coral">*</span>
-              </span>
-              <input
-                value={rewardToken}
-                onChange={(e) => setRewardToken(e.target.value.trim())}
-                placeholder="0x… ERC-20 holders earn (default Arc USDC)"
-                spellCheck={false}
-                className="w-full bg-black/40 border border-hair rounded-xl px-3 py-2.5 text-sm font-mono outline-none focus:border-lime-line"
-              />
-              <p className="mt-1.5 mb-0 text-[12px] text-t3 leading-snug">
-                Defaults to Arc USDC. The trading pair is always TOKEN/USDC; this address is the token
-                holders earn when <code className="text-t2">reflect()</code> runs.
-              </p>
-            </div>
-          </div>
-        )}
-
-        <div className="h-px bg-hair2 my-7" />
-
-        {/* Image */}
-        <div className="flex items-center gap-5">
-          <label className="w-24 h-24 rounded-full border-[1.5px] border-dashed border-white/20 bg-s2 flex flex-col items-center justify-center gap-1.5 cursor-pointer shrink-0 overflow-hidden hover:border-lime-line transition-colors">
-            {imagePreview ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={imagePreview} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <>
-                <ImagePlus className="w-5 h-5 text-t3" />
-                <span className="text-[11px] font-semibold text-t3">Upload</span>
-              </>
+            {isReflection && (
+              <div className="mt-3 p-5 rounded-2xl bg-s1 border border-lime-line space-y-4">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[15px] font-semibold tracking-tightish">LP fee split</span>
+                  <span className="text-[13px] text-t2 leading-snug">
+                    Quote-side LP fees: <strong className="text-white">20% holders</strong> ·{' '}
+                    <strong className="text-white">35% Crucible</strong> ·{' '}
+                    <strong className="text-white">20% creator</strong> ·{' '}
+                    <strong className="text-white">15% project burn</strong> ·{' '}
+                    <strong className="text-white">10% platform</strong>. Referrals pay 0.05% on
+                    Arcfun buys, not from this collect. Launch-token fees burn.
+                  </span>
+                  {!reflectionLive ? (
+                    <span className="text-[12px] text-coral mt-1">
+                      Reflection factory not configured — switch to Meme Launch.
+                    </span>
+                  ) : (
+                    <span className="text-[12px] text-lime-t mt-1">
+                      Live · TOKEN/USDC pool · factory {ARC.REFLECTION_FACTORY.slice(0, 10)}…
+                    </span>
+                  )}
+                </div>
+                <Field label="Holder reward token *">
+                  <input
+                    value={rewardToken}
+                    onChange={(e) => setRewardToken(e.target.value.trim())}
+                    placeholder="0x… ERC-20 holders earn (default Arc USDC)"
+                    spellCheck={false}
+                    className={FIELD}
+                  />
+                  <p className="mt-1.5 mb-0 text-[12px] text-t3 leading-snug">
+                    Defaults to Arc USDC. The trading pair is always TOKEN/USDC; this address is the
+                    token holders earn when reflect() runs.
+                  </p>
+                </Field>
+              </div>
             )}
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => onPickImage(e.target.files?.[0] ?? null)}
-            />
-          </label>
-          <div className="flex flex-col gap-1">
-            <span className="text-[17px] font-semibold tracking-tightish">
-              Token image <span className="text-coral">*</span>
-            </span>
-            <span className="text-sm text-t2">PNG or JPG, 256px or larger. Square crops best.</span>
-          </div>
-        </div>
 
-        {/* Name / ticker */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
-          <div className="px-[18px] py-3.5 rounded-[18px] bg-s2 border border-hair">
-            <span className="block text-xs font-semibold text-t3 mb-1.5">
-              Token name <span className="text-coral">*</span>
-            </span>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Untitled Token"
-              maxLength={64}
-              className="w-full bg-transparent border-0 outline-none text-[17px] font-medium tracking-tightish placeholder:text-white/25"
-            />
-          </div>
-          <div className="px-[18px] py-3.5 rounded-[18px] bg-s2 border border-hair">
-            <span className="block text-xs font-semibold text-t3 mb-1.5">
-              Ticker symbol <span className="text-coral">*</span>
-            </span>
-            <input
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-              placeholder="$TICKER"
-              maxLength={12}
-              className="w-full bg-transparent border-0 outline-none text-[17px] font-medium tracking-tightish uppercase placeholder:text-white/25"
-            />
-          </div>
-        </div>
+            <Field label="Token image *">
+              <div className="flex items-center gap-5">
+                <label className="w-24 h-24 rounded-full border-[1.5px] border-dashed border-white/20 bg-s1 flex flex-col items-center justify-center gap-1.5 cursor-pointer shrink-0 overflow-hidden hover:border-lime-line transition-colors">
+                  {imagePreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={imagePreview} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <>
+                      <ImagePlus className="w-5 h-5 text-t3" />
+                      <span className="text-[11px] font-semibold text-t3">Upload</span>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => onPickImage(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <span className="text-sm text-t2">PNG or JPG, 256px or larger. Square crops best.</span>
+              </div>
+            </Field>
 
-        <div className="px-[18px] py-3.5 rounded-[18px] bg-s2 border border-hair mt-3">
-          <span className="block text-xs font-semibold text-t3 mb-1.5">Description</span>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            maxLength={500}
-            placeholder="Say what it is in one line. The internet has a short attention span."
-            className="w-full bg-transparent border-0 outline-none resize-none text-[15px] leading-relaxed placeholder:text-white/25"
-          />
-        </div>
-
-        {/* Socials */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
-          {[
-            { v: twitter, set: setTwitter, ph: '@handle or URL', label: 'X / Twitter' },
-            { v: telegram, set: setTelegram, ph: 't.me/…', label: 'Telegram' },
-            { v: website, set: setWebsite, ph: 'https://…', label: 'Website' },
-          ].map((f) => (
-            <div key={f.label} className="px-4 py-3 rounded-[18px] bg-s2 border border-hair">
-              <span className="block text-[11px] font-semibold text-t3 mb-1">{f.label}</span>
+            <Field label="Name *">
               <input
-                value={f.v}
-                onChange={(e) => f.set(e.target.value)}
-                placeholder={f.ph}
-                className="w-full bg-transparent border-0 outline-none text-sm placeholder:text-white/25"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="eve"
+                maxLength={64}
+                className={FIELD}
               />
-            </div>
-          ))}
-        </div>
-
-        {/* LP creator rewards wallet — stamped into ArcLock creator fee leg */}
-        <div className="px-[18px] py-3.5 rounded-[18px] bg-s2 border border-hair mt-3">
-          <span className="block text-xs font-semibold text-t3 mb-1.5">
-            Creator rewards wallet <span className="text-t3 font-normal">(optional)</span>
-          </span>
-          <input
-            value={rewardsWallet}
-            onChange={(e) => setRewardsWallet(e.target.value.trim())}
-            placeholder={address || '0x… leave blank to use your connected wallet'}
-            spellCheck={false}
-            className="w-full bg-transparent border-0 outline-none text-[15px] font-mono tracking-tightish placeholder:text-white/25"
-          />
-          <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
-            Where your share of LP fees is paid (Instant: ~70% of quote-side fees). Defaults to the
-            wallet that signs the create tx.
-          </p>
-          {rewardsWallet.trim() && !rewardsOk && (
-            <p className="mt-1.5 mb-0 text-[12px] text-coral">Enter a valid 0x address.</p>
-          )}
-        </div>
-
-        {/* Buy at launch */}
-        <div className="flex items-center justify-between gap-4 p-[18px] rounded-[18px] bg-s2 border border-hair mt-3">
-          <div className="flex flex-col gap-0.5 pr-5">
-            <span className="text-[15px] font-semibold tracking-tightish">Buy at launch</span>
-            <span className="text-[13px] text-t3 leading-snug">
-              Bundle a {quoteSymbol} first buy into the create transaction.
-            </span>
-          </div>
-          <Toggle on={buyAtLaunch} onToggle={() => setBuyAtLaunch((v) => !v)} />
-        </div>
-
-        {buyAtLaunch && (
-          <div className="px-[18px] py-3.5 rounded-[18px] bg-s2 border border-lime-line mt-3 flex items-center justify-between gap-4">
-            <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-semibold text-t3">First buy — {quoteSymbol}</span>
+            </Field>
+            <Field label="Ticker *">
               <input
-                value={firstBuy}
-                onChange={(e) => setFirstBuy(e.target.value.replace(/[^0-9.]/g, ''))}
-                inputMode="decimal"
-                className="bg-transparent border-0 outline-none text-[26px] font-semibold tracking-[-0.03em] tabular-nums w-32"
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                placeholder="EVE"
+                maxLength={12}
+                className={`${FIELD} uppercase`}
               />
-            </div>
-            <div className="flex gap-1.5">
-              {FIRST_BUY_PRESETS.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setFirstBuy(p)}
-                  className="px-3 py-1.5 rounded-[11px] bg-black border border-hair text-[13px] font-semibold tabular-nums text-t2 hover:text-white"
-                >
-                  ${p === '1000' ? '1K' : p}
-                </button>
+            </Field>
+            <Field label="Description">
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                maxLength={500}
+                placeholder="What is this token."
+                className="w-full rounded-2xl bg-s1 px-4 py-3 text-sm outline-none border border-hair focus:border-lime-line placeholder:text-white/30 resize-none"
+              />
+            </Field>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                { v: twitter, set: setTwitter, ph: '@handle or URL', label: 'X / Twitter' },
+                { v: telegram, set: setTelegram, ph: 't.me/…', label: 'Telegram' },
+                { v: website, set: setWebsite, ph: 'https://…', label: 'Website' },
+              ].map((f) => (
+                <Field key={f.label} label={f.label}>
+                  <input
+                    value={f.v}
+                    onChange={(e) => f.set(e.target.value)}
+                    placeholder={f.ph}
+                    className={FIELD}
+                  />
+                </Field>
               ))}
             </div>
-          </div>
-        )}
 
-        {error && (
-          <p className="mt-4 text-xs text-coral flex items-start gap-1.5">
-            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {error}
-          </p>
-        )}
+            <Field label="Creator rewards wallet (optional)">
+              <input
+                value={rewardsWallet}
+                onChange={(e) => setRewardsWallet(e.target.value.trim())}
+                placeholder={address || '0x… leave blank to use your connected wallet'}
+                spellCheck={false}
+                className={`${FIELD} font-mono`}
+              />
+              <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
+                Where your share of LP fees is paid (Instant: ~70% of quote-side fees). Defaults to the
+                wallet that signs the create tx. Rewards to {rewardsPreview}.
+              </p>
+              {rewardsWallet.trim() && !rewardsOk && (
+                <p className="mt-1.5 mb-0 text-[12px] text-coral">Enter a valid 0x address.</p>
+              )}
+            </Field>
 
-        {pendingRegister && (
-          <div className="mt-4 rounded-[14px] border border-amber-500/40 bg-amber-500/10 px-4 py-3.5">
-            <p className="flex items-start gap-1.5 text-[13px] font-medium text-amber-200">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              Token launched — its name and ticker are already live. Its image and socials didn’t
-              save{registerError ? ` — ${registerError}` : ''}, though.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={registering}
-                onClick={() => void retryRegister()}
-                className="h-9 px-4 rounded-[10px] bg-amber-500 text-black text-[13px] font-semibold disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {registering ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                {registering ? 'Retrying…' : 'Retry save'}
-              </button>
-              <button
-                type="button"
-                onClick={() => router.push(`/token/${pendingRegister.token}`)}
-                className="h-9 px-4 rounded-[10px] border border-hair text-[13px] font-medium text-t2 hover:text-white"
-              >
-                Skip, view token
-              </button>
+            <div className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-s1 border border-hair">
+              <div className="flex flex-col gap-0.5 pr-5">
+                <span className="text-[15px] font-semibold tracking-tightish">Buy at launch</span>
+                <span className="text-[13px] text-t3 leading-snug">
+                  Bundle a {quoteSymbol} first buy into the create transaction.
+                </span>
+              </div>
+              <Toggle on={buyAtLaunch} onToggle={() => setBuyAtLaunch((v) => !v)} />
             </div>
-          </div>
-        )}
 
-        {!isConnected ? (
-          <button
-            type="button"
-            disabled={connecting}
-            onClick={() => connect({ connector: connectors[0] })}
-            className="w-full mt-6 h-14 rounded-[18px] bg-lime text-white text-[17px] font-semibold tracking-tightish disabled:opacity-50"
-          >
-            {connecting ? 'Connecting…' : 'Connect wallet'}
-          </button>
-        ) : wrongChain ? (
-          <button
-            type="button"
-            disabled={switching}
-            onClick={() => switchChain({ chainId: ARC_CHAIN_ID })}
-            className="w-full mt-6 h-14 rounded-[18px] bg-amber-500 text-black text-[17px] font-semibold disabled:opacity-50"
-          >
-            {switching ? 'Switching…' : 'Switch to Arc'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={!canSubmit}
-            onClick={() => void onSubmit()}
-            className="w-full mt-6 h-14 rounded-[18px] bg-lime text-white text-[17px] font-semibold tracking-tightish disabled:opacity-40 flex items-center justify-center gap-2"
-          >
-            {busy ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" /> {stepLabel(step)}
-              </>
-            ) : step === 'done' ? (
-              <>
-                <CheckCircle className="w-4 h-4" /> Launched
-              </>
-            ) : isReflection ? (
-              'Launch reflection token'
-            ) : (
-              'Review launch'
+            {buyAtLaunch && (
+              <Field label={`Buy at launch · ${quoteSymbol}`}>
+                <div className="flex items-center gap-3">
+                  <input
+                    value={firstBuy}
+                    onChange={(e) => setFirstBuy(e.target.value.replace(/[^0-9.]/g, ''))}
+                    inputMode="decimal"
+                    className={FIELD}
+                  />
+                  <div className="flex gap-1.5 shrink-0">
+                    {FIRST_BUY_PRESETS.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setFirstBuy(p)}
+                        className="px-3 py-1.5 rounded-full bg-s1 border border-hair text-[13px] font-semibold tabular-nums text-t2 hover:text-white"
+                      >
+                        ${p === '1000' ? '1K' : p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </Field>
             )}
-          </button>
-        )}
 
-        <p className="mt-3.5 mb-0 text-xs text-t3 text-center leading-relaxed">
-          Creation fee 0.10 USDC · gas on Arc · launch-token LP fees auto-burn · pair USDC
-        </p>
+            {error && (
+              <p className="text-xs text-coral flex items-start gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {error}
+              </p>
+            )}
+
+            {pendingRegister && (
+              <div className="rounded-[14px] border border-amber-500/40 bg-amber-500/10 px-4 py-3.5">
+                <p className="flex items-start gap-1.5 text-[13px] font-medium text-amber-200">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  Token launched — its name and ticker are already live. Its image and socials didn’t
+                  save{registerError ? ` — ${registerError}` : ''}, though.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={registering}
+                    onClick={() => void retryRegister()}
+                    className="h-9 px-4 rounded-full bg-amber-500 text-black text-[13px] font-semibold disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {registering ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    {registering ? 'Retrying…' : 'Retry save'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/token/${pendingRegister.token}`)}
+                    className="h-9 px-4 rounded-full border border-hair text-[13px] font-medium text-t2 hover:text-white"
+                  >
+                    Skip, view token
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
-      </div>
+    </>
+  )
 
-      {/* Sticky preview — only when launches are open */}
-      {launchesLive && !compact && (
-      <div className="lg:sticky lg:top-[88px] flex flex-col gap-4">
-        <div className="border border-hair rounded-[28px] bg-s1 p-5">
-          <span className="text-[11px] font-semibold tracking-[0.06em] uppercase text-t3">
-            Live preview
-          </span>
-          <div className="mt-3.5 border border-hair rounded-[22px] overflow-hidden bg-black">
-            <div
-              className="aspect-[16/10] flex items-center justify-center relative"
-              style={{ background: imagePreview ? undefined : tile }}
-            >
-              {imagePreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={imagePreview} alt="" className="absolute inset-0 w-full h-full object-cover" />
-              ) : (
-                <span className="text-[38px] font-bold" style={{ color: mono }}>
-                  {name || symbol ? previewInitial : '?'}
-                </span>
-              )}
-              <span className="absolute top-2.5 left-2.5 px-2 py-1 rounded-[9px] bg-black/55 text-[11px] font-semibold text-white">
-                0s
-              </span>
-              <span className="absolute top-2.5 right-2.5 px-2 py-1 rounded-[9px] bg-black/55 text-[11px] font-semibold text-lime-t">
-                {isReflection ? '◈ Reflect' : 'Uni V3'}
-              </span>
-            </div>
-            <div className="px-4 py-3.5 flex flex-col gap-1.5">
-              <span className="flex justify-between items-baseline gap-2">
-                <span className="text-[15px] font-semibold text-t2 truncate">
-                  {name || 'Untitled Token'}
-                </span>
-                <span className="text-xs font-semibold text-t3 shrink-0">
-                  ${symbol || 'TICKER'}
-                </span>
-              </span>
-              <span className="text-[19px] font-semibold tabular-nums tracking-[-0.025em] text-t2">
-                $0
-              </span>
-            </div>
-          </div>
-        </div>
+  const cta = (
+    <button
+      type="button"
+      disabled={
+        isConnected && !wrongChain
+          ? !canSubmit
+          : connecting || switching
+      }
+      onClick={onCta}
+      className={`w-full h-12 rounded-full text-[15px] font-semibold tracking-tightish disabled:opacity-40 flex items-center justify-center gap-2 ${
+        isConnected && wrongChain ? 'bg-amber-500 text-black' : 'bg-lime text-white hover:bg-lime-2'
+      }`}
+    >
+      {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : step === 'done' ? <CheckCircle className="w-4 h-4" /> : null}
+      {launchCta}
+    </button>
+  )
 
-        <div className="border border-hair rounded-[28px] bg-s1 p-5 flex flex-col gap-3.5">
-          <span className="text-[11px] font-semibold tracking-[0.06em] uppercase text-t3">
-            What ships
-          </span>
-          {shipRows.map((sr) => (
-            <span key={sr.k} className="flex justify-between text-sm gap-3">
-              <span className="text-t2">{sr.k}</span>
-              <span className="font-medium text-right">{sr.v}</span>
-            </span>
-          ))}
-        </div>
+  if (compact) {
+    return (
+      <div>
+        <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em]">Launch this</h1>
+        <p className="mt-2.5 mb-5 text-[15px] text-t2 leading-relaxed">
+          Instant TOKEN/USDC. 1B supply, LP locked. Confirm to mint. We do not send the tx for you.
+        </p>
+        <div className="space-y-5">{fields}</div>
+        {launchesLive ? <div className="mt-6">{cta}</div> : null}
       </div>
-      )}
+    )
+  }
+
+  return (
+    <div>
+      <p className="m-0 text-xs font-medium tracking-[0.16em] text-t3 uppercase">Launch</p>
+      <h1 className="mt-2 mb-0 text-3xl font-semibold tracking-tight">One transaction. Full float.</h1>
+      <p className="mt-2 max-w-xl text-sm text-t2 text-pretty">
+        1B supply, Uniswap V3, LP locked, pair {quoteSymbol}. ${feeUsd.toFixed(2)} creation fee.
+        Launch-token LP fees auto-burn.
+      </p>
+
+      <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="space-y-5">{fields}</div>
+        {launchesLive ? (
+          <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
+            <TokenCard token={previewToken} preview />
+            <div className="rounded-2xl bg-s1 p-5 text-sm border border-hair">
+              <FeeRow k="Creation fee" v={`$${feeUsd.toFixed(2)}`} />
+              <FeeRow k="First buy" v={`$${buyUsd.toFixed(2)}`} />
+              <FeeRow k="You pay" v={`$${payUsd.toFixed(2)}`} />
+              <FeeRow
+                k="Wallet"
+                v={
+                  !isConnected
+                    ? 'Not connected'
+                    : walletUsd == null
+                      ? usdcQ.isPending
+                        ? '…'
+                        : '—'
+                      : fmtUsd(walletUsd)
+                }
+              />
+              <div className="mt-4">{cta}</div>
+              <p className="mt-3 mb-0 text-xs text-t3 leading-relaxed">
+                Gas on Arc · launch-token LP fees auto-burn · pair {quoteSymbol}
+              </p>
+            </div>
+          </aside>
+        ) : null}
+      </div>
     </div>
   )
 }
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <div className="mb-2 text-xs text-t3">{label}</div>
+      {children}
+    </label>
+  )
+}
+
+function FeeRow({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex items-center justify-between py-1.5 text-sm">
+      <span className="text-t2">{k}</span>
+      <span className="tabular-nums">{v}</span>
+    </div>
+  )
+}
+
+function TypeCard({
+  active,
+  onClick,
+  title,
+  body,
+  disabled,
+  soon,
+}: {
+  active?: boolean
+  onClick?: () => void
+  title: string
+  body: string
+  disabled?: boolean
+  soon?: boolean
+}) {
+  const cls = `relative rounded-2xl bg-s1 p-4 text-left border transition-colors duration-150 ${
+    disabled
+      ? 'border-hair opacity-60 cursor-not-allowed'
+      : active
+        ? 'border-lime-line'
+        : 'border-hair hover:border-lime-line'
+  }`
+  const inner = (
+    <>
+      {soon ? (
+        <span className="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide text-t3 bg-white/5">
+          Soon
+        </span>
+      ) : null}
+      <div className="text-sm font-medium">{title}</div>
+      <p className="mt-1 mb-0 text-xs leading-relaxed text-t2">{body}</p>
+    </>
+  )
+  if (disabled || !onClick) return <div className={cls}>{inner}</div>
+  return (
+    <button type="button" onClick={onClick} className={cls}>
+      {inner}
+    </button>
+  )
+}
+
+const FIELD =
+  'w-full h-11 rounded-2xl bg-s1 px-4 text-sm text-white outline-none border border-hair focus:border-lime-line placeholder:text-white/30'
 
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
