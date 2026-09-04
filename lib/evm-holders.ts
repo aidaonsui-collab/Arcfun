@@ -504,6 +504,33 @@ export async function fetchEvmHolders(
 }
 
 /**
+ * Raw (un-rounded, un-formatted) address -> balance map for a token, atomic units. For anything
+ * that does math with the numbers (pro-rata reward splits, etc.) rather than displaying them —
+ * `fetchEvmHolders`'s `balance` field is a comma-formatted display string (`fmtBalance`), lossy
+ * by design, never safe to parse back into a bigint. Catches the ledger up first, same as
+ * `fetchEvmHolders`, then excludes protocol/dead/zero addresses (and any extra ones the caller
+ * passes) before handing back what's left.
+ */
+export async function getRawHolderBalances(
+  token: Address,
+  opts?: { budgetMs?: number; excludeAddresses?: string[] },
+): Promise<Map<string, bigint>> {
+  const factory = ARC.INSTANT_FACTORY
+  const extraExclude = new Set((opts?.excludeAddresses ?? []).map((a) => a.toLowerCase()).filter(Boolean))
+  for (const a of instantProtocolAddresses()) extraExclude.add(a.toLowerCase())
+  const skip = (a: string) => isExcludedHolder(a, factory) || extraExclude.has(a)
+
+  await updateHolderLedger(token, { budgetMs: opts?.budgetMs ?? SCAN_BUDGET_MS })
+  const ledger = await readHolderLedger(token)
+
+  const out = new Map<string, bigint>()
+  for (const [addr, bal] of ledger) {
+    if (bal > 0n && !skip(addr)) out.set(addr, bal)
+  }
+  return out
+}
+
+/**
  * Background maintenance: keeps every known token's holder ledger caught up. Round-robins over
  * listIndexedTokens() the same registry catchUpSwapsAndVolume already uses — any token the
  * platform knows about gets a maintained ledger, no separate registry to keep in sync. Meant to
