@@ -178,7 +178,7 @@ export function WalletButton({
           type="button"
           disabled={isPending}
           onClick={() => (wallets.length > 1 ? setOpen((o) => !o) : connectToArc(connect, wallets))}
-          className="h-9 px-3 sm:px-4 rounded-xl bg-s2 border border-hair text-white text-sm font-semibold hover:bg-s3 disabled:opacity-50 transition-colors"
+          className="h-9 px-4 rounded-full bg-lime text-white text-sm font-semibold hover:bg-lime-2 disabled:opacity-50 transition-colors"
         >
           {isPending ? '…' : 'Connect'}
         </button>

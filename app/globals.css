@@ -346,6 +346,46 @@
 }
 
 
+.deal-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--s2);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(126, 192, 247, 0.12);
+  transform: translate(var(--sx), var(--sy)) rotate(var(--sr));
+  transition:
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.deal-card.is-out {
+  z-index: 40;
+  transition: none;
+  animation: deal-hand 0.68s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes deal-hand {
+  0% {
+    transform: translate(var(--sx), var(--sy)) rotate(var(--sr)) scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+  18% {
+    transform: translate(calc(var(--sx) + 8px), calc(var(--sy) - 16px))
+      rotate(calc(var(--sr) + 3deg)) scale(1.05);
+    opacity: 1;
+    filter: blur(0);
+  }
+  100% {
+    transform: translate(calc(var(--sx) + 128px), calc(var(--sy) - 34px))
+      rotate(20deg) scale(1.02);
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+
 /* Long.xyz-style in-place art fade when a home tile's token swaps */
 @keyframes tile-media-in {
   from {

@@ -1,12 +1,31 @@
 import Link from 'next/link'
 import type { PoolToken } from '@/lib/tokens'
+import { isReflectionToken } from '@/lib/tokens'
 import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import { ageLabel, changeParts, fmtUsd, sparkPathFromValues, tileGradient } from '@/lib/ui-format'
 import { cdnImage } from '@/lib/cdn-image'
 
+function QuoteMark() {
+  return (
+    <svg viewBox="0 0 16 16" className="size-3.5 shrink-0 text-lime-t" aria-hidden>
+      <circle cx="8" cy="8" r="7" fill="currentColor" />
+      <circle cx="8" cy="8" r="5.2" fill="var(--bg)" />
+      <text
+        x="8"
+        y="11"
+        textAnchor="middle"
+        fontSize="7.5"
+        fontWeight="700"
+        fill="currentColor"
+      >
+        $
+      </text>
+    </svg>
+  )
+}
+
 export function TokenCard({
   token,
-  rank,
 }: {
   token: PoolToken
   rank?: number
@@ -17,61 +36,82 @@ export function TokenCard({
   const chg = changeParts(token.priceChange24h)
   const initial = (token.symbol || token.name || '?').charAt(0).toUpperCase()
   const img = token.imageUrl || token.logoUrl
-  const rankLabel =
-    rank != null ? (rank + 1 < 10 ? `0${rank + 1}` : String(rank + 1)) : null
   const age = ageLabel(token.createdAt)
+  const quote = token.instantMeta?.quote || 'USDC'
+  const pct = token.priceChange24h ?? 0
+  const pctLabel = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
 
   return (
-    <div className="group relative text-left border border-hair rounded-[20px] overflow-hidden bg-s1 flex flex-col transition-[transform,border-color] duration-200 ease-out hover:border-lime-line hover:scale-[1.03] hover:z-[3]">
-      <Link href={`/token/${address}`} className="absolute inset-0 z-0" aria-label={token.name || 'Token'} />
-      <span
-        key={address || seed}
-        className="relative block aspect-square flex items-center justify-center pointer-events-none tile-media-in"
-        style={{ background: img ? undefined : tile }}
-      >
-        {img ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={cdnImage(img, 320)} alt="" className="absolute inset-0 w-full h-full object-cover" />
-        ) : (
-          <span
-            className="text-[64px] font-bold tracking-[-0.05em] leading-none"
-            style={{ color: mono }}
-          >
-            {initial}
-          </span>
-        )}
-        <span className="absolute top-2.5 left-2.5 right-2.5 flex items-start justify-between gap-1.5 pointer-events-auto z-10">
-          <span className="shrink-0 px-2 py-1 rounded-[9px] bg-black/50 backdrop-blur-[10px] text-[11px] font-semibold text-white">
-            {age}
-          </span>
-          <LaunchKindBadge token={token} />
+    <Link
+      href={`/token/${address}`}
+      className="group relative block overflow-hidden rounded-[20px] bg-s1 p-5 border border-hair transition-[border-color,transform] duration-200 ease-out hover:border-lime-line hover:z-[3]"
+    >
+      {img ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={`${address}-wm`}
+          src={cdnImage(img, 320)}
+          alt=""
+          className="pointer-events-none absolute -right-6 top-1/2 size-44 -translate-y-1/2 rounded-full object-cover opacity-25 mix-blend-lighten tile-media-in"
+        />
+      ) : (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -right-4 top-1/2 -translate-y-1/2 text-[7rem] font-bold leading-none opacity-10"
+          style={{ color: mono }}
+        >
+          {initial}
+        </span>
+      )}
+      <span className="relative flex items-start justify-between">
+        <span
+          className="size-11 rounded-full overflow-hidden shrink-0 flex items-center justify-center border border-hair"
+          style={{ background: img ? undefined : tile }}
+        >
+          {img ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={`${address}-av`}
+              src={cdnImage(img, 96)}
+              alt=""
+              className="size-full object-cover tile-media-in"
+            />
+          ) : (
+            <span className="text-sm font-bold" style={{ color: mono }}>
+              {initial}
+            </span>
+          )}
         </span>
       </span>
-
-      {/* Pools.trade-style bottom block: name, then price + change on one line — no ticker,
-          no volume line, no sparkline (kept only in the "Top Memes" rail card). */}
-      <span className="px-3.5 pt-3 pb-3.5 flex flex-col gap-1 relative z-[1] pointer-events-none">
-        <span className="flex items-baseline gap-1.5 min-w-0">
-          {rankLabel && (
-            <span className="text-xs font-bold text-lime-t tabular-nums shrink-0">{rankLabel}</span>
-          )}
-          <span className="text-sm font-semibold tracking-tightish truncate">
-            {token.name || 'Unnamed'}
-          </span>
+      <span className="relative mt-8 block">
+        <span className="block text-xs font-medium tracking-wide text-t3 uppercase">
+          ${token.symbol || 'TOKEN'}
         </span>
-        <span className="flex items-center justify-between gap-2 relative z-[1] pointer-events-none">
-          <span className="text-lg font-bold tabular-nums tracking-[-0.02em]">
-            {fmtUsd(token.marketCap)}
+        <span className="mt-1 block text-[1.85rem] leading-none font-semibold tracking-tight tabular-nums">
+          {fmtUsd(token.marketCap)}
+        </span>
+        <span className="mt-3 flex flex-wrap items-center gap-2 text-xs text-t2">
+          <span className="inline-flex items-center gap-1.5">
+            Paired with
+            <QuoteMark />
+            <span className="text-white/80">{quote}</span>
           </span>
+          <span className="text-t3">·</span>
+          <span>{age}</span>
+          {isReflectionToken(token) ? (
+            <span className="px-2 py-0.5 rounded-full bg-s2 border border-hair text-lime-t text-[10px] font-semibold uppercase tracking-wide">
+              Reflect
+            </span>
+          ) : null}
           <span
-            className="shrink-0 text-[13px] font-bold tabular-nums whitespace-nowrap"
+            className="ml-auto tabular-nums font-semibold"
             style={{ color: chg.stroke }}
           >
-            {chg.label}
+            {pctLabel}
           </span>
         </span>
       </span>
-    </div>
+    </Link>
   )
 }
 
