@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { isAddress, type Address } from 'viem'
 import {
@@ -10,10 +11,10 @@ import {
 } from '@/lib/crucible'
 import { fetchCrucibleStats } from '@/lib/crucible-stats'
 import { fetchTokenBurnedPct } from '@/lib/evm-holders'
+import { getArcHomeCatalog } from '@/lib/arc-catalog-cache'
 import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { ageLabel, fmtCompact, fmtUsd } from '@/lib/ui-format'
 import { ExternalLink } from 'lucide-react'
-import { CrucibleFeePath } from '@/components/CrucibleFeePath'
 import { CrucibleCountUp } from '@/components/CrucibleChip'
 
 export const revalidate = 20
@@ -21,24 +22,9 @@ export const revalidate = 20
 export const metadata: Metadata = {
   title: 'The Crucible — Arcfun',
   description:
-    'A buy/burn no one has to click. You trade. Fees accrue. When it cooks, Crucible buys $EVE and burns it.',
+    'Quote fees buy $EVE. Then it is gone. You trade. Fees accrue. When it cooks, Crucible buys $EVE and burns it.',
 }
 
-/**
- * Hard wall-clock bound for the two Arc reads this page renders with.
- *
- * Both already degrade on *error* — liveBurnedPct catches, fetchCrucibleStats falls back to
- * emptyCrucibleStats — but neither was bounded on *slowness*, and Arc's public RPCs are erratic
- * (a single eth_call has been measured at 13s). Nothing here is worth blocking a render on:
- * every field has a defined empty state.
- *
- * Found 2026-09-01: this page is prerendered (revalidate = 20), and Next gives a page 60s to
- * build. Deployment dpl_CLDDk8vq… failed all 3 attempts at exactly that limit. The trigger was
- * #126 making a failed eth_call fail OVER to the next endpoint rather than throwing immediately —
- * correct behaviour, but it turned one fast failure into three sequential endpoint attempts and
- * pushed this page past 60s. The build was only ever passing because the RPC failed fast.
- * 12s each keeps the pair well inside the budget with room for the retry.
- */
 const RPC_DEADLINE_MS = 12_000
 
 function withDeadline<T>(work: Promise<T>, fallback: T): Promise<T> {
@@ -59,6 +45,14 @@ const EVE_TOKEN = (
     : '0x19209E55049bc613c5cC8b66B7DF7824096e78CF'
 ) as Address
 
+const FEE_BARS = [
+  { label: 'Creator', pct: 50 },
+  { label: 'Crucible', pct: 25 },
+  { label: 'Project burn', pct: 10 },
+  { label: 'Platform', pct: 10 },
+  { label: 'Referrer', pct: 5 },
+] as const
+
 async function liveBurnedPct(): Promise<number | null> {
   try {
     return await fetchTokenBurnedPct(EVE_TOKEN)
@@ -67,241 +61,203 @@ async function liveBurnedPct(): Promise<number | null> {
   }
 }
 
+async function eveMarketCap(): Promise<number | null> {
+  try {
+    const snap = await getArcHomeCatalog()
+    const id = EVE_TOKEN.toLowerCase()
+    const eve = snap.tokens.find((t) => (t.coinType || t.poolId || '').toLowerCase() === id)
+    const mc = eve?.marketCap
+    return Number.isFinite(mc) && (mc as number) > 0 ? (mc as number) : null
+  } catch {
+    return null
+  }
+}
+
 export default async function CruciblePage() {
-  const livePct = await withDeadline<number | null>(liveBurnedPct(), null)
+  const [livePct, eveMc] = await Promise.all([
+    withDeadline<number | null>(liveBurnedPct(), null),
+    withDeadline<number | null>(eveMarketCap(), null),
+  ])
   const stats = await withDeadline(fetchCrucibleStats(livePct), emptyCrucibleStats(livePct))
   const explorer = ARC_EXPLORER || 'https://arc-scan.org'
   const burnedHref = `${explorer}/token/${EVE_TOKEN}?a=${BURN_ADDRESS}`
   const meltCount = stats.melts.length
-  const tiles = [
-    {
-      label: 'Burned',
-      value:
-        stats.burnedPct != null ? (
-          <CrucibleCountUp value={stats.burnedPct} kind="pct" />
-        ) : (
-          '—'
-        ),
-      sub: 'of supply',
-      subColor: 'var(--limeT)',
-      bar: stats.burnedPct,
-      live: livePct != null,
-      href: burnedHref,
-    },
-    {
-      label: 'USDC in',
-      value: <CrucibleCountUp value={stats.usdcIn} kind="usd" />,
-      sub: 'quote fees into Crucible',
-      subColor: 'var(--t3)',
-      bar: null as number | null,
-      live: false,
-      href: null as string | null,
-    },
-    {
-      label: 'EVE bought',
-      value: <CrucibleCountUp value={stats.arcfunBought} kind="compact" />,
-      sub: 'from USDC burns',
-      subColor: 'var(--limeT)',
-      bar: null,
-      live: false,
-      href: null,
-    },
-    {
-      label: 'EVE removed',
-      value: <CrucibleCountUp value={stats.arcfunAtDead} kind="compact" />,
-      sub: `${meltCount} burn${meltCount === 1 ? '' : 's'}`,
-      subColor: 'var(--limeT)',
-      bar: null,
-      live: false,
-      href: burnedHref,
-    },
-  ]
+  const card = 'rounded-[20px] bg-s1 border border-hair'
 
   return (
     <main className="min-h-screen text-white pt-16 pb-20">
-      <div className="max-w-desk mx-auto px-4 sm:px-10 py-8 sm:py-10">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm font-medium text-t2 hover:text-white mb-5"
-        >
-          ‹ Home
-        </Link>
-
-        <h1
-          className="crucible-title m-0 text-[32px] sm:text-[40px] font-semibold tracking-display leading-[1.12]"
-          data-text="The Crucible"
-        >
-          The Crucible
+      <div className="max-w-[1120px] mx-auto px-4 sm:px-6 py-8 sm:py-10">
+        <p className="m-0 text-xs font-medium tracking-[0.16em] text-t3 uppercase">Crucible</p>
+        <h1 className="mt-2 mb-0 max-w-xl text-[1.85rem] sm:text-[2.1rem] font-semibold tracking-tight leading-tight text-balance">
+          Quote fees buy $EVE. Then it is gone.
         </h1>
-        <p className="m-0 mt-3 text-[18px] font-semibold tracking-tightish text-white">
-          A buy/burn no one has to click.
-        </p>
-        <p className="mt-3 mb-0 max-w-2xl text-[16px] text-t2 leading-relaxed">
-          You trade. Fees accrue. When it cooks, Crucible buys $EVE and burns it. Referrals on
-          Arcfun buys are extra, and instant.
+        <p className="mt-3 mb-0 max-w-xl text-sm leading-relaxed text-t2 text-pretty">
+          Every launch on Arcfun takes a 1% USDC fee on buys. A slice of that fee sits in Crucible
+          until it can buy $EVE and send it to the dead wallet. No clicks. No payout.
         </p>
 
-        <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-px bg-hair2 border border-hair rounded-[24px] overflow-hidden">
-          {tiles.map((m) => {
-            const inner = (
-              <>
-                <span className="text-[11px] font-semibold tracking-[0.06em] uppercase text-t3 whitespace-nowrap inline-flex items-center gap-1">
-                  {m.label}
-                  {m.href ? <ExternalLink className="w-3 h-3" /> : null}
-                </span>
-                <span
-                  className="text-2xl font-semibold tabular-nums tracking-[-0.028em] leading-tight truncate"
-                  style={m.bar != null ? { color: 'var(--limeT)' } : undefined}
-                >
-                  {m.value}
-                </span>
-                {m.bar != null && Number.isFinite(m.bar) ? (
-                  <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+        <div className="mt-8 grid gap-3 sm:grid-cols-3">
+          <Stat
+            label="Burned"
+            value={
+              stats.burnedPct != null ? (
+                <CrucibleCountUp value={stats.burnedPct} kind="pct" />
+              ) : (
+                '—'
+              )
+            }
+            hint={
+              stats.arcfunAtDead > 0 ? `${fmtCompact(stats.arcfunAtDead)} EVE` : 'of supply'
+            }
+            href={burnedHref}
+          />
+          <Stat
+            label="USDC in"
+            value={<CrucibleCountUp value={stats.usdcIn} kind="usd" />}
+            hint={
+              meltCount > 0
+                ? `${meltCount} burn${meltCount === 1 ? '' : 's'}`
+                : 'quote fees into Crucible'
+            }
+          />
+          <Stat
+            label="$EVE market cap"
+            value={
+              eveMc != null ? <CrucibleCountUp value={eveMc} kind="usd" /> : '—'
+            }
+            hint="Protocol token"
+            href={`/token/${EVE_TOKEN}`}
+            internal
+          />
+        </div>
+
+        <div className="mt-8 grid gap-6 lg:grid-cols-2">
+          <section className={`${card} p-6`}>
+            <h2 className="m-0 text-sm font-medium">Fee path · Meme</h2>
+            <p className="mt-1 mb-0 text-xs text-t3">
+              On a $100 buy, $1.00 splits across the pie.
+            </p>
+            <ul className="mt-5 mb-0 space-y-3 list-none p-0">
+              {FEE_BARS.map((row) => (
+                <li key={row.label}>
+                  <div className="mb-1 flex justify-between text-sm">
+                    <span>{row.label}</span>
+                    <span className="tabular-nums text-t3">{row.pct}%</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
                     <div
                       className="h-full rounded-full crucible-bar"
                       style={{
-                        width: `${Math.min(100, Math.max(0, m.bar))}%`,
-                        background: 'var(--limeT)',
+                        width: `${row.pct * 2}%`,
+                        background: 'rgba(126, 192, 247, 0.78)',
                       }}
                     />
                   </div>
-                ) : null}
-                <span className="text-xs font-semibold tabular-nums" style={{ color: m.subColor }}>
-                  {m.sub}
-                </span>
-              </>
-            )
-            const cls = 'px-5 py-[18px] bg-s1 flex flex-col gap-1.5 min-w-0'
-            return m.href ? (
-              <a
-                key={m.label}
-                href={m.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="View burned supply on explorer"
-                className={`${cls} hover:bg-s2 transition-colors`}
-              >
-                {inner}
-              </a>
-            ) : (
-              <div key={m.label} className={cls}>
-                {inner}
-              </div>
-            )
-          })}
-        </div>
-
-        <div className="mt-5">
-          <CrucibleFeePath kind="meme" notionalUsdc={100} />
-        </div>
-
-        <section className="mt-5 border border-hair rounded-[24px] bg-s1 overflow-hidden">
-          <div className="px-5 py-4 border-b border-hair2 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="m-0 text-[17px] font-semibold tracking-tightish">Burn tape</h2>
-              <p className="m-0 mt-0.5 text-[13px] text-t3">
-                {stats.lastMelt
-                  ? `Last burn ${ageLabel(stats.lastMelt.ts)} ago`
-                  : 'No burns yet'}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-5 mb-0 text-xs text-t3">
+              Sells: 1% in the launch token, 100% burned. Nobody is paid.
+            </p>
+            {usesLegacyOnChainSplits() ? (
+              <p className="mt-4 mb-0 text-[12px] text-t3 leading-snug border-t border-hair2 pt-3">
+                Next · {CRUCIBLE_CONTRACTS_NOTE}
               </p>
-            </div>
-          </div>
-          {stats.melts.length === 0 ? (
-            <p className="px-5 py-12 text-center text-sm text-t3">No burns yet.</p>
-          ) : (
-            <>
-            <div className="sm:hidden divide-y divide-hair2">
-              {stats.melts.map((m, i) => (
-                <a
-                  key={m.id}
-                  href={`${explorer}/tx/${m.id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="View cook on explorer"
-                  className="tape-row px-5 py-3.5 flex flex-col gap-1.5 hover:bg-s2 transition-colors"
-                  style={{ ['--tape-i' as string]: i }}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="inline-flex items-center gap-2 text-[13px] text-t2 tabular-nums">
+            ) : null}
+          </section>
+
+          <section className={`${card} p-6 flex flex-col`}>
+            <h2 className="m-0 text-sm font-medium">Burn tape</h2>
+            <div className="mt-4 flex-1 divide-y divide-hair2">
+              {stats.melts.length === 0 ? (
+                <p className="py-6 m-0 text-sm text-t3">No burns yet.</p>
+              ) : (
+                stats.melts.map((m, i) => (
+                  <a
+                    key={m.id}
+                    href={`${explorer}/tx/${m.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="View cook on explorer"
+                    className="tape-row flex items-center justify-between gap-3 py-3 text-sm hover:text-white"
+                    style={{ ['--tape-i' as string]: i }}
+                  >
+                    <span className="inline-flex items-center gap-2 text-t2 tabular-nums shrink-0">
                       {i === 0 ? (
                         <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot shrink-0" />
-                      ) : null}
+                      ) : (
+                        <span className="w-1.5 h-1.5 shrink-0" aria-hidden />
+                      )}
                       {ageLabel(m.ts)} ago
                     </span>
-                    <span className="text-[15px] font-semibold tabular-nums text-coral">
-                      {fmtCompact(m.arcfunBurned)} burned
+                    <span className="tabular-nums text-t2">{fmtUsd(m.usdcIn)} in</span>
+                    <span className="tabular-nums font-medium text-right">
+                      {fmtCompact(m.arcfunBurned)} EVE burned
                     </span>
-                  </div>
-                  <div className="flex items-center justify-between text-[12px] text-t3 tabular-nums">
-                    <span>{fmtUsd(m.usdcIn)} in</span>
-                    <span>{fmtCompact(m.arcfunBought)} bought</span>
-                  </div>
-                </a>
-              ))}
+                  </a>
+                ))
+              )}
             </div>
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="text-[12px] font-semibold text-t3 border-b border-hair2">
-                    <th className="px-5 py-3 font-semibold">When</th>
-                    <th className="px-5 py-3 font-semibold text-right">USDC in</th>
-                    <th className="px-5 py-3 font-semibold text-right">EVE bought</th>
-                    <th className="px-5 py-3 font-semibold text-right">Burned</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.melts.map((m, i) => (
-                    <tr
-                      key={m.id}
-                      className="tape-row border-b border-hair2 last:border-0"
-                      style={{ ['--tape-i' as string]: i }}
-                    >
-                      <td className="px-5 py-3 text-t2 tabular-nums">
-                        <a
-                          href={`${explorer}/tx/${m.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="View cook on explorer"
-                          className="inline-flex items-center gap-2 hover:text-white"
-                        >
-                          {i === 0 ? (
-                            <span className="w-1.5 h-1.5 rounded-full bg-lime-t live-dot shrink-0" />
-                          ) : (
-                            <span className="w-1.5 h-1.5 shrink-0" aria-hidden />
-                          )}
-                          {ageLabel(m.ts)} ago
-                        </a>
-                      </td>
-                      <td className="px-5 py-3 text-right tabular-nums font-semibold">
-                        {fmtUsd(m.usdcIn)}
-                      </td>
-                      <td className="px-5 py-3 text-right tabular-nums text-t2">
-                        {fmtCompact(m.arcfunBought)}
-                      </td>
-                      <td className="px-5 py-3 text-right tabular-nums text-coral font-semibold">
-                        {fmtCompact(m.arcfunBurned)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            </>
-          )}
-        </section>
+            <Link
+              href={`/token/${EVE_TOKEN}`}
+              className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-full bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
+            >
+              Trade $EVE
+            </Link>
+          </section>
+        </div>
 
-        <section className="mt-5 border border-hair rounded-[24px] bg-s1 p-5 sm:p-6">
-          <h2 className="m-0 text-[17px] font-semibold tracking-tightish">Payout trail</h2>
-          <p className="mt-2 mb-0 text-[14px] text-t2 leading-relaxed">
-            Referrals pay at swap time, on-chain, to the code&apos;s payout wallet. Anyone who
-            bought can share their link later. Direct Uni or aggregator swaps have no code and
-            pay nobody.
-          </p>
-          {usesLegacyOnChainSplits() ? (
-            <p className="mt-3 mb-0 text-[13px] text-t3 leading-snug">{CRUCIBLE_CONTRACTS_NOTE}</p>
-          ) : null}
-        </section>
+        <p className="mt-6 mb-0 max-w-2xl text-[13px] text-t3 leading-relaxed">
+          Referrals pay at swap time, on-chain, to the code&apos;s payout wallet. Anyone who
+          bought can share their link later. Direct Uni or aggregator swaps have no code and pay
+          nobody.
+        </p>
       </div>
     </main>
+  )
+}
+
+function Stat({
+  label,
+  value,
+  hint,
+  href,
+  internal,
+}: {
+  label: string
+  value: ReactNode
+  hint: string
+  href?: string
+  internal?: boolean
+}) {
+  const inner = (
+    <>
+      <div className="text-[11px] text-t3 inline-flex items-center gap-1">
+        {label}
+        {href && !internal ? <ExternalLink className="w-3 h-3" /> : null}
+      </div>
+      <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">{value}</div>
+      <div className="mt-1 text-xs text-t3">{hint}</div>
+    </>
+  )
+  const cls = 'rounded-[20px] bg-s1 border border-hair px-5 py-5 text-white no-underline'
+  if (!href) return <div className={cls}>{inner}</div>
+  if (internal) {
+    return (
+      <Link href={href} className={`${cls} hover:border-lime-line transition-colors`}>
+        {inner}
+      </Link>
+    )
+  }
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="View burned supply on explorer"
+      className={`${cls} hover:border-lime-line transition-colors`}
+    >
+      {inner}
+    </a>
   )
 }
