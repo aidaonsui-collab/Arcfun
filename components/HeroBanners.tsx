@@ -27,21 +27,23 @@ const POSES = [
 export function HeroBanners() {
   return (
     <div className="grid gap-3 md:grid-cols-2">
-      <div className="relative overflow-hidden rounded-[24px] bg-s1 px-7 py-8 min-h-52 border border-hair">
-        <div className="relative z-10 max-w-[19rem]">
+      <div className="relative overflow-hidden rounded-[24px] bg-s1 px-5 py-7 sm:px-7 sm:py-8 min-h-52 border border-hair">
+        <div className="md:max-w-[19rem]">
           <h1 className="m-0 text-[1.7rem] leading-tight font-semibold tracking-tight text-pretty md:text-[1.9rem]">
             Launch on Arc.
             <br />
             Pair it to Stocks.
           </h1>
-          <Link
-            href="/create"
-            className="mt-6 inline-flex h-11 items-center px-6 rounded-full bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
-          >
-            Launch now
-          </Link>
+          <div className="mt-6 flex items-center justify-between gap-3 md:block">
+            <Link
+              href="/create"
+              className="inline-flex h-11 shrink-0 items-center px-6 rounded-full bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
+            >
+              Launch now
+            </Link>
+            <DealDeck />
+          </div>
         </div>
-        <DealDeck />
       </div>
 
       <div className="relative overflow-hidden rounded-[24px] bg-s2 px-7 py-8 min-h-52 border border-hair">
@@ -121,7 +123,7 @@ function DealDeck() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute top-1/2 right-10 h-36 w-44 origin-right -translate-y-1/2 scale-90 sm:right-16 sm:scale-100"
+      className="pointer-events-none relative h-28 w-32 shrink-0 origin-right scale-90 md:absolute md:top-1/2 md:right-10 md:h-36 md:w-44 md:-translate-y-1/2 md:scale-100"
     >
       {stacked.map((token, i) => {
         const pose = POSES[i] ?? POSES[POSES.length - 1]
