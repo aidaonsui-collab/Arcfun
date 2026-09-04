@@ -5,6 +5,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/arc/keeper/eve-holder-rewards",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/arc/indexer/run",
       "schedule": "*/2 * * * *"
     },
