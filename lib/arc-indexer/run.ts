@@ -5,7 +5,7 @@
  */
 import { parseAbiItem, type Address, type Hex } from 'viem'
 import { ARC, arcPublicClient, arcLogsClient, arcInstantEnabled, arcReflectionEnabled } from '@/lib/contracts-arc'
-import { arcMarketCapUsd, healIndexedSpotUsdc, instantCatalogFactories } from '@/lib/arc-instant-tokens'
+import { arcMarketCapUsd, healIndexedSpotUsdc, healSparkCloses, instantCatalogFactories } from '@/lib/arc-instant-tokens'
 import { lastSparkClose } from '@/lib/arc-catalog-from-index'
 import { syncTradesToHead } from '@/lib/arc-trades'
 import { allInMultiplier, fetchOtcFeeBps } from '@/lib/bridge/robin-otc'
@@ -473,6 +473,7 @@ export async function enrichTokensWithIndexVolume<
     const v = id ? map[id] : undefined
     if (!v) return t
     const lastPrice = healIndexedSpotUsdc(lastSparkClose(v))
+    const sparkCloses = healSparkCloses(v.sparkCloses) ?? v.sparkCloses
     return {
       ...t,
       volume1h: v.volume1h,
@@ -482,7 +483,7 @@ export async function enrichTokensWithIndexVolume<
       volumeAll: v.volumeAll,
       lastTradeAt: v.lastTradeAt || (t as { lastTradeAt?: number }).lastTradeAt,
       priceChange24h: v.priceChange24h ?? t.priceChange24h ?? 0,
-      sparkCloses: v.sparkCloses,
+      sparkCloses,
       ...(lastPrice > 0
         ? { currentPrice: lastPrice, marketCap: arcMarketCapUsd(lastPrice) }
         : {}),
