@@ -15,6 +15,15 @@ Also useful:
 
 Rate limit on arcexplorer verify: **5 requests / hour** per IP (`ratelimit: "5-in-1hr"`). Failed attempts count.
 
+### Verified this pass (2026-09-04 CT)
+
+| Contract | Address | Explorer status |
+| --- | --- | --- |
+| CrucibleLock | `0xE522…928EA` → `0xE522907807CdDF006b433a103356d2c30ac39209` | `verified=true`, `verificationStatus=metadata_match` |
+| ReferralRegistry | `0x1E61c1DBcD0E2147Ae2247285B6788dAa4564033` | `verified=true`, `verificationStatus=metadata_match` |
+
+Still unverified (needs another hour of rate-limit budget and/or ctor-arg support): EveBurn, ArcBpsSource, Crucible, InstantLockerAdapter, Instant/MonLock impls, Robin OTC.
+
 ## Inventory (5042)
 
 | Name | Address | Kind | Explorer | Local source | Settings that body-match | Verified? | Notes |
@@ -27,10 +36,10 @@ Rate limit on arcexplorer verify: **5 requests / hour** per IP (`ratelimit: "5-i
 | MonLock impl | `0x701ba347bbd231e604fbc4303d5a2dce8abe52ed` | implementation | [link](https://www.arcexplorer.org/contract/0x701ba347bbd231e604fbc4303d5a2dce8abe52ed) | `src/MonLock.sol` / `MonLockUUPS.sol` | no match in matrix (prologue differs; on-chain has **no** solc metadata trailer) | no | Likely different compile flags / bytecode_hash=none strip |
 | ArcBpsSource | `0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE` | plain | [link](https://www.arcexplorer.org/contract/0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE) | `src/ArcBpsSource.sol` | **body** = cancun + viaIR + opt 200 + `bytecode_hash=none` **with metadata trailer stripped on-chain** | no | On-chain runtime is 1109 B; local same body + 13 B solc CBOR. arcexplorer exact-match fails |
 | EveBurn | `0x292C8Fd478eC224aAC5CAf338c4d3B67203e899E` | plain | [link](https://www.arcexplorer.org/contract/0x292C8Fd478eC224aAC5CAf338c4d3B67203e899E) | `contracts/eve-burn/src/EveBurn.sol` | **exact**: solc 0.8.26, **viaIR false**, opt 200, cancun, ipfs; ctor `(usdc, swapRouter, eve, 10000)` | attempted — fail | Local anvil deploy == on-chain. Explorer UI/API does **not** document `constructorArguments`; without them immutables (`usdc`,`eve`) diverge. First API attempt counted against 5/hr |
-| CrucibleLock (`NEXT_PUBLIC_ARC_INSTANT_LOCKER`) | `0xE522907807CdDF006b433a103356d2c30ac39209` | plain | [link](https://www.arcexplorer.org/contract/0xE522907807CdDF006b433a103356d2c30ac39209) | `script/vendor-crucible/src/CrucibleLock.sol` | **body** match: cancun + viaIR + opt 200 + ipfs (only metadata IPFS CID differs) | pending | No immutables. Multi-file standard-json prepared; rate-limited before submit |
+| CrucibleLock (`NEXT_PUBLIC_ARC_INSTANT_LOCKER`) | `0xE522907807CdDF006b433a103356d2c30ac39209` | plain | [link](https://www.arcexplorer.org/contract/0xE522907807CdDF006b433a103356d2c30ac39209) | `script/vendor-crucible/src/CrucibleLock.sol` | **body** match: cancun + viaIR + opt 200 + ipfs (only metadata IPFS CID differs) | **yes** (`metadata_match`, 2026-09-04) | Flattened single-file submit succeeded. Multi-file std-json returned HTTP 500 |
 | InstantLockerAdapter | `0x9deBd8d2CFa7dA789257146D325Af4094B1c1c5f` | plain | [link](https://www.arcexplorer.org/contract/0x9deBd8d2CFa7dA789257146D325Af4094B1c1c5f) | `script/vendor-crucible/src/InstantLockerAdapter.sol` | **body** match same settings (CID differs) | pending | Immutables: CrucibleLock + NFPM |
 | Crucible (burn sink) | `0x0B3Eb6Cef8B2b3b158c560898Ead0127f08AE6B6` | plain | [link](https://www.arcexplorer.org/contract/0x0B3Eb6Cef8B2b3b158c560898Ead0127f08AE6B6) | `script/vendor-crucible/src/Crucible.sol` | **body** match same settings (CID differs) | pending | From CrucibleLock.crucible() |
-| ReferralRegistry | `0x1E61c1DBcD0E2147Ae2247285B6788dAa4564033` | plain | [link](https://www.arcexplorer.org/contract/0x1E61c1DBcD0E2147Ae2247285B6788dAa4564033) | `script/vendor-crucible/src/ReferralRegistry.sol` | expected same profile as CrucibleLock stack | pending | From CrucibleLock.referralRegistry() |
+| ReferralRegistry | `0x1E61c1DBcD0E2147Ae2247285B6788dAa4564033` | plain | [link](https://www.arcexplorer.org/contract/0x1E61c1DBcD0E2147Ae2247285B6788dAa4564033) | `script/vendor-crucible/src/ReferralRegistry.sol` | cancun + viaIR + opt 200 | **yes** (`metadata_match`, 2026-09-04) | From CrucibleLock.referralRegistry() |
 | Robin OTC liquidity | `0xBD06241e272d05449A034abc0cfd558905c4aE3e` | plain | [link](https://www.arcexplorer.org/contract/0xBD06241e272d05449A034abc0cfd558905c4aE3e) | **not in this repo** (ABI only under `subgraph/`) | — | no | Default in `lib/bridge/robin-otc.ts` `OTC_DEFAULTS.liquidity` |
 | Fee router (`.env.example`) | `0x8d051f7FCf2F67f272b6ec96dAf2e9a847633394` | plain | [link](https://www.arcexplorer.org/contract/0x8d051f7FCf2F67f272b6ec96dAf2e9a847633394) | not under `contracts/arc-instant` | — | no | `lib/contracts-arc.ts` hardcodes a **different** default `0x6795…f088` |
 | Instant LEGACY factory | `0x607bff9EB2ff1494AC8f0b545502Ce49ee2Ae42B` | EIP-1967 proxy | [link](https://www.arcexplorer.org/contract/0x607bff9EB2ff1494AC8f0b545502Ce49ee2Ae42B) | — | — | no | impl `0x61655fF3b76E21bEC788916242365a96cf0d5E85` |
