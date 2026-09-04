@@ -47,19 +47,28 @@ export function TokenCard({
 
   const body = (
     <>
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -right-8 top-1/2 size-56 -translate-y-1/2 rounded-full"
+        style={{
+          background:
+            'radial-gradient(circle at 48% 50%, rgba(47, 132, 219, 0.32) 0%, rgba(47, 132, 219, 0.12) 38%, transparent 70%)',
+        }}
+      />
       {img ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           key={`${address}-wm`}
           src={cdnImage(img, 320)}
           alt=""
-          className="pointer-events-none absolute -right-6 top-1/2 size-44 -translate-y-1/2 rounded-full object-cover opacity-25 mix-blend-lighten tile-media-in"
+          className="pointer-events-none absolute -right-6 top-1/2 size-44 -translate-y-1/2 rounded-full object-cover opacity-[0.48] mix-blend-lighten tile-media-in"
+          style={{ filter: 'drop-shadow(0 0 26px rgba(47, 132, 219, 0.32))' }}
         />
       ) : (
         <span
           aria-hidden
-          className="pointer-events-none absolute -right-4 top-1/2 -translate-y-1/2 text-[7rem] font-bold leading-none opacity-10"
-          style={{ color: mono }}
+          className="pointer-events-none absolute -right-4 top-1/2 -translate-y-1/2 text-[7rem] font-bold leading-none opacity-[0.16]"
+          style={{ color: mono, filter: 'drop-shadow(0 0 18px rgba(47, 132, 219, 0.22))' }}
         >
           {initial}
         </span>
@@ -142,9 +151,17 @@ export function TokenRailCard({ token }: { token: PoolToken }) {
       className="flex-none w-[300px] flex items-stretch border border-hair rounded-[20px] overflow-hidden bg-s1 hover:border-lime-line transition-colors"
     >
       <span
-        className="relative w-24 shrink-0 flex items-center justify-center"
+        className="relative w-24 shrink-0 flex items-center justify-center overflow-hidden"
         style={{ background: img ? undefined : tile }}
       >
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(circle at 70% 50%, rgba(47, 132, 219, 0.28) 0%, transparent 70%)',
+          }}
+        />
         {img ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={cdnImage(img, 96)} alt="" className="absolute inset-0 w-full h-full object-cover" />
