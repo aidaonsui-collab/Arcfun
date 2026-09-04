@@ -21,8 +21,9 @@ Rate limit on arcexplorer verify: **5 requests / hour** per IP (`ratelimit: "5-i
 | --- | --- | --- |
 | CrucibleLock | `0xE522…928EA` → `0xE522907807CdDF006b433a103356d2c30ac39209` | `verified=true`, `verificationStatus=metadata_match` |
 | ReferralRegistry | `0x1E61c1DBcD0E2147Ae2247285B6788dAa4564033` | `verified=true`, `verificationStatus=metadata_match` |
+| **$EVE (LaunchToken18)** | `0x19209E55049bc613c5cC8b66B7DF7824096e78CF` | `verified=true`, `verificationStatus=metadata_match`, `verifiedAt=2026-09-04T21:31:14.349Z` — submitted the prepared `eve-token-verify-payload.json` once the 5/hr window cleared. Response: `{"verified":true,"exactMatch":false,"compilerVersion":"0.8.26+commit.8a97fa7a.Emscripten.clang"}`. Live: [arcexplorer.org/contract/0x1920…78CF](https://www.arcexplorer.org/contract/0x19209E55049bc613c5cC8b66B7DF7824096e78CF) shows "Verified source", full ABI (18 entries), source readable |
 
-Still unverified: **$EVE LaunchToken18** (local code-body match ready; arcexplorer **5/hr** rate limit hit 2026-09-04 ~15:47 CT — Retry-After ~45m), **EveBurn** (ctor-arg / immutable blocker — not rate limit alone), ArcBpsSource, Crucible, InstantLockerAdapter, Instant/MonLock impls, Robin OTC.
+Still unverified: **EveBurn** (ctor-arg / immutable blocker — not rate limit alone), ArcBpsSource, Crucible, InstantLockerAdapter, Instant/MonLock impls, Robin OTC.
 
 ### EveBurn retry (2026-09-04 ~15:25–15:40 CT)
 
@@ -83,7 +84,7 @@ Also: `api.arc-scan.org` `verifysourcecode` refuses chain 5042 (Sourcify `provid
 ```bash
 # from repo root
 ./scripts/verify-arc.sh status          # getsource / arcexplorer status for inventory
-./scripts/verify-arc.sh submit-eve-token # $EVE LaunchToken18 flattened — ready after 5/hr window
+./scripts/verify-arc.sh submit-eve-token # $EVE LaunchToken18 — DONE, verified 2026-09-04, see status_one below
 ./scripts/verify-arc.sh submit-eve       # EveBurn — blocked until explorer applies ctor/immutables
 ./scripts/verify-arc.sh submit-crucible  # CrucibleLock multi-file standard-json
 ```
