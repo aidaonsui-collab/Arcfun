@@ -397,6 +397,12 @@ export async function fetchEvmHolders(
     fromBlock?: bigint
     seedAddresses?: string[]
     excludeAddresses?: string[]
+    /** Override the live path's default SCAN_BUDGET_MS. For a token whose ledger is far behind
+     *  head — the background cron shares its time across every known token, so a token can lag
+     *  noticeably between the moment its cursor is established and full catch-up — a caller that
+     *  actually wants to wait can request a larger one-off window. Never used by the route by
+     *  default; exists for exactly this manual-catch-up case, not asked to scale further. */
+    budgetMs?: number
   },
 ): Promise<EvmHoldersResult> {
   const client = arcPublicClient()
@@ -406,10 +412,10 @@ export async function fetchEvmHolders(
   for (const a of instantProtocolAddresses()) extraExclude.add(a.toLowerCase())
   const skip = (a: string) => isExcludedHolder(a, factory) || extraExclude.has(a)
 
-  // Catch the ledger up (small budget from this path — the background cron carries the real
-  // weight) and read totalSupply concurrently; neither depends on the other.
+  // Catch the ledger up (small budget from this path by default — the background cron carries
+  // the real weight) and read totalSupply concurrently; neither depends on the other.
   const [, totalSupply] = await Promise.all([
-    updateHolderLedger(token, { budgetMs: SCAN_BUDGET_MS, floorBlock: opts?.fromBlock }),
+    updateHolderLedger(token, { budgetMs: opts?.budgetMs ?? SCAN_BUDGET_MS, floorBlock: opts?.fromBlock }),
     client.readContract({ address: token, abi: erc20Abi, functionName: 'totalSupply' }).catch(() => 0n),
   ])
 

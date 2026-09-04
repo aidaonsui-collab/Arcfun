@@ -11,8 +11,9 @@ import { ARC, arcInstantEnabled, instantLockerForFactory, instantProtocolAddress
 import { isReflectionToken } from '@/lib/tokens'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
-export async function GET(_req: Request, { params }: { params: Promise<{ token: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
   if (!isPlausibleEvmAddress(token)) {
     return NextResponse.json({ error: 'invalid token', holders: [], total: 0 }, { status: 400 })
@@ -20,6 +21,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
   if (!arcInstantEnabled()) {
     return NextResponse.json({ error: 'not configured', holders: [], total: 0 }, { status: 404 })
   }
+  // Manual catch-up escape hatch for a token whose ledger cursor is well behind head — the
+  // background cron shares its time across every known token, so a token can lag noticeably
+  // between its cursor being established and full catch-up. Bounded well under maxDuration to
+  // leave room for the pool/trades fetch above it; never used unless explicitly requested.
+  const catchup = new URL(req.url).searchParams.get('catchup') === '1'
 
   try {
     // fetchArcPoolToken (not the Instant-only variant) so Reflection and graduated-curve tokens
@@ -53,10 +59,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
         ...(pool.instantMeta?.uniPool ? [pool.instantMeta.uniPool] : []),
       ],
       creatorAddress: pool.creator,
+      budgetMs: catchup ? 45_000 : undefined,
     })
 
     return NextResponse.json(result, {
-      headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' },
+      // A catch-up call is a one-off, not a representative response to cache for other viewers.
+      headers: catchup
+        ? { 'Cache-Control': 'private, no-store' }
+        : { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' },
     })
   } catch (e) {
     console.error('[api/arc/holders]', e)
