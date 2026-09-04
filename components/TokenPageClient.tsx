@@ -741,7 +741,8 @@ export function TokenPageClient({
                           ) : (
                             <span
                               className="w-[18px] h-[18px] rounded-full shrink-0"
-                              style={{ background: walletHue(t.trader) }}
+                              title={t.isBuy ? 'Buy' : 'Sell'}
+                              style={{ background: t.isBuy ? 'var(--limeT)' : 'var(--coral)' }}
                             />
                           )}
                           <span className="text-t2 truncate min-w-0">
