@@ -7,7 +7,7 @@
  * empty rebuild was persisted. An empty snapshot is not "the pad has zero launches".
  */
 import type { Address } from 'viem'
-import { healIndexedSpotUsdc } from './arc-instant-tokens'
+import { arcMarketCapUsd, healIndexedSpotUsdc, sanitizePoolTokenSpot } from './arc-instant-tokens'
 import type { ArcTokenMeta } from './arc-token-meta'
 import type { IndexedToken, IndexedVolume } from './arc-indexer/types'
 import type { PoolToken } from './tokens'
@@ -33,52 +33,52 @@ function tradeTs(t: Pick<PoolToken, 'lastTradeAt'>): number {
 
 /**
  * RPC/catalog rows win on identity; indexer fills ids the rebuild missed.
- * When fallback lastTradeAt is newer (or primary has none), take trade/price
+ * When fallback lastTradeAt is newer (or primary has none), take trade/volume
  * fields from fallback and keep Instant metadata (name, image, instantMeta).
+ * Price/mcap/spark are healed first: a stale 6dp-as-18 print must not overwrite
+ * a live slot0, and a zero fallback must not wipe a plausible primary spot.
  */
 export function mergeCatalogTokens(primary: PoolToken[], fallback: PoolToken[]): PoolToken[] {
   const byId = new Map<string, PoolToken>()
   for (const t of primary) {
     const id = catalogId(t)
-    if (id) byId.set(id, t)
+    if (id) byId.set(id, sanitizePoolTokenSpot(t))
   }
   for (const t of fallback) {
     const id = catalogId(t)
     if (!id) continue
     const existing = byId.get(id)
+    const healed = sanitizePoolTokenSpot(t)
     if (!existing) {
-      byId.set(id, t)
+      byId.set(id, healed)
       continue
     }
-    const fallbackAt = tradeTs(t)
+    const fallbackAt = tradeTs(healed)
     const primaryAt = tradeTs(existing)
     if (fallbackAt > primaryAt) {
+      const fallbackPx = healIndexedSpotUsdc(healed.currentPrice)
       byId.set(id, {
         ...existing,
-        currentPrice: t.currentPrice,
-        marketCap: t.marketCap,
-        lastTradeAt: t.lastTradeAt,
-        volume1h: t.volume1h,
-        volume6h: t.volume6h,
-        volume12h: t.volume12h,
-        volume24h: t.volume24h,
-        volumeAll: t.volumeAll,
-        priceChange24h: t.priceChange24h,
-        sparkCloses: t.sparkCloses,
+        ...(fallbackPx > 0
+          ? { currentPrice: fallbackPx, marketCap: arcMarketCapUsd(fallbackPx) }
+          : {}),
+        lastTradeAt: healed.lastTradeAt,
+        volume1h: healed.volume1h,
+        volume6h: healed.volume6h,
+        volume12h: healed.volume12h,
+        volume24h: healed.volume24h,
+        volumeAll: healed.volumeAll,
+        priceChange24h: healed.priceChange24h,
+        sparkCloses: healed.sparkCloses ?? existing.sparkCloses,
       })
     }
   }
-  return [...byId.values()]
+  return [...byId.values()].map((t) => sanitizePoolTokenSpot(t))
 }
 
 function shortAddr(a: string): string {
   if (!a || a.toLowerCase() === ZERO) return ''
   return `${a.slice(0, 6)}…${a.slice(-4)}`
-}
-
-function marketCapUsd(priceUsdc: number): number {
-  if (!(priceUsdc > 0) || !Number.isFinite(priceUsdc)) return 0
-  return priceUsdc * TOTAL_SUPPLY_HUMAN
 }
 
 export function lastSparkClose(vol: IndexedVolume | null | undefined): number {
@@ -107,7 +107,7 @@ export function indexedRowToPoolToken(
     row.kind === 'reflection' || factory.toLowerCase() === REFLECTION_FACTORY
   const isCurve = row.kind === 'curve'
   const uniPool = row.pool && row.pool.toLowerCase() !== ZERO ? row.pool : undefined
-  return {
+  return sanitizePoolTokenSpot({
     id: token,
     chain: 'arc',
     poolId: token,
@@ -154,10 +154,10 @@ export function indexedRowToPoolToken(
     priceChange24h: vol?.priceChange24h ?? 0,
     sparkCloses: vol?.sparkCloses,
     age: '',
-    marketCap: marketCapUsd(price),
+    marketCap: arcMarketCapUsd(price),
     totalSupply: TOTAL_SUPPLY_HUMAN,
     createdAt: row.createdAt || undefined,
-  }
+  })
 }
 
 export async function poolTokensFromIndexed(): Promise<PoolToken[]> {

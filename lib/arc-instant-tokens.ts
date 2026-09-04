@@ -258,8 +258,57 @@ export function isPlausibleSpotUsdc(priceUsdc: number): boolean {
 
 export function healIndexedSpotUsdc(priceUsdc: number): number {
   if (isPlausibleSpotUsdc(priceUsdc)) return priceUsdc
+  if (!(priceUsdc > 0) || !Number.isFinite(priceUsdc)) return 0
   const healed = priceUsdc / DP6_AS_18
   return isPlausibleSpotUsdc(healed) ? healed : 0
+}
+
+export function healSparkCloses(closes: number[] | undefined | null): number[] | undefined {
+  if (!closes?.length) return undefined
+  const out: number[] = []
+  for (const p of closes) {
+    const h = healIndexedSpotUsdc(p)
+    if (h > 0) out.push(h)
+  }
+  return out.length ? out : undefined
+}
+
+type SpotFields = {
+  currentPrice?: number
+  marketCap?: number
+  sparkCloses?: number[]
+}
+
+/**
+ * Catalog KV served #167's unhealed AMG print (`currentPrice` 7e6, FDV 7e15 → "$7019.18T")
+ * because heal ran only on rebuild/enrich, and merge copied the previous snapshot back.
+ * Heal on every catalog read/write so a stale row cannot reach the home grid.
+ */
+export function sanitizePoolTokenSpot<T extends SpotFields>(t: T): T {
+  const sparkCloses = healSparkCloses(t.sparkCloses)
+  let price = healIndexedSpotUsdc(Number(t.currentPrice) || 0)
+  if (!(price > 0) && sparkCloses?.length) {
+    price = sparkCloses[sparkCloses.length - 1]
+  }
+  if (!(price > 0)) {
+    const mc = Number(t.marketCap) || 0
+    if (mc > MAX_PLAUSIBLE_FDV_USD) {
+      const healedMc = mc / DP6_AS_18
+      if (healedMc > 0 && healedMc <= MAX_PLAUSIBLE_FDV_USD) {
+        price = healedMc / TOTAL_SUPPLY_HUMAN
+      }
+    }
+  }
+  const next = { ...t }
+  if (sparkCloses) next.sparkCloses = sparkCloses
+  if (price > 0) {
+    next.currentPrice = price
+    next.marketCap = arcMarketCapUsd(price)
+  } else if ((Number(t.currentPrice) || 0) > 0 && !isPlausibleSpotUsdc(Number(t.currentPrice))) {
+    next.currentPrice = 0
+    next.marketCap = 0
+  }
+  return next
 }
 
 /** Price of 1 whole token in USDC, from Uni V3 slot0. Reads token.decimals() for 6 vs 18 dp. */
