@@ -144,7 +144,7 @@ export function HomeClient({
         <section className="relative mt-6 lg:min-h-[200px]">
           <div className="relative max-w-[600px] flex flex-col gap-3">
             <h1 className="m-0 text-[26px] sm:text-[32px] leading-[1.15] font-bold tracking-display text-pretty text-white">
-              The best way to launch and trade tokens on Arc.
+              Tokenize the World
             </h1>
             <div className="flex flex-wrap items-stretch gap-2.5 pt-1">
               <PadVolumeTile
