@@ -1,5 +1,6 @@
 /**
- * GET /api/arc/keeper/otc — OTC desk unwired; cron removed from vercel.json.
+ * GET /api/arc/keeper/otc — manual settle trigger.
+ * Live cadence is Jessica's Air (lib/arc-indexer/daemon.ts), not a Vercel minute cron.
  * Settles pending Instant OTC fills (Base/ARB/ETH → Arc) against the shared desk contracts. See
  * lib/arc-otc-keeper.ts for the actual per-fill lock → deliver → settle chain, and its top-of-file
  * comment for why ArcFun runs its own copy of this alongside Robinpad's.

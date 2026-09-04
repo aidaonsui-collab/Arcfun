@@ -189,9 +189,10 @@ export function getPaymentChain(id: OtcPaymentChainId | number): OtcPaymentChain
 }
 
 export function robinOtcEnabled(): boolean {
-  // Unwired: UI hidden, /otc redirects home, /api/otc/* 404, Vercel crons removed.
-  // Implementation stays. Flip this to true to bring the desk back.
-  return false
+  // Desk is on. NEXT_PUBLIC_ROBIN_OTC_ENABLED=0 takes it down without a code change.
+  if (process.env.NEXT_PUBLIC_ROBIN_OTC_ENABLED === '0') return false
+  if (process.env.NEXT_PUBLIC_ROBIN_OTC_ENABLED === '1') return true
+  return true
 }
 
 /** Total open depth across active offers (USDC 6dp) — uses available when present. */

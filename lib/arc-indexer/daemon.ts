@@ -10,9 +10,14 @@
  */
 import { hostname } from 'node:os'
 import { runArcIndexerCycle } from './run'
+import { runOtcIndexerCycle } from './otc-cycle'
 import { indexerWorkerName, renewIndexerLease } from './lease'
+import { runOtcKeeperTick } from '@/lib/arc-otc-keeper'
+import { robinOtcEnabled } from '@/lib/bridge/robin-otc'
 
 const SLEEP_MS = Math.max(1_000, Number(process.env.INDEXER_SLEEP_MS) || 4_000)
+/** OTC book + settle — Jessica only. Do not put these on Vercel minute crons. */
+const OTC_MS = Math.max(15_000, Number(process.env.OTC_SLEEP_MS) || 60_000)
 
 /**
  * Renewing only once per loop iteration — before runArcIndexerCycle(), not during it — let the
@@ -42,11 +47,44 @@ export async function main(): Promise<void> {
   const host = hostname()
   const owner = indexerWorkerName() === 'vercel-cron' ? `jessica:${host}` : indexerWorkerName()
   process.env.INDEXER_WORKER = owner
-  console.log(`[arc-indexer] dedicated loop owner=${owner} sleep=${SLEEP_MS}ms renew=${LEASE_RENEW_MS}ms`)
+  console.log(
+    `[arc-indexer] dedicated loop owner=${owner} sleep=${SLEEP_MS}ms renew=${LEASE_RENEW_MS}ms otc=${OTC_MS}ms`,
+  )
 
   setInterval(() => {
     void renewIndexerLease(owner, host, process.pid)
   }, LEASE_RENEW_MS)
+
+  let otcInflight = false
+  const tickOtcDesk = async () => {
+    if (!robinOtcEnabled() || otcInflight) return
+    otcInflight = true
+    try {
+      const idx = await runOtcIndexerCycle()
+      const idxLag = idx.ok
+        ? `ok found=${idx.found ?? 0} refreshed=${idx.refreshed ?? 0} cursor=${idx.otcCursor || '—'} ${idx.ms}ms`
+        : `FAIL ${idx.error || 'unknown'} ${idx.ms}ms`
+      console.log(`[arc-indexer] otc ${new Date().toISOString()} ${idxLag}`)
+      const dryRun = process.env.ARC_OTC_KEEPER_LIVE === '0'
+      const k = await runOtcKeeperTick({ dryRun, lookbackBlocks: 9_000n })
+      if (!k.ok) {
+        console.error(`[arc-indexer] otc-keeper FAIL ${k.error || 'unknown'}`)
+      } else {
+        const n = Array.isArray(k.results) ? k.results.length : 0
+        console.log(
+          `[arc-indexer] otc-keeper ${new Date().toISOString()} ${dryRun ? 'dry-run' : 'live'} fills=${n}`,
+        )
+      }
+    } catch (e) {
+      console.error('[arc-indexer] otc', e instanceof Error ? e.message : e)
+    } finally {
+      otcInflight = false
+    }
+  }
+  setInterval(() => {
+    void tickOtcDesk()
+  }, OTC_MS)
+  void tickOtcDesk()
 
   for (;;) {
     const t0 = Date.now()

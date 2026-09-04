@@ -9,9 +9,6 @@ export function Footer() {
           <Link href="/crucible" className="hover:text-white">
             Crucible
           </Link>
-          <Link href="/vault" className="hover:text-white">
-            Eve Vault
-          </Link>
           <Link href="/docs" className="hover:text-white">
             Docs
           </Link>
@@ -20,6 +17,9 @@ export function Footer() {
           </Link>
           <Link href="/studio" className="hover:text-white">
             Studio
+          </Link>
+          <Link href="/otc" className="hover:text-white">
+            Arc OTC
           </Link>
           <Link href="/create" className="hover:text-white">
             Launch

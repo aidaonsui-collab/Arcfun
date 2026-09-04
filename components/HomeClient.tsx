@@ -159,15 +159,27 @@ export function HomeClient({
               >
                 Launch a token
               </Link>
+              <Link
+                href="/otc"
+                className="inline-flex h-[42px] items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
+              >
+                OTC desk
+              </Link>
             </div>
           </div>
 
-          <div className="hidden lg:flex absolute right-0 top-0 w-72 h-[200px] items-center justify-center">
+          <div className="hidden lg:flex absolute right-0 top-0 w-72 h-[200px] flex-col items-center justify-center gap-3">
             <Link
               href="/create"
               className="inline-flex h-14 items-center px-8 rounded-full bg-lime text-white text-[16px] font-semibold tracking-tightish hover:bg-lime-2 transition-colors shadow-[0_12px_36px_rgba(47,132,219,0.35)]"
             >
               Launch a token
+            </Link>
+            <Link
+              href="/otc"
+              className="inline-flex h-10 items-center px-5 rounded-full bg-white/10 border border-hair text-white text-sm font-medium tracking-tightish hover:bg-white/[0.14] transition-colors"
+            >
+              OTC desk
             </Link>
           </div>
         </section>
