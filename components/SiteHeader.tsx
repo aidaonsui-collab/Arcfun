@@ -1,19 +1,19 @@
 'use client'
 
 /**
- * Sticky nav — Arcfun brand mark + wordmark, search, Vault, ArcStudio, wallet chip.
- * Mobile: Home, Crucible, Eve Vault, ArcStudio, Create collection, Profile, Docs.
+ * Sticky nav — Arcfun brand mark + wordmark, search, ArcStudio, Arc OTC, wallet chip.
+ * Mobile: Home, Crucible, ArcStudio, Create collection, Profile, Arc OTC, Docs.
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { FormEvent, useEffect, useState } from 'react'
 import { useAccount, useConnect } from 'wagmi'
 import {
+  ArrowLeftRight,
   BookOpen,
   CircleUser,
   Flame,
   Home,
-  Landmark,
   LayoutGrid,
   Menu,
   PlusCircle,
@@ -68,7 +68,7 @@ export function SiteHeader() {
   }, [menuOpen])
 
   const onStudio = pathname.startsWith('/studio')
-  const onVault = pathname.startsWith('/vault')
+  const onOtc = pathname.startsWith('/otc')
 
   const onSearch = (e: FormEvent) => {
     e.preventDefault()
@@ -141,17 +141,6 @@ export function SiteHeader() {
         <CrucibleChip compact className="hidden lg:inline-flex" />
 
         <Link
-          href="/vault"
-          className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
-            onVault
-              ? 'border-lime-line bg-s2 text-white'
-              : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
-          }`}
-        >
-          Vault
-        </Link>
-
-        <Link
           href="/studio"
           className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
             onStudio
@@ -160,6 +149,17 @@ export function SiteHeader() {
           }`}
         >
           Studio
+        </Link>
+
+        <Link
+          href="/otc"
+          className={`hidden sm:inline-flex h-9 items-center px-3 rounded-xl border text-sm font-semibold transition-colors ${
+            onOtc
+              ? 'border-lime-line bg-s2 text-white'
+              : 'border-hair bg-s2 text-t2 hover:text-white hover:border-lime-line'
+          }`}
+        >
+          Arc OTC
         </Link>
 
         {isConnected && address ? (
@@ -232,7 +232,6 @@ export function SiteHeader() {
 
               {navRow('/', 'Home', Home)}
               {navRow('/crucible', 'Crucible', Flame)}
-              {navRow('/vault', 'Eve Vault', Landmark)}
               {navRow('/studio', 'Studio', LayoutGrid)}
               {navRow('/studio/create', 'Create collection', PlusCircle)}
 
@@ -259,6 +258,7 @@ export function SiteHeader() {
                   {isPending ? 'Connecting…' : 'Connect wallet'}
                 </button>
               )}
+              {navRow('/otc', 'Arc OTC', ArrowLeftRight)}
               {navRow('/docs', 'Docs', BookOpen)}
             </div>
           </aside>

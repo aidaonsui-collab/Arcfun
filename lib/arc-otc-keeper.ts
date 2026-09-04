@@ -1,6 +1,6 @@
 /**
- * Arc OTC desk keeper — settles Instant OTC fills (Base/ARB/ETH → Arc), on a schedule (see
- * app/api/arc/keeper/otc/route.ts + vercel.json cron).
+ * Arc OTC desk keeper — settles Instant OTC fills (Base/ARB/ETH → Arc).
+ * Live ticks run on Jessica's Air (lib/arc-indexer/daemon.ts). The HTTP route is a manual trigger.
  *
  * Flow per fill (v4 payment = reserve + lock):
  *   1. lock() on payment (blocks self-refund) BEFORE Arc

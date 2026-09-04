@@ -28,9 +28,11 @@ Requires project env:
 - `CRON_SECRET` (Vercel injects Bearer automatically for crons)
 - `KV_REST_API_URL` / `KV_REST_API_TOKEN` (Upstash)
 
+OTC book (`/api/arc/indexer/otc`) and OTC settle (`/api/arc/keeper/otc`) are **not** Vercel crons. Jessica's Air runs both about every 60s inside `npm run indexer`. The HTTP routes stay as a manual trigger (`Authorization: Bearer $CRON_SECRET`).
+
 ## Dedicated loop (Jessica / home Mac Air)
 
-The 2-minute cron is a backup. For sharc-style lag, run the same cycle in a tight loop on a machine that stays awake, writing the **production** KV.
+The 2-minute factory/swap cron is a backup. OTC ticks live only on the Air. For sharc-style lag, run the same cycle in a tight loop on a machine that stays awake, writing the **production** KV.
 
 On Jessica:
 
@@ -43,7 +45,7 @@ caffeinate -dims npm run indexer
 
 Or `./scripts/run-indexer-jessica.sh` (also uses `caffeinate` if you wrap it).
 
-The loop renews KV key `arcfun:idx:lease` every cycle. While that lease is live, the Vercel cron returns `{ skipped: "dedicated-indexer" }` and does not race cursors. If the Air sleeps, the lease expires in ~45s and the cron takes over.
+The loop renews KV key `arcfun:idx:lease` every cycle. While that lease is live, the Vercel factory/swap cron returns `{ skipped: "dedicated-indexer" }` and does not race cursors. If the Air sleeps, the lease expires in ~45s and that cron takes over. OTC book and settle pause until the Air is awake again.
 
 `/api/arc/indexer/status` reports `dedicated: true` and `lease.owner` when Jessica is writing.
 

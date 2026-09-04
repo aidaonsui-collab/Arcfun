@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Always-on Arc indexer on Jessica (home Mac Air).
+# Always-on Arc indexer + OTC book/keeper on Jessica (home Mac Air).
 # Pull production env first:  vercel env pull --environment production .env.local
 # Then:  caffeinate -dims ./scripts/run-indexer-jessica.sh
 set -euo pipefail
