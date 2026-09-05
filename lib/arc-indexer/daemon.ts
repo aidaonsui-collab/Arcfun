@@ -16,8 +16,11 @@ import { runOtcKeeperTick } from '@/lib/arc-otc-keeper'
 import { robinOtcEnabled } from '@/lib/bridge/robin-otc'
 
 const SLEEP_MS = Math.max(1_000, Number(process.env.INDEXER_SLEEP_MS) || 4_000)
-/** OTC book + settle — Jessica only. Do not put these on Vercel minute crons. */
-const OTC_MS = Math.max(15_000, Number(process.env.OTC_SLEEP_MS) || 60_000)
+/** OTC book + settle — Jessica only. Do not put these on Vercel minute crons.
+ *  otcInflight (below) already refuses to start a new tick while one is still running, so
+ *  dropping this to 10s is safe even on a cycle that occasionally takes longer than that — the
+ *  next scheduled tick just no-ops instead of overlapping. */
+const OTC_MS = Math.max(5_000, Number(process.env.OTC_SLEEP_MS) || 10_000)
 
 /**
  * Renewing only once per loop iteration — before runArcIndexerCycle(), not during it — let the
