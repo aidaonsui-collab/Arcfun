@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * Sticky nav — Arcfun brand mark + wordmark, search, ArcStudio, Arc OTC, wallet chip.
+ * Sticky nav — Arcfun brand mark + wordmark, Crucible, Studio, OTC, Profile, wallet chip.
  * Mobile: Home, Crucible, ArcStudio, Create collection, Profile, Arc OTC, Docs.
  */
 import Link from 'next/link'
@@ -68,6 +68,12 @@ export function SiteHeader() {
 
   const onStudio = pathname.startsWith('/studio')
   const onOtc = pathname.startsWith('/otc')
+  const onProfile =
+    pathname.startsWith('/creator') ||
+    pathname.startsWith('/portfolio') ||
+    pathname === '/studio/me'
+  const profileHref =
+    isConnected && address ? (onStudio ? '/studio/me' : `/creator/${address}`) : '/portfolio'
 
   const onSearch = (e: FormEvent) => {
     e.preventDefault()
@@ -124,6 +130,7 @@ export function SiteHeader() {
               ['/crucible', 'Crucible', pathname.startsWith('/crucible')],
               ['/studio', 'Studio', onStudio],
               ['/otc', 'OTC', onOtc],
+              [profileHref, 'Profile', onProfile],
             ] as const
           ).map(([href, label, on]) => (
             <Link
