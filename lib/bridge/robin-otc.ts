@@ -91,6 +91,9 @@ export function reserveAuthDomain(verifyingContract: Address, chainId: number = 
 export const OTC_DEFAULT_FEE_BPS = 200
 /** Discounted fee for ≥0.01% $ROBIN supply holders (when oracle voucher is used). */
 export const OTC_ROBIN_FEE_BPS = 100
+/** Full waiver for ≥0.1% $EVE supply holders (when oracle voucher is used). Beats the ROBIN
+ *  discount whenever both apply — see app/api/bridge/otc-voucher/route.ts. */
+export const OTC_EVE_FEE_BPS = 0
 
 function envAddr(...keys: string[]): Address {
   for (const k of keys) {
