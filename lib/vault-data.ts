@@ -130,7 +130,7 @@ export const VAULT_STEPS = [
   {
     n: '01',
     title: 'Instant fees settle as USDC',
-    body: 'Eve Instant creator fees collect in USDC on Arc. Nothing is split differently. The vault only reads what Instant already pays.',
+    body: 'Instant platform fees collect in USDC on Arc. Nothing is split differently — this is the platform’s own cut, not creators’. The vault only reads what Instant already pays.',
   },
   {
     n: '02',
@@ -146,14 +146,14 @@ export const VAULT_STEPS = [
 
 export const VAULT_STACK = [
   { label: 'Arc', detail: 'Settlement · chain 5042' },
-  { label: 'USDC', detail: 'Instant creator proceeds' },
+  { label: 'USDC', detail: 'Instant platform proceeds' },
   { label: 'ERC-4626', detail: 'Single curated vault' },
   { label: 'Keeper', detail: 'Buys only approved RWAs' },
   { label: 'Circle window', detail: 'Public RWAs mid-Sep' },
 ]
 
 export const VAULT_FLOW_LEGS = [
-  { n: '01', title: 'Instant', body: 'Creator fees accrue as USDC on each Eve Instant launch.', live: true },
+  { n: '01', title: 'Instant', body: 'The platform’s own fee cut accrues as USDC on each Eve Instant launch.', live: true },
   { n: '02', title: 'Escrow', body: 'USDC sits idle. No split change. No keeper yet.', live: true },
   { n: '03', title: 'Yes', body: 'Arcfun signs routing. Caps, curator list, and the 4626 go live.', live: false },
   { n: '04', title: 'Keeper', body: 'Buys only approved RWAs and deposits the lot into the vault.', live: false },
