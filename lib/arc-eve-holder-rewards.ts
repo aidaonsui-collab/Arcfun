@@ -32,6 +32,7 @@ import { type Address, erc20Abi, maxUint256 } from 'viem'
 import { ARC, ARC_INSTANT_LOCKER_MONLOCK, arcPublicClient, arcServerWalletClient } from './contracts-arc'
 import { minOutFromSlippage } from './arc-swap'
 import { getRawHolderBalances } from './evm-holders'
+import cycle1Backfill from './eve-rewards-cycle1-backfill.json'
 
 export const EVE_TOKEN = '0x19209E55049bc613c5cC8b66B7DF7824096e78CF' as Address
 const EVE_POSITION_ID = 4695n
@@ -70,6 +71,11 @@ const MAX_RECIPIENTS_PER_BATCH = 75
 const STATE_KEY = 'arcfun:everewards:state'
 const LOG_KEY = 'arcfun:everewards:log'
 const LOG_CAP = 200
+/** Redis hash: lowercased holder address -> cumulative atomic REWARD_TOKEN (18dp) actually sent
+ *  to them so far. Same shape as the holder ledger in lib/evm-holders.ts (raw units, hash keyed
+ *  by address) — lets a wallet's profile page show "how much $COOL have I earned" with a single
+ *  hget instead of re-deriving it from disperse-batch history on every page view. */
+const CLAIMED_KEY = 'arcfun:everewards:claimed'
 
 export interface EveRewardsState {
   /** True once a tick has actually observed the on-chain beneficiary equal to this keeper. Before
@@ -254,6 +260,68 @@ async function appendLog(entry: CycleLogEntry): Promise<void> {
   }
 }
 
+/** Add one successfully-sent batch's amounts onto each recipient's running total. Called only
+ *  after disperseToken's tx has actually confirmed — never for a batch that failed or wasn't
+ *  attempted, so this can't overstate what a wallet has really received. Same
+ *  read-current/apply-delta/write-back shape as evm-holders.ts's ledger, for the same reason: a
+ *  full-hash read/write here would cost more the longer the holder list grows, for no benefit
+ *  when only a handful of addresses changed. */
+async function creditClaimed(batch: { address: Address; amount: bigint }[]): Promise<void> {
+  if (!batch.length) return
+  try {
+    const addrs = batch.map((r) => r.address.toLowerCase())
+    const current = (await kv.hmget<Record<string, string>>(CLAIMED_KEY, ...addrs)) ?? {}
+    const updates: Record<string, string> = {}
+    for (const { address, amount } of batch) {
+      const a = address.toLowerCase()
+      const prev = current[a] ? BigInt(current[a]) : 0n
+      updates[a] = (prev + amount).toString()
+    }
+    await kv.hset(CLAIMED_KEY, updates)
+  } catch (e) {
+    // Best-effort tracking only — never let a KV hiccup here undo or retry a disperse that
+    // already succeeded on-chain.
+    console.warn('[arc-eve-holder-rewards] creditClaimed', (e as Error).message?.slice(0, 200))
+  }
+}
+
+/** How much REWARD_TOKEN a wallet has actually been sent by this program so far, atomic units. */
+export async function getClaimedCoolRewards(wallet: Address): Promise<bigint> {
+  try {
+    const raw = await kv.hget<string>(CLAIMED_KEY, wallet.toLowerCase())
+    return raw ? BigInt(raw) : 0n
+  } catch {
+    return 0n
+  }
+}
+
+const BACKFILL_DONE_KEY = 'arcfun:everewards:claimed:backfilled'
+
+/**
+ * One-time seed for the very first disperse cycle (2026-09-04, 4 batches, 260 recipients), which
+ * ran before per-wallet tracking (creditClaimed above) existed. Sourced from the underlying
+ * ERC-20 Transfer logs on $COOL from ArcDisperse for that cycle's exact block range — verified to
+ * sum to 2118206219140240659049, which matches that cycle's EveRewardsState.totalDistributedReward
+ * exactly. Every cycle since has been tracked incrementally as it happened; this fills the one
+ * gap before that existed. Guarded by BACKFILL_DONE_KEY so calling this more than once (or
+ * concurrently) never double-credits.
+ */
+export async function backfillCycle1Claimed(): Promise<{ ok: boolean; applied: boolean }> {
+  try {
+    if (await kv.get<boolean>(BACKFILL_DONE_KEY)) return { ok: true, applied: false }
+    const entries = Object.entries(cycle1Backfill as Record<string, string>).map(([address, amount]) => ({
+      address: address as Address,
+      amount: BigInt(amount),
+    }))
+    await creditClaimed(entries)
+    await kv.set(BACKFILL_DONE_KEY, true)
+    return { ok: true, applied: true }
+  } catch (e) {
+    console.warn('[arc-eve-holder-rewards] backfillCycle1Claimed', (e as Error).message?.slice(0, 200))
+    return { ok: false, applied: false }
+  }
+}
+
 /** Cached for the process lifetime — EVE's pool token0/token1 order never changes. */
 let usdcIs0Cache: boolean | null = null
 async function usdcIsToken0(client: ReturnType<typeof arcPublicClient>): Promise<boolean> {
@@ -358,6 +426,11 @@ export async function runEveHolderRewardsCycle(privateKey: `0x${string}`): Promi
 
   const state = await loadState(keeper)
   const now = Date.now()
+
+  // No-ops after the first successful run (BACKFILL_DONE_KEY-guarded) — self-heals the one gap
+  // in per-wallet tracking (the cycle that ran before creditClaimed existed) on whatever cron
+  // tick happens to run this code first, rather than needing a separate manual trigger.
+  await backfillCycle1Claimed()
 
   if (state.ended) {
     return { ok: true, ended: true, state }
@@ -577,6 +650,7 @@ export async function runEveHolderRewardsCycle(privateKey: `0x${string}`): Promi
             await client.waitForTransactionReceipt({ hash })
             txs.push(hash)
             totalSent += batchTotal
+            await creditClaimed(batch)
           } catch (e) {
             // Stop on the first failed batch — funds for the remaining batches stay in the
             // keeper wallet and are simply retried (re-split against then-current balances)
