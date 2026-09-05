@@ -24,11 +24,25 @@ import { profileEditMessage, followMessage } from '@/lib/arc-auth'
 import { uploadImage } from '@/lib/upload-image'
 import { ARC_EXPLORER, ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { ageLabel, fmtUsd, tileGradient } from '@/lib/ui-format'
+import { formatToken } from '@/lib/token-format'
 import { PortfolioDesk } from '@/components/PortfolioDesk'
 import type { Address } from 'viem'
 import { cdnImage } from '@/lib/cdn-image'
 
 type PnlRange = CreatorPnl['range']
+
+/** lib/arc-eve-holder-rewards.ts EVE_TOKEN, duplicated here rather than imported — that module
+ *  pulls in server-only deps (private-key signing, @vercel/kv) that a client component must
+ *  never bundle, even if the actual server-side code would tree-shake away. */
+const EVE_TOKEN = '0x19209E55049bc613c5cC8b66B7DF7824096e78CF'
+
+function fmtCool(raw: bigint): string {
+  const n = Number(formatToken(raw, 18))
+  if (!Number.isFinite(n) || n === 0) return '0'
+  if (n >= 1000) return n.toLocaleString(undefined, { maximumFractionDigits: 0 })
+  if (n >= 1) return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  return n.toPrecision(3)
+}
 
 export default function CreatorPage() {
   const params = useParams()
@@ -114,6 +128,48 @@ export default function CreatorPage() {
       setClaimLocker(null)
     }
   }, [claimOk, load, resetClaim])
+
+  // $EVE holder-rewards tile (see lib/arc-eve-holder-rewards.ts) — only meaningful for the
+  // connected wallet's own profile, so this deliberately checks `connected` against
+  // `profile.address` directly rather than waiting on `isSelf` below (hooks run before it).
+  const [coolRewards, setCoolRewards] = useState<{
+    claimed: bigint
+    ended: boolean
+    expiresAt: number | null
+  } | null>(null)
+
+  const loadCoolRewards = useCallback(async () => {
+    if (!connected || !profile || connected.toLowerCase() !== profile.address.toLowerCase()) {
+      setCoolRewards(null)
+      return
+    }
+    try {
+      const res = await fetch(
+        `/api/arc/keeper/eve-holder-rewards?status=1&wallet=${connected}`,
+        { cache: 'no-store' },
+      )
+      const data = (await res.json()) as {
+        ok?: boolean
+        walletClaimed?: string
+        state?: { ended?: boolean; expiresAt?: number }
+      }
+      if (!data.ok) {
+        setCoolRewards(null)
+        return
+      }
+      setCoolRewards({
+        claimed: data.walletClaimed ? BigInt(data.walletClaimed) : 0n,
+        ended: Boolean(data.state?.ended),
+        expiresAt: data.state?.expiresAt ?? null,
+      })
+    } catch {
+      setCoolRewards(null)
+    }
+  }, [connected, profile])
+
+  useEffect(() => {
+    void loadCoolRewards()
+  }, [loadCoolRewards])
 
   const isSelf =
     !!connected &&
@@ -384,6 +440,40 @@ export default function CreatorPage() {
         </section>
 
         {isSelf ? <PortfolioDesk wallet={profile.address} /> : null}
+
+        {isSelf && coolRewards ? (
+          <section className="border border-hair rounded-[24px] bg-s1 p-5 sm:p-6 mb-5">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div>
+                <h2 className="m-0 text-[17px] font-semibold tracking-tightish">
+                  $COOL holder rewards
+                </h2>
+                <p className="m-0 mt-1 text-[13px] text-t3 max-w-lg">
+                  A share of $EVE&apos;s platform LP fees, swapped into $COOL and sent to every
+                  EVE holder automatically.{' '}
+                  {coolRewards.ended
+                    ? 'This program has ended.'
+                    : coolRewards.expiresAt
+                      ? `Runs through ${new Date(coolRewards.expiresAt).toLocaleDateString()}.`
+                      : null}
+                </p>
+              </div>
+              <div className="text-left sm:text-right shrink-0">
+                <p className="m-0 text-[22px] font-semibold tabular-nums tracking-tightish text-lime-t">
+                  {fmtCool(coolRewards.claimed)}{' '}
+                  <span className="text-[14px] font-medium text-t3">COOL</span>
+                </p>
+                <p className="m-0 mt-0.5 text-[12px] text-t3">received so far</p>
+              </div>
+            </div>
+            <Link
+              href={`/token/${EVE_TOKEN}`}
+              className="mt-3 inline-flex items-center gap-1 text-[12px] font-semibold text-t3 hover:text-white"
+            >
+              View $EVE <ExternalLink className="h-3 w-3" />
+            </Link>
+          </section>
+        ) : null}
 
         {/* PnL */}
         <section className="border border-hair rounded-[24px] bg-s1 p-5 sm:p-6 mb-5">
