@@ -21,10 +21,10 @@ const wagmiConfig = createConfig({
             projectId: wcProjectId,
             showQrModal: true,
             metadata: {
-              name: 'ArcFun',
+              name: 'eve.fun',
               description: 'Instant token launches on Arc',
               url: process.env.NEXT_PUBLIC_APP_URL || 'https://arcfun.lol',
-              icons: [`${process.env.NEXT_PUBLIC_APP_URL || 'https://arcfun.lol'}/favicon.ico`],
+              icons: [`${process.env.NEXT_PUBLIC_APP_URL || 'https://www.arcfun.co'}/favicon-192.png`],
             },
           }),
         ]

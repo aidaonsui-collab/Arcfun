@@ -69,7 +69,7 @@ export const ARCFUN_MCP = {
   venue: 'https://www.arcfun.co',
   mcpUrl: 'https://www.arcfun.co/api/mcp',
   stack: {
-    venue: 'ArcFun Instant / Instant Reflection on Uniswap V3 TOKEN/USDC',
+    venue: 'eve.fun Instant / Instant Reflection on Uniswap V3 TOKEN/USDC',
     wallet: 'Circle Agent Stack (Agent Wallets, Circle CLI, spend policies)',
     agent: 'Eve (MCP connection, tools, approval: always on submit)',
     alsoWorksWith: ['Claude Code', 'Cursor', 'Codex', 'OpenClaw'],
@@ -225,7 +225,7 @@ export async function mcpGetToken(address: string) {
   const token = requireAddr(address, 'token')
   if (isHiddenToken(token)) throw new Error('token not listed')
   let pool = await fetchArcPoolToken(token)
-  if (!pool) throw new Error('token not found on ArcFun')
+  if (!pool) throw new Error('token not found on eve.fun')
   try {
     const { enrichTokensWithIndexVolume } = await import('./arc-indexer/run')
     ;[pool] = await enrichTokensWithIndexVolume([pool])

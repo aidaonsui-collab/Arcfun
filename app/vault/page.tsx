@@ -4,7 +4,7 @@ import { VaultPageClient } from '@/components/vault/VaultPageClient'
 export const revalidate = 60
 
 export const metadata: Metadata = {
-  title: 'Eve Vault · Arcfun',
+  title: 'Eve Vault · eve.fun',
   description:
     'When RWAs land on Arc, Eve creator rewards buy them into a vault. Stub only; no fees move yet.',
 }

@@ -75,8 +75,8 @@ export function createArcDatafeed(token: string, symbol: string) {
           supported_resolutions: SUPPORTED_RESOLUTIONS,
           volume_precision: 3,
           data_status: 'streaming',
-          exchange: 'ArcFun',
-          listed_exchange: 'ArcFun',
+          exchange: 'eve.fun',
+          listed_exchange: 'eve.fun',
           format: 'price',
         })
       }, 0)

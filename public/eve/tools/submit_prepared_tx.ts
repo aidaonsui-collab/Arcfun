@@ -1,5 +1,5 @@
 /**
- * Eve tool: send one unsigned step from ArcFun prepare_launch / prepare_swap
+ * Eve tool: send one unsigned step from eve.fun prepare_launch / prepare_swap
  * through Circle Agent Stack (`circle wallet execute`).
  *
  * Copy to agent/tools/submit_prepared_tx.ts in an Eve project.
@@ -38,7 +38,7 @@ function nativeAmount(valueWei: string): string | null {
 
 export default defineTool({
   description:
-    'Submit one prepared ArcFun transaction (approve, create, or swap) via Circle Agent Stack using `circle wallet execute`. Human approval required. ArcFun MCP does not sign.',
+    'Submit one prepared eve.fun transaction (approve, create, or swap) via Circle Agent Stack using `circle wallet execute`. Human approval required. eve.fun MCP does not sign.',
   inputSchema: z.object({
     to: z.string().describe('Contract address'),
     functionSignature: z.string().describe('ABI signature, e.g. approve(address,uint256)'),
@@ -51,7 +51,7 @@ export default defineTool({
   approval: always(),
   async execute({ to, functionSignature, args, value, chainId, wallet, description }) {
     if (chainId !== 5042 && chainId !== 5042002) {
-      throw new Error('ArcFun only on Arc mainnet (5042) or Arc testnet (5042002)')
+      throw new Error('eve.fun only on Arc mainnet (5042) or Arc testnet (5042002)')
     }
     const address = wallet || process.env.CIRCLE_WALLET_ADDRESS
     if (!address) {

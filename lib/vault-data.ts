@@ -155,7 +155,7 @@ export const VAULT_STACK = [
 export const VAULT_FLOW_LEGS = [
   { n: '01', title: 'Instant', body: 'Creator fees accrue as USDC on each Eve Instant launch.', live: true },
   { n: '02', title: 'Escrow', body: 'USDC sits idle. No split change. No keeper yet.', live: true },
-  { n: '03', title: 'Yes', body: 'Arcfun signs routing. Caps, curator list, and the 4626 go live.', live: false },
+  { n: '03', title: 'Yes', body: 'eve.fun signs routing. Caps, curator list, and the 4626 go live.', live: false },
   { n: '04', title: 'Keeper', body: 'Buys only approved RWAs and deposits the lot into the vault.', live: false },
   { n: '05', title: 'Board', body: 'TVL, weights, and your share print here. Unwind is a redeem.', live: false },
 ]

@@ -1,5 +1,5 @@
 /**
- * Eve MCP connection to the ArcFun venue.
+ * Eve MCP connection to the eve.fun venue.
  *
  * Copy to agent/connections/arcfun.ts in an `eve init` project.
  * Tools surface as arcfun__about, arcfun__list_tokens, arcfun__prepare_swap, …
@@ -12,7 +12,7 @@ import { defineMcpClientConnection } from 'eve/connections'
 export default defineMcpClientConnection({
   url: 'https://www.arcfun.co/api/mcp',
   description:
-    'ArcFun Instant and Instant Reflection launchpad on Arc (chain 5042). List tokens, quote USDC buys and sells, and prepare unsigned launches and swaps. Sign with Circle Agent Stack via submit_prepared_tx. Eve is the agent runtime.',
+    'eve.fun Instant and Instant Reflection launchpad on Arc (chain 5042). List tokens, quote USDC buys and sells, and prepare unsigned launches and swaps. Sign with Circle Agent Stack via submit_prepared_tx. Eve is the agent runtime.',
   tools: {
     allow: [
       'about',

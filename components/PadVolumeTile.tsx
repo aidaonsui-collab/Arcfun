@@ -18,7 +18,7 @@ export function PadVolumeTile({
   return (
     <div
       className={`inline-grid grid-cols-2 self-start rounded-[14px] border border-hair bg-s2 overflow-hidden ${className}`}
-      title="Uniswap volume across Arcfun launches"
+      title="Uniswap volume across eve.fun launches"
     >
       <div className="min-w-[7.25rem] px-3.5 py-2">
         <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-t3">24h vol</div>

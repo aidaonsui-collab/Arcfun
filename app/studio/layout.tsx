@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: `${SITE}/og-studio.png?v=2`,
+        url: `${SITE}/og-studio.png?v=3`,
         width: 1600,
         height: 900,
         alt: 'ArcStudio — Launch and trade NFTs on Arc. Mint in USDC.',
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: TITLE,
     description: DESCRIPTION,
-    images: [`${SITE}/og-studio.png?v=2`],
+    images: [`${SITE}/og-studio.png?v=3`],
   },
 }
 

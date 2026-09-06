@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
   const creator = await readPadCreator(token as Address)
   if (!creator) {
-    return NextResponse.json({ error: 'not an ArcFun launch' }, { status: 404 })
+    return NextResponse.json({ error: 'not an eve.fun launch' }, { status: 404 })
   }
 
   const parsed = parseAuthFields(body)

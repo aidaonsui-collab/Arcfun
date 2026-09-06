@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
   // Same chain-derived check every other consumer uses — never trusts the request body.
   const creator = await readPadCreator(token as Address)
   if (!creator) {
-    return NextResponse.json({ ok: false, error: 'not an ArcFun launch' }, { status: 404 })
+    return NextResponse.json({ ok: false, error: 'not an eve.fun launch' }, { status: 404 })
   }
 
   const client = arcPublicClient()
