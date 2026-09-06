@@ -3,7 +3,7 @@ export function BrandMark({ className = "w-[26px] h-[26px]" }: { className?: str
   return (
     // eslint-disable-next-line @next/next/no-img-element -- small brand glyph; keep crisp pixels
     <img
-      src="/eve-star.png"
+      src="/eve-star.png?v=4"
       alt=""
       width={26}
       height={26}
