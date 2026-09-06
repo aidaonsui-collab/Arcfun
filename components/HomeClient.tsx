@@ -118,6 +118,16 @@ export function HomeClient({
     return list
   }, [tokens, filter, sort, kind])
 
+  const padVolume = useMemo(() => {
+    let volume24h = 0
+    let volumeAll = 0
+    for (const t of tokens) {
+      volume24h += t.volume24h ?? 0
+      volumeAll += t.volumeAll ?? 0
+    }
+    return { volume24h, volumeAll }
+  }, [tokens])
+
   useEffect(() => {
     if (!kindOpen) return
     const onDoc = (e: MouseEvent) => {
@@ -134,7 +144,7 @@ export function HomeClient({
       </Suspense>
       <div className="relative z-10 max-w-[1120px] mx-auto px-4 sm:px-6">
         <section className="pt-6 md:pt-8">
-          <HeroBanners />
+          <HeroBanners volume24h={padVolume.volume24h} volumeAll={padVolume.volumeAll} />
         </section>
 
         <section id="all-launches" className="mt-8">

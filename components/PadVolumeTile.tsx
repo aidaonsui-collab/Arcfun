@@ -20,13 +20,13 @@ export function PadVolumeTile({
       className={`inline-grid grid-cols-2 self-start rounded-[14px] border border-hair bg-s2 overflow-hidden ${className}`}
       title="Uniswap volume across Arcfun launches"
     >
-      <div className="px-3.5 py-2 w-[7.25rem]">
+      <div className="min-w-[7.25rem] px-3.5 py-2">
         <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-t3">24h vol</div>
         <div className="mt-0.5 text-[15px] font-semibold tabular-nums tracking-tightish text-white">
           {fmtUsd(v24)}
         </div>
       </div>
-      <div className="px-3.5 py-2 w-[7.25rem] border-l border-hair">
+      <div className="min-w-[7.25rem] px-3.5 py-2 border-l border-hair">
         <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-t3">All time</div>
         <div className="mt-0.5 text-[15px] font-semibold tabular-nums tracking-tightish text-white">
           {fmtUsd(vall)}
