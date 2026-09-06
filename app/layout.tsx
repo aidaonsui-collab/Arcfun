@@ -5,8 +5,12 @@ import { SiteHeader } from '@/components/SiteHeader'
 import { Footer } from '@/components/Footer'
 import { Analytics } from '@vercel/analytics/next'
 
-const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://www.arcfun.co'
-const TITLE = 'Arcfun — Instant token launches on Arc'
+const SITE_URL = (
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  process.env.NEXT_PUBLIC_APP_URL ||
+  'https://www.eve.fun'
+).replace('arcfun.vercel.app', 'www.eve.fun')
+const TITLE = 'eve.fun — Instant token launches on Arc'
 const DESCRIPTION =
   'Launch a token on Arc mainnet in one transaction. Full supply straight onto Uniswap V3, LP locked.'
 
@@ -27,12 +31,12 @@ export const metadata: Metadata = {
     title: TITLE,
     description: DESCRIPTION,
     url: SITE_URL,
-    siteName: 'Arcfun',
+    siteName: 'eve.fun',
     locale: 'en_US',
     type: 'website',
     images: [
       {
-        url: '/og.png',
+        url: 'https://www.eve.fun/og-eve.png',
         width: 1200,
         height: 630,
         alt: 'eve.fun — Instant token launches on Arc',
@@ -43,7 +47,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: TITLE,
     description: DESCRIPTION,
-    images: ['/og.png'],
+    images: ['https://www.eve.fun/og-eve.png'],
   },
 }
 
