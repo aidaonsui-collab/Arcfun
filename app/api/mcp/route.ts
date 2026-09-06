@@ -37,9 +37,9 @@ const handler = createMcpHandler(
     server.registerTool(
       'about',
       {
-        title: 'About ArcFun + Circle + Eve',
+        title: 'About eve.fun + Circle + Eve',
         description:
-          'How ArcFun, Circle Agent Stack, and Eve fit together. Call this first. Venue is ArcFun Instant/Reflection on Arc. Wallet is Circle Agent Wallet / CLI. Agent runtime is Eve or any MCP client.',
+          'How eve.fun, Circle Agent Stack, and Eve fit together. Call this first. Venue is eve.fun Instant/Reflection on Arc. Wallet is Circle Agent Wallet / CLI. Agent runtime is Eve or any MCP client.',
         inputSchema: z.object({}),
       },
       async () => {
@@ -54,8 +54,8 @@ const handler = createMcpHandler(
     server.registerTool(
       'list_tokens',
       {
-        title: 'List ArcFun tokens',
-        description: 'List live Instant and Instant Reflection tokens on ArcFun, sorted by market cap.',
+        title: 'List eve.fun tokens',
+        description: 'List live Instant and Instant Reflection tokens on eve.fun, sorted by market cap.',
         inputSchema: z.object({
           limit: z.number().int().min(1).max(80).optional().describe('Max tokens to return (default 40)'),
         }),
@@ -147,7 +147,7 @@ const handler = createMcpHandler(
       'get_candles',
       {
         title: 'Get candles',
-        description: 'OHLCV candles from the indexed swap tape. Same buckets as the ArcFun chart.',
+        description: 'OHLCV candles from the indexed swap tape. Same buckets as the eve.fun chart.',
         inputSchema: z.object({
           address: z.string().describe('Token 0x address'),
           interval: z.enum(['5M', '15M', '1H', '1D']).optional(),
@@ -167,7 +167,7 @@ const handler = createMcpHandler(
       {
         title: 'Prepare an Instant or Reflection launch',
         description:
-          'Build unsigned approve + create transactions for an ArcFun launch. Does not send. Sign with a Circle Agent Wallet (or any Arc wallet) via Eve submit_prepared_tx. Creation fee is 0.10 native USDC. First buy is ERC-20 USDC.',
+          'Build unsigned approve + create transactions for an eve.fun launch. Does not send. Sign with a Circle Agent Wallet (or any Arc wallet) via Eve submit_prepared_tx. Creation fee is 0.10 native USDC. First buy is ERC-20 USDC.',
         inputSchema: z.object({
           name: z.string().min(1).max(32),
           symbol: z.string().min(1).max(12),
@@ -275,7 +275,7 @@ async function withCors(req: Request) {
 
   let settleHeader: string | undefined
   if (tool) {
-    const requirements = buildRequirements(new URL(req.url).toString(), `ArcFun MCP tool: ${tool}`)
+    const requirements = buildRequirements(new URL(req.url).toString(), `eve.fun MCP tool: ${tool}`)
 
     const decoded = decodePaymentHeader(req.headers.get('X-PAYMENT'))
     if (!decoded.ok) {

@@ -54,7 +54,7 @@ export function blitzLaunchRequirements(resource: string): PaymentRequirements {
     asset: ARC.USDC as Address,
     payTo,
     resource,
-    description: 'Arcfun Blitz Instant launch (nanogas)',
+    description: 'eve.fun Blitz Instant launch (nanogas)',
     mimeType: 'application/json',
     maxTimeoutSeconds: 600,
     extra: { name: 'USDC', version: '2', decimals: USDC_DECIMALS, chainId: ARC_CHAIN_ID },

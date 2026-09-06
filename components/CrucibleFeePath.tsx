@@ -76,9 +76,9 @@ function feeLegBlurb(leg: FeeSplitLeg): string {
     case 'projectBurn':
       return 'This USDC buys the launch token and sends it to the dead wallet.'
     case 'platform':
-      return "Arcfun's cut. Keeps the pad running."
+      return "eve.fun's cut. Keeps the pad running."
     case 'referrer':
-      return 'Instant payout on Arcfun buys through your link. Extra to the 1% pool fee. Direct Uni swaps skip this.'
+      return 'Instant payout on eve.fun buys through your link. Extra to the 1% pool fee. Direct Uni swaps skip this.'
     case 'holders':
       return 'USDC for people holding this token. Claim from Profile after the keeper calls reflect().'
     default:

@@ -91,7 +91,7 @@ export async function tokenOgImage(t: TokenOgInput) {
               marginBottom: 14,
             }}
           >
-            Arcfun
+            eve.fun
           </div>
           <div
             style={{
@@ -117,7 +117,7 @@ export async function tokenOgImage(t: TokenOgInput) {
             {name}
           </div>
           <div style={{ display: 'flex', fontSize: 20, color: 'rgba(255,255,255,0.45)' }}>
-            Instant · Trade in USDC · arcfun.co
+            Instant · Trade in USDC · eve.fun
           </div>
         </div>
       </div>
@@ -127,5 +127,5 @@ export async function tokenOgImage(t: TokenOgInput) {
 }
 
 export function fallbackTokenOgImage() {
-  return fallbackOgImage('Arcfun')
+  return fallbackOgImage('eve.fun')
 }

@@ -23,7 +23,7 @@ export function generateStaticParams(): { address: string }[] {
   return []
 }
 
-const SITE = 'Arcfun'
+const SITE = 'eve.fun'
 const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.arcfun.co').replace(/\/$/, '')
 
 function shortAddr(a: string): string {
@@ -53,7 +53,7 @@ export async function generateMetadata({
   const title = `$${symbol} — ${name} | ${SITE}`
   const description = meta?.description?.replace(/\s+/g, ' ').trim()
     ? meta.description!.replace(/\s+/g, ' ').trim().slice(0, 220)
-    : `Trade $${symbol} on Arcfun. Instant launch on Arc, quoted in USDC.`
+    : `Trade $${symbol} on eve.fun. Instant launch on Arc, quoted in USDC.`
 
   return {
     title,

@@ -486,7 +486,7 @@ function Holdings({
       <p className="m-0 text-[11px] font-semibold uppercase tracking-[0.14em] text-t3">Holdings</p>
       <h2 className="m-0 mt-2 text-[28px] font-semibold tracking-display">Your Instant clip, on the vault.</h2>
       <p className="mt-3 mb-0 max-w-xl text-t2">
-        Positions stay empty until Arcfun signs fee routing and an RWA lists on Arc. Connect with
+        Positions stay empty until eve.fun signs fee routing and an RWA lists on Arc. Connect with
         the header wallet to see how the board will read.
       </p>
 
@@ -494,7 +494,7 @@ function Holdings({
         <div className="mt-6 rounded-[24px] border border-hair bg-s1 p-6">
           <p className="m-0 text-[17px] font-semibold tracking-tightish">Connect to read a position</p>
           <p className="mt-2 mb-0 max-w-md text-sm text-t3">
-            Use Connect in the Arcfun header. No vault contract to sign. No funds move.
+            Use Connect in the eve.fun header. No vault contract to sign. No funds move.
           </p>
         </div>
       ) : (
@@ -617,7 +617,7 @@ function CashFlow({ preview }: { preview: boolean }) {
         {rows.length === 0 ? (
           <li className="py-10 text-sm text-t3">
             No fees move yet. Instant still pays creators in USDC. A keeper will only route after an
-            approved RWA lists on 5042 and Arcfun signs the split.
+            approved RWA lists on 5042 and eve.fun signs the split.
           </li>
         ) : (
           rows.map((ev) => {

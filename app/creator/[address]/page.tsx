@@ -201,7 +201,7 @@ export default function CreatorPage() {
     if (!profile || typeof window === 'undefined') return
     const url = window.location.href
     if (navigator.share) {
-      void navigator.share({ title: `Creator ${profile.short} on Arcfun`, url }).catch(() => {
+      void navigator.share({ title: `Creator ${profile.short} on eve.fun`, url }).catch(() => {
         void navigator.clipboard.writeText(url)
       })
     } else {
@@ -389,7 +389,7 @@ export default function CreatorPage() {
                 <p className="m-0 mt-3 text-sm text-t2 max-w-xl whitespace-pre-wrap">{profile.meta.bio}</p>
               ) : (
                 <p className="m-0 mt-3 text-sm text-t3 max-w-xl">
-                  Tokens launched on Arcfun · Instant, Reflection, and curve.
+                  Tokens launched on eve.fun · Instant, Reflection, and curve.
                 </p>
               )}
             </div>

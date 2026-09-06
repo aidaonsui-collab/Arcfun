@@ -45,7 +45,7 @@ export default function ArcOtcPage() {
       <div className="arc-bridge-inner otc-wide">
         <header className="arc-bridge-hero">
           <p className="arc-bridge-kicker">
-            {tab === 'orders' ? 'Arcfun · My orders' : 'Arcfun · Base · ARB → Arc USDC'}
+            {tab === 'orders' ? 'eve.fun · My orders' : 'eve.fun · Base · ARB → Arc USDC'}
           </p>
           <h1 className="arc-bridge-title">
             <span>Arc OTC</span>

@@ -62,7 +62,7 @@ function ReferralRow({ wallet }: { wallet: string }) {
       <div className="px-5 py-4 border-b border-hair2">
         <h2 className="m-0 text-[17px] font-semibold tracking-tightish">Referrer</h2>
         <p className="m-0 mt-0.5 text-[13px] text-t3">
-          Share this anytime after a launch. Buys through Arcfun with your code pay you 0.05% of
+          Share this anytime after a launch. Buys through eve.fun with your code pay you 0.05% of
           the USDC in, instantly. Direct Uni swaps do not.
         </p>
       </div>

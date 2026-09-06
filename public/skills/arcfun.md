@@ -1,22 +1,22 @@
 ---
 name: arcfun
 description: >
-  Launch and trade Instant / Instant Reflection tokens on ArcFun (Arc, chain 5042).
-  Use when the user wants to list ArcFun tokens, quote a USDC buy or sell, launch a meme
+  Launch and trade Instant / Instant Reflection tokens on eve.fun (Arc, chain 5042).
+  Use when the user wants to list eve.fun tokens, quote a USDC buy or sell, launch a meme
   or reflection token, or wire an Eve agent to the pad with Circle Agent Stack as the wallet.
 ---
 
-# ArcFun + Circle Agent Stack + Eve
+# eve.fun + Circle Agent Stack + Eve
 
-ArcFun is the venue (Uniswap V3 TOKEN/USDC Instant pad).
+eve.fun is the venue (Uniswap V3 TOKEN/USDC Instant pad).
 Circle Agent Stack is the wallet (Agent Wallets, Circle CLI, spend policies).
 Eve is the agent (MCP connection, tools, approvals). Any MCP client also works.
 
-This skill never asks ArcFun to hold a key. The MCP only reads the pad and returns unsigned transactions. Signing is `circle wallet execute`.
+This skill never asks eve.fun to hold a key. The MCP only reads the pad and returns unsigned transactions. Signing is `circle wallet execute`.
 
 ## Connect
 
-Add the ArcFun MCP server (Streamable HTTP):
+Add the eve.fun MCP server (Streamable HTTP):
 
 ```json
 {
@@ -57,7 +57,7 @@ Then:
 1. `circle wallet login you@example.com`
 2. `circle wallet list --chain ARC --type agent` (or `ARC-TESTNET`)
 3. Fund the wallet on Arc. Gas is native USDC.
-4. Cap spend and allowlist ArcFun contracts:
+4. Cap spend and allowlist eve.fun contracts:
 
 ```bash
 circle wallet limit set --address $CIRCLE_WALLET_ADDRESS --chain ARC \
@@ -87,9 +87,9 @@ circle wallet execute "approve(address,uint256)" 0xFactory 100000000 \
   --chain ARC --output json
 ```
 
-Circle codegen MCP (`api.circle.com/v1/codegen/mcp`) writes Circle SDK code. It does not sign ArcFun trades. Use Agent Wallet / CLI.
+Circle codegen MCP (`api.circle.com/v1/codegen/mcp`) writes Circle SDK code. It does not sign eve.fun trades. Use Agent Wallet / CLI.
 
-`circle blockchain list` is the source of truth for the Arc `--chain` flag. Circle currently publishes Arc testnet as `ARC-TESTNET`. On live ArcFun (5042) use the Arc identifier your CLI lists.
+`circle blockchain list` is the source of truth for the Arc `--chain` flag. Circle currently publishes Arc testnet as `ARC-TESTNET`. On live eve.fun (5042) use the Arc identifier your CLI lists.
 
 ## Eve
 

@@ -3,9 +3,9 @@ import Link from 'next/link'
 import { CrucibleFeePath } from '@/components/CrucibleFeePath'
 
 export const metadata: Metadata = {
-  title: 'Docs — Arcfun',
+  title: 'Docs — eve.fun',
   description:
-    'Arcfun pair types, LP fee splits, ArcStudio NFT launchpad, Profile reflection claims, and how Instant launches work on Arc.',
+    'eve.fun pair types, LP fee splits, ArcStudio NFT launchpad, Profile reflection claims, and how Instant launches work on Arc.',
 }
 
 const TOC = [
@@ -26,7 +26,7 @@ export default function DocsPage() {
           Docs
         </p>
         <h1 className="m-0 mt-2 text-[32px] sm:text-[40px] font-semibold tracking-display leading-[1.12]">
-          How Arcfun works
+          How eve.fun works
         </h1>
         <p className="mt-3 mb-0 max-w-2xl text-[16px] text-t2 leading-relaxed">
           Instant token launches on Arc. Full supply onto Uniswap V3 from block one, always quoted
@@ -219,7 +219,7 @@ export default function DocsPage() {
             </li>
             <li>
               Referrals are per buy, not stamped at launch. Share <code className="text-t2">/r/&#123;code&#125;</code> anytime.
-              Buys through Arcfun pay that code <strong className="text-white font-semibold">0.05%</strong> of the USDC in,
+              Buys through eve.fun pay that code <strong className="text-white font-semibold">0.05%</strong> of the USDC in,
               instantly. Direct Uni swaps do not.
             </li>
           </ul>
@@ -390,13 +390,13 @@ export default function DocsPage() {
         <section id="agents" className="scroll-mt-24 mt-14">
           <h2 className="m-0 text-[24px] font-semibold tracking-tightish">Agents</h2>
           <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
-            ArcFun is the venue. Circle Agent Stack is the wallet. Eve is the agent runtime.
+            eve.fun is the venue. Circle Agent Stack is the wallet. Eve is the agent runtime.
             Together they let an AI launch and trade Instant / Reflection tokens on Arc without
-            ArcFun ever holding a key. Signing is <code className="text-t2">circle wallet execute</code>.
+            eve.fun ever holding a key. Signing is <code className="text-t2">circle wallet execute</code>.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
             <article className="border border-hair rounded-[22px] bg-s1 p-5">
-              <h3 className="m-0 text-[15px] font-semibold tracking-tightish">ArcFun MCP</h3>
+              <h3 className="m-0 text-[15px] font-semibold tracking-tightish">eve.fun MCP</h3>
               <p className="mt-1.5 mb-0 text-[13px] text-t2 leading-relaxed">
                 List, quote, holders, candles, and unsigned launch/swap transactions.
               </p>

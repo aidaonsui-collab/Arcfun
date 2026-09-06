@@ -4,7 +4,7 @@ import { isHiddenToken } from '@/lib/tokens'
 import { fallbackTokenOgImage, OG_SIZE, tokenOgImage } from '@/lib/arc-og'
 
 export const runtime = 'nodejs'
-export const alt = 'Arcfun token'
+export const alt = 'eve.fun token'
 export const size = OG_SIZE
 export const contentType = 'image/png'
 export const revalidate = 300

@@ -540,7 +540,7 @@ export function ArcCreateForm({
                     <strong className="text-white">20% creator</strong> ·{' '}
                     <strong className="text-white">15% project burn</strong> ·{' '}
                     <strong className="text-white">10% platform</strong>. Referrals pay 0.05% on
-                    Arcfun buys, not from this collect. Launch-token fees burn.
+                    eve.fun buys, not from this collect. Launch-token fees burn.
                   </span>
                   {!reflectionLive ? (
                     <span className="text-[12px] text-coral mt-1">

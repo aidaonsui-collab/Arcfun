@@ -20,7 +20,7 @@ import { CrucibleCountUp } from '@/components/CrucibleChip'
 export const revalidate = 20
 
 export const metadata: Metadata = {
-  title: 'The Crucible — Arcfun',
+  title: 'The Crucible — eve.fun',
   description:
     'Quote fees buy $EVE. Then it is gone. You trade. Fees accrue. When it cooks, Crucible buys $EVE and burns it.',
 }
@@ -92,7 +92,7 @@ export default async function CruciblePage() {
           Quote fees buy $EVE. Then it is gone.
         </h1>
         <p className="mt-3 mb-0 max-w-xl text-sm leading-relaxed text-t2 text-pretty">
-          Every launch on Arcfun takes a 1% USDC fee on buys. A slice of that fee sits in Crucible
+          Every launch on eve.fun takes a 1% USDC fee on buys. A slice of that fee sits in Crucible
           until it can buy $EVE and send it to the dead wallet. No clicks. No payout.
         </p>
 

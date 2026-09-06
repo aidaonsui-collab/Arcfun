@@ -52,7 +52,7 @@ export function tokenRegisterMessage(opts: {
   timestamp: number
 }): string {
   return [
-    'ArcFun token register',
+    'eve.fun token register',
     `Token: ${getAddress(opts.token)}`,
     'Action: register-token',
     `Payload: ${opts.payloadHash}`,
@@ -87,7 +87,7 @@ export function authQuery(auth: { signature: string; timestamp: number; nonce: s
 
 export function profileEditMessage(address: string, timestamp: number): string {
   return [
-    'Arcfun profile edit',
+    'eve.fun profile edit',
     `Address: ${getAddress(address)}`,
     'Action: update-profile',
     `Timestamp: ${timestamp}`,
@@ -101,7 +101,7 @@ export function followMessage(
   timestamp: number,
 ): string {
   return [
-    'Arcfun social',
+    'eve.fun social',
     `Follower: ${getAddress(follower)}`,
     `Target: ${getAddress(target)}`,
     `Action: ${action}`,

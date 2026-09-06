@@ -1,6 +1,6 @@
 import { ArcCreateForm } from '@/components/ArcCreateForm'
 
-export const metadata = { title: 'Launch a token — Arcfun' }
+export const metadata = { title: 'Launch a token — eve.fun' }
 
 export default function CreatePage() {
   return (
