@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import Link from 'next/link'
+import { PadVolumeTile } from '@/components/PadVolumeTile'
 
 type PairMark = {
   id: string
@@ -24,9 +25,15 @@ const POSES = [
   { x: -6, y: 24, r: -10 },
 ] as const
 
-export function HeroBanners() {
+export function HeroBanners({
+  volume24h = 0,
+  volumeAll = 0,
+}: {
+  volume24h?: number
+  volumeAll?: number
+}) {
   return (
-    <div className="grid gap-3 md:grid-cols-2">
+    <div className="grid gap-3 md:grid-cols-2 md:items-stretch">
       <div className="relative overflow-hidden rounded-[24px] bg-s1 px-5 py-7 sm:px-7 sm:py-8 min-h-52 border border-hair">
         <div
           aria-hidden
@@ -55,39 +62,8 @@ export function HeroBanners() {
         </div>
       </div>
 
-      <div className="relative overflow-hidden rounded-[24px] bg-s2 px-7 py-8 min-h-52 border border-hair">
-        <div className="relative z-10 max-w-[18rem]">
-          <h2 className="m-0 text-[1.7rem] leading-tight font-semibold tracking-tight text-pretty md:text-[1.9rem]">
-            $EVE’s Crucible.
-          </h2>
-          <p className="mt-2 mb-0 text-sm text-t2">The financial structure</p>
-          <Link
-            href="/crucible"
-            className="mt-6 inline-flex h-11 items-center px-6 rounded-full bg-lime text-white text-sm font-semibold tracking-tightish hover:bg-lime-2 transition-colors"
-          >
-            Open
-          </Link>
-        </div>
-        <div
-          aria-hidden
-          className="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 select-none text-[5.5rem] font-semibold tracking-tighter text-white/[0.08] md:right-8 md:text-[6.5rem]"
-        >
-          BURN
-        </div>
-        <svg
-          aria-hidden
-          viewBox="0 0 240 240"
-          className="pointer-events-none absolute -right-8 -bottom-10 size-56 text-lime-t/20"
-        >
-          <circle cx="120" cy="120" r="90" fill="none" stroke="currentColor" strokeWidth="1" />
-          <circle cx="120" cy="120" r="62" fill="none" stroke="currentColor" strokeWidth="1" />
-          <path
-            d="M40 150a90 90 0 0 1 160 0"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.4"
-          />
-        </svg>
+      <div className="flex items-center justify-center md:min-h-52">
+        <PadVolumeTile volume24h={volume24h} volumeAll={volumeAll} />
       </div>
     </div>
   )
