@@ -15,6 +15,10 @@ module.exports = {
           soft: 'var(--limeSoft)',
           line: 'var(--limeLine)',
         },
+        fun: {
+          DEFAULT: 'var(--fun)',
+          line: 'var(--funLine)',
+        },
         coral: {
           DEFAULT: 'var(--coral)',
           soft: 'var(--coralSoft)',

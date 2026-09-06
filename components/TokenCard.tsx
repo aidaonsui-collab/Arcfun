@@ -43,7 +43,7 @@ export function TokenCard({
   const pct = token.priceChange24h ?? 0
   const pctLabel = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
   const frame =
-    'group relative block overflow-hidden rounded-[20px] bg-s1 p-5 border border-hair transition-[border-color,transform] duration-200 ease-out hover:border-lime-line hover:z-[3]'
+    'group relative block overflow-hidden rounded-[20px] bg-s1 p-5 border border-fun-line transition-[border-color,transform] duration-200 ease-out hover:border-fun hover:z-[3]'
 
   const body = (
     <>
@@ -139,7 +139,7 @@ export function TokenRailCard({ token }: { token: PoolToken }) {
   return (
     <Link
       href={`/token/${address}`}
-      className="flex-none w-[300px] flex items-stretch border border-hair rounded-[20px] overflow-hidden bg-s1 hover:border-lime-line transition-colors"
+      className="flex-none w-[300px] flex items-stretch border border-fun-line rounded-[20px] overflow-hidden bg-s1 hover:border-fun transition-colors"
     >
       <span
         className="relative w-24 shrink-0 flex items-center justify-center"
