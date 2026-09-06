@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * Sticky nav — Arcfun brand mark + wordmark, Crucible, Studio, OTC, Profile, wallet chip.
+ * Sticky nav — eve.fun brand mark + wordmark, Crucible, Studio, OTC, Profile, wallet chip.
  * Mobile: Home, Crucible, ArcStudio, Create collection, Profile, Arc OTC, Docs.
  */
 import Link from 'next/link'
@@ -121,7 +121,10 @@ export function SiteHeader() {
 
         <Link href="/" className="flex items-center gap-2 shrink-0">
           <BrandMark className="w-6 h-6" />
-          <span className="text-[17px] font-semibold tracking-tight text-white">arcfun</span>
+          <span className="text-[17px] font-semibold tracking-tight">
+            <span style={{ color: "#2775CA" }}>eve</span>
+            <span style={{ color: "#7CFF3A" }}>.fun</span>
+          </span>
         </Link>
 
         <nav className="ml-4 hidden items-center gap-1 md:flex">
@@ -178,7 +181,10 @@ export function SiteHeader() {
             <div className="flex items-center justify-between h-16 px-5 shrink-0">
               <Link href="/" onClick={() => setMenuOpen(false)} className="flex items-center gap-2.5">
                 <BrandMark />
-                <span className="text-[20px] font-bold tracking-tightish text-white">Arcfun</span>
+                <span className="text-[20px] font-bold tracking-tightish">
+                  <span style={{ color: "#2775CA" }}>eve</span>
+                  <span style={{ color: "#7CFF3A" }}>.fun</span>
+                </span>
               </Link>
               <button
                 type="button"
