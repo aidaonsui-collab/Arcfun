@@ -19,19 +19,26 @@ export function createArcDatafeed(token: string, symbol: string) {
   const CANDLE_CACHE_TTL_MS = 8_000
   const candleCache = new Map<string, { at: number; promise: Promise<TVBar[]> }>()
 
-  function fetchCandles(resolution: string): Promise<TVBar[]> {
-    const hit = candleCache.get(resolution)
+  /** `fromSec`/`toSec` omitted → server default window (recent, bounded — see the ohlcv route).
+   *  Passed explicitly on scroll-back so the server actually queries further into durable
+   *  history instead of us filtering one fixed payload client-side (that's what used to cap
+   *  every chart at whatever the KV trade tape's last ~400 swaps covered, regardless of how far
+   *  back the user scrolled). */
+  function fetchCandles(resolution: string, fromSec?: number, toSec?: number): Promise<TVBar[]> {
+    const cacheKey = `${resolution}:${fromSec ?? ''}:${toSec ?? ''}`
+    const hit = candleCache.get(cacheKey)
     if (hit && Date.now() - hit.at < CANDLE_CACHE_TTL_MS) return hit.promise
     const promise = (async () => {
-      const res = await fetch(
-        `/api/arc/${encodeURIComponent(token)}/ohlcv?resolution=${encodeURIComponent(resolution)}`,
-      )
+      const q = new URLSearchParams({ resolution })
+      if (fromSec != null) q.set('from', String(Math.floor(fromSec)))
+      if (toSec != null) q.set('to', String(Math.ceil(toSec)))
+      const res = await fetch(`/api/arc/${encodeURIComponent(token)}/ohlcv?${q.toString()}`)
       if (!res.ok) return []
       const data = await res.json()
       return (data.candles ?? []) as TVBar[]
     })()
-    candleCache.set(resolution, { at: Date.now(), promise })
-    promise.catch(() => candleCache.delete(resolution))
+    candleCache.set(cacheKey, { at: Date.now(), promise })
+    promise.catch(() => candleCache.delete(cacheKey))
     return promise
   }
 
@@ -90,25 +97,20 @@ export function createArcDatafeed(token: string, symbol: string) {
       onError: (err: string) => void,
     ) {
       try {
-        const candles = await fetchCandles(resolution)
-        if (!candles.length) {
-          onResult([], { noData: true })
-          return
-        }
         if (periodParams.firstDataRequest) {
-          onResult(candles, { noData: false })
+          const candles = await fetchCandles(resolution)
+          onResult(candles, { noData: candles.length === 0 })
           return
         }
+        // Scrolling back — ask the server for this exact window (seconds, not ms) instead of
+        // filtering the first-load payload; the server can now actually reach further back via
+        // durable history.
         const fromRaw = periodParams.from
         const toRaw = periodParams.to
-        const fromMs = fromRaw > 1e12 ? fromRaw : fromRaw * 1000
-        const toMs = toRaw > 1e12 ? toRaw : toRaw * 1000
-        const bars = candles.filter((c) => c.time >= fromMs && c.time <= toMs)
-        if (!bars.length) {
-          onResult([], { noData: true })
-          return
-        }
-        onResult(bars, { noData: false })
+        const fromSec = fromRaw > 1e12 ? fromRaw / 1000 : fromRaw
+        const toSec = toRaw > 1e12 ? toRaw / 1000 : toRaw
+        const bars = await fetchCandles(resolution, fromSec, toSec)
+        onResult(bars, { noData: bars.length === 0 })
       } catch (e) {
         onError((e as Error)?.message ?? 'Failed to fetch bars')
       }

@@ -33,6 +33,7 @@ import {
 import { summarizeRpcError } from './rpc-error'
 import { staleTapeRewindFrom, shouldPersistScanCursor, tapeIsStaleTs } from './arc-trades-cursor'
 import { quoteDecimalsForToken, quoteTokenForFactory } from './arc-rwa-assets'
+import { recordTrades1m } from './arc-candle-store'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 
@@ -137,7 +138,10 @@ const lastSyncedAt = new Map<string, number>()
  * Instant-only resolvePool silently returned "no trades" for Reflection/curve tokens even when
  * they had a live, tradeable pool.
  */
-async function resolvePool(
+/** Exported for scripts/backfill-candles.ts — the deep, one-time historical scan reuses the same
+ *  pool-orientation resolution and chunked log scan as the live sync path so backfilled candles
+ *  can never disagree with what a live cycle would have computed for the same blocks. */
+export async function resolvePool(
   token: Address,
 ): Promise<{ pool: Address; tokenIs0: boolean; tokenDecimals: number; quoteDecimals: number } | null> {
   try {
@@ -256,7 +260,8 @@ async function getSwapLogs(pool: Address, fromBlock: bigint, toBlock: bigint): P
   throw lastErr
 }
 
-async function scanSwapRange(
+/** Exported for scripts/backfill-candles.ts — see resolvePool's export note above. */
+export async function scanSwapRange(
   client: ReturnType<typeof arcLogsClient>,
   pool: Address,
   tokenIs0: boolean,
@@ -383,6 +388,11 @@ async function persistTrades(key: string, ascendingNew: EvmTrade[], newCursor: b
     if (fresh.length > 0) {
       await kv.rpush(tradesKvKey(key), ...fresh)
       await kv.ltrim(tradesKvKey(key), -TRADES_CAP, -1)
+      // Durable candle history — separate store, never trimmed. See lib/arc-candle-store.ts;
+      // no-ops quietly if SUPABASE_* isn't configured, and never throws into this path. Awaited
+      // (not fire-and-forget) so it gets a chance to land before a serverless invocation's
+      // deferred work window closes — same reasoning as the kv writes just above.
+      await recordTrades1m(key as Address, fresh)
     }
     await kv.set(cursorKvKey(key), newCursor.toString())
   } catch (e) {

@@ -86,8 +86,10 @@ export function buildCandles(trades: EvmTrade[], bucketSec: number, fallbackPric
   return real.length > MAX_BUCKETS ? real.slice(-MAX_BUCKETS) : real
 }
 
-/** Cap filled bars so a 5M chart over weeks doesn't explode. */
-const MAX_FILLED = 1_500
+/** Cap filled bars so a 5M chart over weeks doesn't explode. Also reused by the ohlcv route as
+ *  the default lookback window (in bars) when a request doesn't specify from/to, so a first
+ *  chart load stays bounded the same way regardless of how much durable history now exists. */
+export const MAX_FILLED = 1_500
 
 /**
  * Insert last-close bars into quiet buckets from the first print through `untilTs`
