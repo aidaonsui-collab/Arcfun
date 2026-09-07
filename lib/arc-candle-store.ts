@@ -7,6 +7,8 @@
  * that same trimmed tape, so a token's candles could never reach further back than its last
  * TRADES_CAP swaps — e.g. EVE (17d old, high volume) only ever showed ~4 days on any timeframe.
  * This table is append-only and never trimmed: one row per (token, 1-minute bucket), forever.
+ * Writes are capped to top-N tokens by lifetime pad volume (plus an always-list, default $EVE) —
+ * see lib/arc-candle-durable.ts — so Free Supabase stays cheap; reads still serve any stored row.
  * Every coarser resolution the chart offers (5m/15m/1h/4h/1d/1w) is rolled up from these 1m rows
  * on read via the arc_candles_rollup() Postgres function — see the migration in this PR.
  *
@@ -20,6 +22,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { Address } from 'viem'
 import type { Candle } from './candles'
 import type { EvmTrade } from './evm-trades'
+import { isCandleDurableToken } from './arc-candle-durable'
 
 let cached: SupabaseClient | null | undefined
 
@@ -61,6 +64,8 @@ type Row1m = {
 export async function recordTrades1m(token: Address, trades: EvmTrade[]): Promise<void> {
   const db = supa()
   if (!db) return
+  // Free-tier cap: only top-N by pad volume (+ always-list) get durable writes.
+  if (!(await isCandleDurableToken(token))) return
   const priced = trades.filter((t) => t.ts > 0 && t.priceUsd > 0)
   if (priced.length === 0) return
 
