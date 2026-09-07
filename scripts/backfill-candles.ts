@@ -6,7 +6,8 @@
  *   # or, for one token only:
  *   npm run backfill-candles -- 0x19209E55049bc613c5cC8b66B7DF7824096e78CF
  *
- * For every indexed token, scans Uniswap V3 Swap logs from its pool's createdBlock (resuming
+ * Respects the same CANDLE_DURABLE_* allowlist as live writes (top-N by pad volume + always-list).
+ * For every allowed indexed token, scans Uniswap V3 Swap logs from its pool's createdBlock (resuming
  * from arc_candle_backfill_state.scanned_up_to_block on a rerun) up to the chain head at the time
  * this script started, folding them into 1-minute candles in the durable Supabase store — see
  * lib/arc-candle-store.ts. This is what actually recovers a token's pre-existing history (e.g.
@@ -25,6 +26,7 @@ import { arcLogsClient } from '@/lib/contracts-arc'
 import { resolvePool, scanSwapRange } from '@/lib/arc-trades'
 import { listIndexedTokens } from '@/lib/arc-indexer/store'
 import { candleStoreConfigured, getBackfillState, recordTrades1m, setBackfillState } from '@/lib/arc-candle-store'
+import { getCandleDurableAllowlist } from '@/lib/arc-candle-durable'
 import { summarizeRpcError } from '@/lib/rpc-error'
 
 /** Per-iteration scan width — small enough that a crash mid-token loses at most this much
@@ -90,10 +92,30 @@ async function main() {
 
   const only = process.argv[2]?.trim().toLowerCase()
   const tokens = await listIndexedTokens()
-  const targets = only ? tokens.filter((t) => t.token.toLowerCase() === only) : tokens
+  let targets = only ? tokens.filter((t) => t.token.toLowerCase() === only) : tokens
   if (targets.length === 0) {
     console.error(only ? `[backfill] ${only} is not an indexed token` : '[backfill] no indexed tokens found')
     process.exit(1)
+  }
+
+  const allow = await getCandleDurableAllowlist()
+  if (!allow.unlimited) {
+    const before = targets.length
+    targets = targets.filter((t) => allow.allowed.has(t.token.toLowerCase()))
+    console.log(
+      `[backfill] durable allowlist: top ${allow.maxTokens} by pad volume + always-list ` +
+        `(${allow.allowed.size} addresses) — kept ${targets.length}/${before}`,
+    )
+    if (targets.length === 0) {
+      console.error(
+        only
+          ? `[backfill] ${only} is outside the durable candle allowlist (CANDLE_DURABLE_*)`
+          : '[backfill] no indexed tokens fall inside the durable candle allowlist',
+      )
+      process.exit(1)
+    }
+  } else {
+    console.log('[backfill] CANDLE_DURABLE_MAX_TOKENS=0 — unlimited durable writes')
   }
 
   const client = arcLogsClient()
