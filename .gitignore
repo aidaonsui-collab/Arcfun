@@ -18,3 +18,7 @@ subgraph/**/generated
 subgraph/**/build
 subgraph/**/package-lock.json
 .claude/launch.json
+
+.owner.key
+.arc_rpc.txt
+.upgrade-origin-mint.log
