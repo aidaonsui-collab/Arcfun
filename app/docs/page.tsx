@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { CrucibleFeePath } from '@/components/CrucibleFeePath'
+import { CRUCIBLE_CONTRACTS_NOTE } from '@/lib/crucible'
 
 export const metadata: Metadata = {
   title: 'Docs — eve.fun',
@@ -224,8 +225,9 @@ export default function DocsPage() {
             </li>
           </ul>
           <p className="mt-4 mb-0 max-w-2xl text-[13px] text-t3 leading-relaxed">
-            Next — live pools still use 70/30 (Meme) or 50/25/25 (Reflection). Contracts still
-            need to ship before Crucible and project-burn legs pay on-chain. ReferralRouter pays the 0.05% buy skim once deployed.
+            Next — {CRUCIBLE_CONTRACTS_NOTE} Reflection&apos;s own locker still pays 50/25/25
+            (Holders / Creator / Platform) until that path migrates too. ReferralRouter pays the
+            0.05% buy skim once deployed.
           </p>
         </section>
 
@@ -307,6 +309,32 @@ export default function DocsPage() {
                 Fees are not streamed per swap. A keeper collects the locked LP, forwards USDC,
                 then calls <code className="text-t2">reflect()</code>. Refresh after a sweep if
                 the tile still says Pending.
+              </li>
+            </ul>
+          </div>
+
+          <div className="mt-3 border border-hair rounded-[22px] bg-s1 p-5">
+            <h3 className="m-0 text-[15px] font-semibold tracking-tightish">
+              $COOL holder rewards{' '}
+              <span className="text-[13px] font-semibold text-t3 tracking-normal">
+                (limited-time)
+              </span>
+            </h3>
+            <ul className="mt-3 mb-0 pl-4 text-[14px] text-t2 space-y-2 leading-relaxed">
+              <li>
+                Separate from Reflection: a share of{' '}
+                <strong className="text-white font-semibold">$EVE&apos;s own</strong> platform LP
+                fees, swapped into $COOL and sent to every $EVE holder automatically — no{' '}
+                <code className="text-t2">claim()</code>, no per-token row.
+              </li>
+              <li>
+                Holding $EVE is what qualifies you, not holding a Reflection launch. Shows on your
+                own profile only, with a running total received and, while the program is live, its
+                end date.
+              </li>
+              <li>
+                Time-boxed, not a permanent leg of the fee split above — check your Profile for
+                whether it&apos;s still running.
               </li>
             </ul>
           </div>
