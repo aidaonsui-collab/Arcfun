@@ -126,7 +126,7 @@ export function ItemView({
               ) : (
                 <>
                   <div className="text-[13px] text-t3">Mint price</div>
-                  <Price value={collection.mintPriceUsdc} size="lg" />
+                  <Price value={collection.mintPriceUsdc} size="lg" symbol={collection.paymentSymbol} />
                 </>
               )}
             </div>
@@ -282,6 +282,7 @@ export function ItemView({
                 : null
               : collection.mintPriceUsdc
         }
+        priceSymbol={listing || item.minted ? 'USDC' : collection.paymentSymbol}
         priceLabel={
           listing
             ? 'Listed for'

@@ -89,6 +89,7 @@ export const PORT_FACTORY_ABI = [
           { name: 'royaltyBps', type: 'uint96' },
           { name: 'creatorRewardsWallet', type: 'address' },
           { name: 'originToken', type: 'address' },
+          { name: 'payInOriginToken', type: 'bool' },
         ],
       },
     ],
@@ -224,6 +225,7 @@ export const PORT_NFT_ABI = [
   },
   { type: 'function', name: 'creatorPayout', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'originToken', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'paymentToken', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   {
     type: 'function',
     name: 'royaltyInfo',

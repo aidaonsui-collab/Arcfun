@@ -95,9 +95,14 @@ export default function PortCreatePage() {
     token: string
     name: string
     symbol: string
+    decimals: number
     creator: string
     linkedCollection: string | null
   } | null>(null)
+  /** Charge mint in the linked origin token instead of USDC. Only meaningful once originInfo is
+   *  set — reset below whenever the origin link is cleared or changes, so a stale choice can
+   *  never submit alongside a token that no longer matches it. */
+  const [payInOriginToken, setPayInOriginToken] = useState(false)
   const [originStatus, setOriginStatus] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -142,11 +147,13 @@ export default function PortCreatePage() {
     if (!raw) {
       setOriginInfo(null)
       setOriginStatus('')
+      setPayInOriginToken(false)
       return
     }
     if (!isAddress(raw)) {
       setOriginInfo(null)
       setOriginStatus('')
+      setPayInOriginToken(false)
       return
     }
     let cancelled = false
@@ -158,6 +165,7 @@ export default function PortCreatePage() {
           if (cancelled) return
           if (!d?.ok) {
             setOriginInfo(null)
+            setPayInOriginToken(false)
             setOriginStatus('Not a live Instant or Reflection token on Arc.')
             return
           }
@@ -165,6 +173,7 @@ export default function PortCreatePage() {
             token: d.token,
             name: d.name,
             symbol: d.symbol,
+            decimals: Number(d.decimals) || 18,
             creator: d.creator,
             linkedCollection: d.linkedCollection,
           })
@@ -179,6 +188,7 @@ export default function PortCreatePage() {
         .catch(() => {
           if (!cancelled) {
             setOriginInfo(null)
+            setPayInOriginToken(false)
             setOriginStatus('Could not look up that token.')
           }
         })
@@ -369,7 +379,7 @@ export default function PortCreatePage() {
             revealed: false,
             maxSupply: BigInt(Math.floor(supply)),
             maxPerWallet: BigInt(Math.floor(per)),
-            price: parseUnits(String(price), 6),
+            price: parseUnits(String(price), payInOriginToken && originInfo ? originInfo.decimals : 6),
             publicMintStart: BigInt(start),
             allowlistMintStart: BigInt(alStartUnix),
             allowlistMintEnd: BigInt(alEndUnix),
@@ -377,6 +387,7 @@ export default function PortCreatePage() {
             royaltyBps: BigInt(royalty * 100),
             creatorRewardsWallet: payout,
             originToken: (originInfo?.token as Address) || zeroAddress,
+            payInOriginToken: Boolean(payInOriginToken && originInfo),
           },
         ],
         value: due > 0n ? due : undefined,
@@ -480,6 +491,15 @@ export default function PortCreatePage() {
             : busy
               ? 'Publishing…'
               : 'Publish contract'
+
+  // The same "would this link actually succeed" check createCollection itself will enforce —
+  // shared by the badge below and the pay-in-origin-token toggle on the Mint step, so the two
+  // can never disagree about whether a link is live.
+  const originEligible = Boolean(
+    originInfo &&
+      !originInfo.linkedCollection &&
+      (!address || originInfo.creator.toLowerCase() === address.toLowerCase()),
+  )
 
   return (
     <main className="min-h-screen pt-16 text-white">
@@ -648,17 +668,11 @@ export default function PortCreatePage() {
                   {originStatus ? (
                     <span
                       className={`mt-1.5 flex items-center gap-1.5 text-[13px] ${
-                        originInfo &&
-                        !originInfo.linkedCollection &&
-                        (!address || originInfo.creator.toLowerCase() === address.toLowerCase())
-                          ? 'text-[#e2b340]'
-                          : 'text-t3'
+                        originEligible ? 'text-[#e2b340]' : 'text-t3'
                       }`}
                     >
-                      {originInfo &&
-                      !originInfo.linkedCollection &&
-                      (!address || originInfo.creator.toLowerCase() === address.toLowerCase()) ? (
-                        <OfficialBadge symbol={originInfo.symbol} size="sm" />
+                      {originEligible ? (
+                        <OfficialBadge symbol={originInfo!.symbol} size="sm" />
                       ) : (
                         originStatus
                       )}
@@ -696,8 +710,9 @@ export default function PortCreatePage() {
             <div className="px-5 py-8 sm:px-10 lg:px-14">
               <h1 className="text-[28px] font-semibold tracking-display sm:text-[32px]">Mint</h1>
               <p className="mt-2 max-w-lg text-[15px] leading-relaxed text-t2">
-                The contract needs a supply and a USDC price at deploy. Set them here, then
-                publish.
+                The contract needs a supply and a{' '}
+                {payInOriginToken && originInfo ? `$${originInfo.symbol}` : 'USDC'} price at
+                deploy. Set them here, then publish.
               </p>
               <div className="mt-8 max-w-xl space-y-5">
                 <div className="grid grid-cols-2 gap-3">
@@ -727,10 +742,43 @@ export default function PortCreatePage() {
                       className={`${inputClass} pr-16`}
                     />
                     <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-[13px] text-t3">
-                      USDC
+                      {payInOriginToken && originInfo ? `$${originInfo.symbol}` : 'USDC'}
                     </span>
                   </div>
                 </Field>
+                {originEligible ? (
+                  <Field
+                    label="Mint currency"
+                    hint={`Fixed once published — collectors will pay in ${
+                      payInOriginToken ? `$${originInfo!.symbol}` : 'USDC'
+                    } for the life of this collection.`}
+                  >
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPayInOriginToken(false)}
+                        className={`h-10 flex-1 rounded-full border text-[13px] font-semibold transition-colors ${
+                          !payInOriginToken
+                            ? 'border-lime-line bg-s2 text-white'
+                            : 'border-hair text-t3 hover:text-t2'
+                        }`}
+                      >
+                        USDC
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPayInOriginToken(true)}
+                        className={`h-10 flex-1 rounded-full border text-[13px] font-semibold transition-colors ${
+                          payInOriginToken
+                            ? 'border-lime-line bg-s2 text-white'
+                            : 'border-hair text-t3 hover:text-t2'
+                        }`}
+                      >
+                        ${originInfo!.symbol}
+                      </button>
+                    </div>
+                  </Field>
+                ) : null}
                 <Field label="Public start">
                   <input
                     type="datetime-local"

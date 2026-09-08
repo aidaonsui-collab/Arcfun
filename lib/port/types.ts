@@ -15,7 +15,12 @@ export type Collection = {
   creatorRewardsWallet: string
   maxSupply: number
   maxPerWallet: number
+  /** Always in paymentDecimals, whatever the currency — the name is legacy, not a guarantee. */
   mintPriceUsdc: number
+  /** Mint currency. USDC unless the collection was created to charge in its origin token. */
+  paymentToken: string
+  paymentDecimals: number
+  paymentSymbol: string
   publicStart: number
   allowlist: boolean
   allowlistStart: number

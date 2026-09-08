@@ -12,7 +12,8 @@ import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProo
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 /// @title ArcNft721
-/// @notice Cloneable ERC-721 + EIP-2981. Fixed-price USDC mint, per-wallet cap,
+/// @notice Cloneable ERC-721 + EIP-2981. Fixed-price mint (USDC by default, or the
+///         collection's bound origin token — see paymentToken), per-wallet cap,
 ///         optional merkle allowlist, reveal. Deployed by ArcNftCollectionFactory.
 contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;
@@ -46,7 +47,7 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
         bool revealed;
         uint256 maxSupply;
         uint256 maxPerWallet;
-        uint256 price; // USDC 6dp
+        uint256 price; // In paymentToken's own decimals — 6 for USDC, else whatever originToken uses
         uint64 publicMintStart;
         uint64 allowlistMintStart;
         uint64 allowlistMintEnd;
@@ -55,7 +56,7 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
         address creator;
         address creatorPayout;
         address treasury;
-        address usdc;
+        address paymentToken;
         address factory;
         address originToken;
     }
@@ -63,7 +64,10 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
     address public factory;
     address public creatorPayout;
     address public treasury;
-    IERC20 public usdc;
+    /// @notice Mint currency. USDC unless the factory bound this collection to its origin
+    ///         token and the creator chose to charge in it instead (see CreateParams.payInOriginToken
+    ///         on ArcNftCollectionFactory) — fixed for this collection's lifetime, set once here.
+    IERC20 public paymentToken;
     /// @notice Instant/Reflection token this collection is bound to. Zero if unbound.
     address public originToken;
 
@@ -95,7 +99,10 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
     }
 
     function initialize(Init calldata c) external initializer {
-        if (c.creator == address(0) || c.creatorPayout == address(0) || c.treasury == address(0) || c.usdc == address(0)) {
+        if (
+            c.creator == address(0) || c.creatorPayout == address(0) || c.treasury == address(0)
+                || c.paymentToken == address(0)
+        ) {
             revert ZeroAddr();
         }
         if (c.royaltyBps > MAX_ROYALTY_BPS) revert RoyaltyTooHigh();
@@ -109,7 +116,7 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
         factory = c.factory;
         creatorPayout = c.creatorPayout;
         treasury = c.treasury;
-        usdc = IERC20(c.usdc);
+        paymentToken = IERC20(c.paymentToken);
         originToken = c.originToken;
 
         maxSupply = c.maxSupply;
@@ -148,10 +155,10 @@ contract ArcNft721 is Initializable, ERC721Upgradeable, ERC2981Upgradeable, Owna
 
         uint256 paid = price * n;
         if (paid > 0) {
-            usdc.safeTransferFrom(to, address(this), paid);
+            paymentToken.safeTransferFrom(to, address(this), paid);
             uint256 plat = (paid * PLATFORM_MINT_BPS) / BPS_DENOM;
-            if (plat > 0) usdc.safeTransfer(treasury, plat);
-            usdc.safeTransfer(creatorPayout, paid - plat);
+            if (plat > 0) paymentToken.safeTransfer(treasury, plat);
+            paymentToken.safeTransfer(creatorPayout, paid - plat);
         }
 
         uint256 firstId = totalMinted + 1;

@@ -58,7 +58,9 @@ export function DropLanding({
             <span className="text-[28px] font-semibold tabular-nums tracking-display">
               {formatUsdc(collection.mintPriceUsdc)}
             </span>
-            <span className="text-[15px] text-t3">USDC · {collection.maxPerWallet} per wallet</span>
+            <span className="text-[15px] text-t3">
+              {collection.paymentSymbol} · {collection.maxPerWallet} per wallet
+            </span>
           </div>
           <p className="mt-3 text-[13px] leading-snug text-t3">
             New collections lock mint price after the first mint or public start, and lock the art

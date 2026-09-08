@@ -22,6 +22,7 @@ export function StickyMintBar({
           </div>
           <Price
             value={collection.floorUsdc != null ? collection.floorUsdc : collection.mintPriceUsdc}
+            symbol={collection.floorUsdc != null ? 'USDC' : collection.paymentSymbol}
             size="lg"
           />
         </div>
@@ -41,12 +42,15 @@ export function StickyMintBar({
 export function StickyItemBar({
   priceUsdc,
   priceLabel,
+  priceSymbol = 'USDC',
   cta,
   disabled,
   onClick,
 }: {
   priceUsdc: number | null
   priceLabel: string
+  /** Listings/offers are always USDC; pass collection.paymentSymbol only for a mint price. */
+  priceSymbol?: string
   cta: string
   disabled?: boolean
   onClick: () => void
@@ -60,7 +64,7 @@ export function StickyItemBar({
           ) : (
             <>
               <div className="text-[13px] text-t3">{priceLabel}</div>
-              <Price value={priceUsdc} size="lg" />
+              <Price value={priceUsdc} symbol={priceSymbol} size="lg" />
             </>
           )}
         </div>

@@ -5,10 +5,13 @@ export function Price({
   value,
   className,
   size = 'sm',
+  symbol = 'USDC',
 }: {
   value: number
   className?: string
   size?: 'sm' | 'lg'
+  /** Defaults to USDC — pass a collection's paymentSymbol for a mint price that may not be. */
+  symbol?: string
 }) {
   return (
     <span
@@ -19,7 +22,7 @@ export function Price({
       )}
     >
       {formatUsdc(value)}
-      <span className="ml-1 font-medium text-t3">USDC</span>
+      <span className="ml-1 font-medium text-t3">{symbol}</span>
     </span>
   )
 }

@@ -1,3 +1,4 @@
+import { ARC } from '@/lib/contracts-arc'
 import { collectionSlug } from './path'
 import type { Collection } from './types'
 
@@ -52,6 +53,9 @@ export function collectionFromOverlay(
     maxSupply,
     maxPerWallet: prev?.maxPerWallet ?? 0,
     mintPriceUsdc: prev?.mintPriceUsdc ?? 0,
+    paymentToken: prev?.paymentToken ?? ARC.USDC,
+    paymentDecimals: prev?.paymentDecimals ?? 6,
+    paymentSymbol: prev?.paymentSymbol ?? 'USDC',
     publicStart: prev?.publicStart ?? 0,
     allowlist: prev?.allowlist ?? false,
     allowlistStart: prev?.allowlistStart ?? 0,

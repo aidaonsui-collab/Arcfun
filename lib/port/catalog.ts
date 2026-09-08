@@ -48,6 +48,7 @@ async function loadOne(
       revealed,
       alStart,
       alEnd,
+      paymentTokenRead,
     ] = await client.multicall({
         allowFailure: true,
         contracts: [
@@ -67,6 +68,10 @@ async function loadOne(
           { address, abi: PORT_NFT_ABI, functionName: 'revealed' },
           { address, abi: PORT_NFT_ABI, functionName: 'allowlistMintStart' },
           { address, abi: PORT_NFT_ABI, functionName: 'allowlistMintEnd' },
+          // Absent on collections cloned before this getter existed — allowFailure treats that
+          // as "not this shape" rather than an error, and we fall back to USDC below, which is
+          // correct: every pre-existing collection is USDC-only by construction.
+          { address, abi: PORT_NFT_ABI, functionName: 'paymentToken' },
         ],
       })
 
@@ -98,6 +103,35 @@ async function loadOne(
       }
     }
 
+    // Mint currency. Falls back to USDC both when the getter simply isn't there (an
+    // older collection, cloned before paymentToken existed) and when it reads back zero.
+    const paymentTokenAddr =
+      paymentTokenRead.status === 'success' && asAddr(paymentTokenRead.result)
+        ? (paymentTokenRead.result as Address)
+        : ARC.USDC
+    const paysInOrigin = originToken && paymentTokenAddr.toLowerCase() === originToken.toLowerCase()
+    let paymentDecimals = 6
+    let paymentSymbol = 'USDC'
+    if (paymentTokenAddr.toLowerCase() !== ARC.USDC.toLowerCase()) {
+      try {
+        paymentDecimals = await client.readContract({
+          address: paymentTokenAddr,
+          abi: erc20Abi,
+          functionName: 'decimals',
+        })
+        // Reuse the originSymbol lookup above when it's the same token — one less RPC call for
+        // the common case (a collection paying in the token it's bound to).
+        paymentSymbol =
+          paysInOrigin && originSymbol
+            ? originSymbol
+            : await client.readContract({ address: paymentTokenAddr, abi: erc20Abi, functionName: 'symbol' })
+      } catch {
+        // Contract said it's not USDC but we can't read it — safer to show 0 than a wrong price.
+        paymentDecimals = 0
+        paymentSymbol = '?'
+      }
+    }
+
     const displayName = overlay?.name || name.result
     return {
       address,
@@ -116,7 +150,12 @@ async function loadOne(
         (payout.status === 'success' ? String(payout.result) : '') || creator,
       maxSupply: Number.isFinite(supplyN) ? supplyN : 0,
       maxPerWallet: maxPerWallet.status === 'success' ? Number(maxPerWallet.result) : 0,
-      mintPriceUsdc: Number(formatUnits(priceRaw, 6)),
+      // Named for the common case, but the real currency is whatever paymentSymbol says — see
+      // paymentToken/paymentDecimals/paymentSymbol below. Always in paymentToken's own decimals.
+      mintPriceUsdc: Number(formatUnits(priceRaw, paymentDecimals)),
+      paymentToken: paymentTokenAddr,
+      paymentDecimals,
+      paymentSymbol,
       publicStart: start.status === 'success' ? Number(start.result) * 1000 : 0,
       allowlist: root.status === 'success' && String(root.result) !== ZERO_ROOT,
       allowlistStart: alStart.status === 'success' ? Number(alStart.result) * 1000 : 0,

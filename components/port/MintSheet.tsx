@@ -18,7 +18,7 @@ import { formatUsdc } from '@/lib/port/format'
 import { Price } from './Price'
 import { PortSheet } from './PortSheet'
 import { PORT_NFT_ABI } from '@/lib/port/abi'
-import { ARC, ARC_CHAIN_ID } from '@/lib/contracts-arc'
+import { ARC_CHAIN_ID } from '@/lib/contracts-arc'
 import { cdnImage } from '@/lib/cdn-image'
 
 export function MintSheet({
@@ -64,7 +64,7 @@ export function MintSheet({
     if (status !== 'live') return
     setBusy(true)
     try {
-      const unit = parseUnits(String(collection.mintPriceUsdc), 6)
+      const unit = parseUnits(String(collection.mintPriceUsdc), collection.paymentDecimals)
       const paid = unit * BigInt(qty)
       const pub = publicMintLive(collection)
       const alOpen = allowlistWindowLive(collection)
@@ -82,7 +82,7 @@ export function MintSheet({
       }
       if (paid > 0n) {
         await writeContractAsync({
-          address: ARC.USDC,
+          address: collection.paymentToken as Address,
           abi: erc20Abi,
           functionName: 'approve',
           args: [collection.address as Address, paid],
@@ -134,7 +134,7 @@ export function MintSheet({
             <img src={cdnImage(collection.image, 56)} alt="" className="h-14 w-14 rounded-2xl object-cover" />
             <div className="min-w-0">
               <div className="truncate text-[15px] font-semibold">{collection.name}</div>
-              <Price value={collection.mintPriceUsdc} />
+              <Price value={collection.mintPriceUsdc} symbol={collection.paymentSymbol} />
             </div>
           </div>
           <div className="mt-6 flex items-center justify-between">
@@ -161,7 +161,9 @@ export function MintSheet({
           </div>
           <div className="mt-5 flex items-center justify-between text-[15px]">
             <span className="text-t3">Total</span>
-            <span className="font-semibold tabular-nums">{formatUsdc(total)} USDC</span>
+            <span className="font-semibold tabular-nums">
+              {formatUsdc(total)} {collection.paymentSymbol}
+            </span>
           </div>
           <p className="mt-3 text-[13px] text-t3">
             {Math.round(CREATOR_SHARE * 100)}% creator · {Math.round(PLATFORM_FEE * 100)}% platform
