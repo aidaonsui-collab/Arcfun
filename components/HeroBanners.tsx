@@ -48,7 +48,7 @@ export function HeroBanners({
           <h1 className="relative z-10 m-0 text-[1.7rem] leading-tight font-semibold tracking-tight text-pretty md:text-[1.9rem]">
             Launch on Arc.
             <br />
-            Pair it to Stocks.
+            Pair it to Money Market Funds.
           </h1>
           <div className="mt-6 flex items-center justify-between gap-3 md:block">
             <Link
