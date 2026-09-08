@@ -7,11 +7,13 @@ import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import {ArcNftCollectionFactory} from "../src/ArcNftCollectionFactory.sol";
 import {ArcNft721} from "../src/ArcNft721.sol";
 import {MockUSDC} from "../src/MockUSDC.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract ArcNftTest is Test {
     ArcNftCollectionFactory factory;
     ArcNft721 implementation;
     MockUSDC usdc;
+    MockToken18 eveToken;
     MockInstant instant;
 
     address owner = makeAddr("owner");
@@ -36,8 +38,11 @@ contract ArcNftTest is Test {
         );
         factory = ArcNftCollectionFactory(address(new ERC1967Proxy(address(impl), data)));
 
+        eveToken = new MockToken18();
         usdc.mint(alice, 1_000_000_000);
         usdc.mint(bob, 1_000_000_000);
+        eveToken.mint(alice, 1_000_000 ether);
+        eveToken.mint(bob, 1_000_000 ether);
         vm.deal(creator, 10 ether);
         vm.deal(owner, 10 ether);
         vm.deal(alice, 1 ether);
@@ -60,7 +65,8 @@ contract ArcNftTest is Test {
             allowlistRoot: bytes32(0),
             royaltyBps: 500,
             creatorRewardsWallet: payout,
-            originToken: address(0)
+            originToken: address(0),
+            payInOriginToken: false
         });
     }
 
@@ -347,6 +353,55 @@ contract ArcNftTest is Test {
         factory.createCollection{value: CREATION_FEE}(p);
     }
 
+    /// Real token, real (18dp) decimals — proves the mint path is genuinely decimals-agnostic,
+    /// not just "happens to work because everything in the suite is 6dp like USDC".
+    function test_payInOriginToken_chargesOriginToken_notUsdc() public {
+        instant.set(address(eveToken), creator, makeAddr("pool"));
+
+        ArcNftCollectionFactory.CreateParams memory p = _params();
+        p.originToken = address(eveToken);
+        p.payInOriginToken = true;
+        p.price = 10 ether; // 10 $EVE, 18dp — deliberately NOT the 6dp PRICE constant
+        p.publicMintStart = uint64(block.timestamp);
+
+        vm.prank(creator);
+        ArcNft721 col = ArcNft721(factory.createCollection{value: CREATION_FEE}(p));
+        assertEq(address(col.paymentToken()), address(eveToken));
+
+        uint256 usdcBefore = usdc.balanceOf(alice);
+        vm.startPrank(alice);
+        eveToken.approve(address(col), type(uint256).max);
+        col.mint(2); // 20 $EVE
+        vm.stopPrank();
+
+        assertEq(col.balanceOf(alice), 2);
+        // paid in $EVE, not USDC — alice's USDC balance never moves
+        assertEq(usdc.balanceOf(alice), usdcBefore);
+        // 20 EVE * 5% = 1 to treasury, 19 to creator payout — same split, new currency
+        assertEq(eveToken.balanceOf(treasury), 1 ether);
+        assertEq(eveToken.balanceOf(payout), 19 ether);
+        assertEq(usdc.balanceOf(treasury), 0);
+        assertEq(usdc.balanceOf(payout), 0);
+
+        // bob has plenty of USDC but never approved it here, and never approved $EVE either —
+        // confirms there's no fallback path that would let a USDC allowance substitute
+        vm.startPrank(bob);
+        usdc.approve(address(col), type(uint256).max);
+        vm.expectRevert();
+        col.mint(1);
+        vm.stopPrank();
+    }
+
+    function test_payInOriginToken_withoutOriginToken_reverts() public {
+        ArcNftCollectionFactory.CreateParams memory p = _params();
+        p.originToken = address(0);
+        p.payInOriginToken = true;
+
+        vm.prank(creator);
+        vm.expectRevert(ArcNftCollectionFactory.NoOriginToken.selector);
+        factory.createCollection{value: CREATION_FEE}(p);
+    }
+
     function test_setHidden_ownerOnly_freesOrigin() public {
         address eve = makeAddr("eveToken");
         instant.set(eve, creator, makeAddr("pool"));
@@ -437,6 +492,17 @@ contract ArcNftTest is Test {
         vm.prank(creator);
         vm.expectRevert(ArcNft721.TxCap.selector);
         col.ownerMint(bob, 51);
+    }
+}
+
+/// @dev Test-only 18dp origin-token stand-in — deliberately NOT 6dp like MockUSDC, so tests
+///      against it can't accidentally pass just because every mock in the suite shares USDC's
+///      decimals.
+contract MockToken18 is ERC20 {
+    constructor() ERC20("Eve", "EVE") {}
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
     }
 }
 

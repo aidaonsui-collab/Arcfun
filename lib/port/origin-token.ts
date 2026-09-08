@@ -35,6 +35,7 @@ export type OriginTokenInfo = {
   token: Address
   name: string
   symbol: string
+  decimals: number
   creator: Address
   imageUrl?: string
   linkedCollection: Address | null
@@ -88,10 +89,12 @@ export async function lookupOriginToken(raw: string): Promise<OriginTokenInfo | 
 
   let name = ''
   let symbol = ''
+  let decimals = 18
   try {
-    ;[name, symbol] = await Promise.all([
+    ;[name, symbol, decimals] = await Promise.all([
       client.readContract({ address: token, abi: erc20Abi, functionName: 'name' }),
       client.readContract({ address: token, abi: erc20Abi, functionName: 'symbol' }),
+      client.readContract({ address: token, abi: erc20Abi, functionName: 'decimals' }),
     ])
   } catch {
     return null
@@ -117,6 +120,7 @@ export async function lookupOriginToken(raw: string): Promise<OriginTokenInfo | 
     token,
     name,
     symbol,
+    decimals,
     creator,
     imageUrl: meta?.imageUrl,
     linkedCollection,

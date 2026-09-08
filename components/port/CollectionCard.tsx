@@ -37,7 +37,7 @@ export function CollectionCard({ collection }: { collection: Collection }) {
           {status === 'sold' ? (
             <span className="text-[13px] font-medium text-t3">Sold out</span>
           ) : (
-            <Price value={collection.mintPriceUsdc} />
+            <Price value={collection.mintPriceUsdc} symbol={collection.paymentSymbol} />
           )}
         </div>
       </div>

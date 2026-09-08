@@ -67,7 +67,7 @@ export function DropSettingsSheet({
       address: collection.address as Address,
       abi: PORT_NFT_ABI,
       functionName: 'setPrice',
-      args: [parseUnits(String(n), 6)],
+      args: [parseUnits(String(n), collection.paymentDecimals)],
       chainId: ARC_CHAIN_ID,
     })
     await publicClient?.waitForTransactionReceipt({ hash, timeout: 120_000 })
@@ -210,7 +210,7 @@ export function DropSettingsSheet({
               className="h-12 w-full rounded-xl border border-hair bg-s2 px-3.5 pr-16 text-[15px] outline-none"
             />
             <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-[13px] text-t3">
-              USDC
+              {collection.paymentSymbol}
             </span>
           </div>
           <button

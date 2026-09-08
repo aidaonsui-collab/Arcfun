@@ -41,7 +41,10 @@ interface IReflectionPools {
 /// @notice One-tx collection deploy. Same creation-fee / treasury / owner-waiver
 ///         shape as InstantErc20QuoteFactory. Clones ArcNft721.
 ///         Optional originToken binds the collection to an Instant/Reflection
-///         launch; only that token's creator can set the link.
+///         launch; only that token's creator can set the link. When bound, the
+///         creator may also charge mint in that token instead of USDC
+///         (CreateParams.payInOriginToken) — a per-collection choice, fixed for
+///         that collection's lifetime once created.
 contract ArcNftCollectionFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
     error FeeTooLow();
     error ZeroAddr();
@@ -50,6 +53,7 @@ contract ArcNftCollectionFactory is Initializable, OwnableUpgradeable, UUPSUpgra
     error NotTokenCreator();
     error TokenAlreadyLinked();
     error NotCollection();
+    error NoOriginToken();
 
     struct CreateParams {
         string name;
@@ -67,6 +71,9 @@ contract ArcNftCollectionFactory is Initializable, OwnableUpgradeable, UUPSUpgra
         uint96 royaltyBps;
         address creatorRewardsWallet;
         address originToken;
+        /// @notice Charge mint in originToken instead of USDC. Requires originToken != 0.
+        ///         `price` is then read in originToken's own decimals, not USDC's 6.
+        bool payInOriginToken;
     }
 
     uint256 public creationFee;
@@ -176,7 +183,10 @@ contract ArcNftCollectionFactory is Initializable, OwnableUpgradeable, UUPSUpgra
             if (tokCreator == address(0)) revert UnknownToken();
             if (tokCreator != msg.sender) revert NotTokenCreator();
             if (collectionOfToken[origin] != address(0)) revert TokenAlreadyLinked();
+        } else if (p.payInOriginToken) {
+            revert NoOriginToken();
         }
+        address payToken = p.payInOriginToken ? origin : usdc;
 
         address payout = p.creatorRewardsWallet == address(0) ? msg.sender : p.creatorRewardsWallet;
         collection = Clones.clone(implementation);
@@ -198,7 +208,7 @@ contract ArcNftCollectionFactory is Initializable, OwnableUpgradeable, UUPSUpgra
                 creator: msg.sender,
                 creatorPayout: payout,
                 treasury: treasury,
-                usdc: usdc,
+                paymentToken: payToken,
                 factory: address(this),
                 originToken: origin
             })

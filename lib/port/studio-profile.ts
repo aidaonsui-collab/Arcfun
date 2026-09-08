@@ -31,6 +31,10 @@ export async function getStudioProfile(raw: string): Promise<StudioProfile | nul
   const address = raw.toLowerCase()
   const [all, meta] = await Promise.all([listCollections(), getCreatorMeta(address)])
   const launchedCols = all.filter((c) => c.creator.toLowerCase() === address)
+  // KNOWN GAP: mintPriceUsdc is in whatever collection.paymentSymbol is, not always USDC (see
+  // lib/port/catalog.ts) — this sum mixes currencies with no conversion if a creator has some
+  // collections in USDC and others in an origin token. Fine while every collection is USDC;
+  // needs a real per-currency breakdown (or a price oracle) before that stops being true.
   const launched: StudioLaunched[] = launchedCols.map((collection) => ({
     collection,
     primaryEarnedUsdc: collection.minted * collection.mintPriceUsdc * CREATOR_SHARE,
