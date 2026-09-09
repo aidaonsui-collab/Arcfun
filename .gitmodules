@@ -16,3 +16,9 @@
 [submodule "contracts/arc-instant/lib/v4-core"]
 	path = contracts/arc-instant/lib/v4-core
 	url = https://github.com/Uniswap/v4-core.git
+[submodule "contracts/arc-ns/lib/forge-std"]
+	path = contracts/arc-ns/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "contracts/arc-ns/lib/openzeppelin-contracts"]
+	path = contracts/arc-ns/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
