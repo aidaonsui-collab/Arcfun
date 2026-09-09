@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { createHash } from 'node:crypto'
 import { getArcTokenMeta } from '@/lib/arc-token-meta'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { isHiddenToken } from '@/lib/tokens'
@@ -24,11 +25,30 @@ export function generateStaticParams(): { address: string }[] {
 }
 
 const SITE = 'eve.fun'
-const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.arcfun.co').replace(/\/$/, '')
+/** Production Vercel still has NEXT_PUBLIC_APP_URL=arcfun.vercel.app — rewrite like root layout. */
+const SITE_URL = (
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  process.env.NEXT_PUBLIC_APP_URL ||
+  'https://www.eve.fun'
+)
+  .replace(/\/$/, '')
+  .replace('arcfun.vercel.app', 'www.eve.fun')
+  .replace('www.arcfun.co', 'www.eve.fun')
+  .replace('arcfun.co', 'www.eve.fun')
 
 function shortAddr(a: string): string {
   if (!a || a.length < 10) return a || 'token'
   return `${a.slice(0, 6)}…${a.slice(-4)}`
+}
+
+/** Telegram/X pin og:image by URL. Next's file-route content hash does not change when KV
+ *  meta (pfp) is written after launch, so first crawl (letter avatar) sticks forever. Bust on
+ *  imageUrl/symbol so a later Sign-and-save produces a new URL crawlers will refetch. */
+function ogArtBust(imageUrl: string | undefined, symbol: string): string {
+  return createHash('sha256')
+    .update(`${imageUrl || ''}|${symbol}`)
+    .digest('hex')
+    .slice(0, 12)
 }
 
 export async function generateMetadata({
@@ -54,6 +74,7 @@ export async function generateMetadata({
   const description = meta?.description?.replace(/\s+/g, ' ').trim()
     ? meta.description!.replace(/\s+/g, ' ').trim().slice(0, 220)
     : `Trade $${symbol} on eve.fun. Instant launch on Arc, quoted in USDC.`
+  const ogImage = `${SITE_URL}${path}/opengraph-image?v=${ogArtBust(meta?.imageUrl, symbol)}`
 
   return {
     title,
@@ -66,11 +87,13 @@ export async function generateMetadata({
       siteName: SITE,
       locale: 'en_US',
       type: 'website',
+      images: [{ url: ogImage, width: 1200, height: 630, alt: `$${symbol} on eve.fun` }],
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
+      images: [ogImage],
     },
   }
 }
