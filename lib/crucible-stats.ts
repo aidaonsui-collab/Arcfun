@@ -9,11 +9,15 @@
  * scanned up to 80 × 9k getLogs from block 18_000_000 on the request, then the page's 12s
  * deadline discarded the work. First cook is block 18433541. Persist the tape in KV and
  * only scan a few chunks per request from the cursor.
+ *
+ * Live 2026-09-09: a fourth cook ($9.70) sat on-chain while the page kept serving the KV
+ * snapshot (refresh only ran in `after()`, and only if `at` was >20s old). Every request
+ * now also scans the last HEAD_CHUNKS of the chain so a recent cook shows on this load.
  */
 import { after } from 'next/server'
 import { kv } from '@vercel/kv'
 import { erc20Abi, formatUnits, isAddress, parseAbiItem, type Address } from 'viem'
-import { scanLogsChunked } from '@/lib/arc-indexer/logs'
+import { LOG_CHUNK, scanLogsChunked } from '@/lib/arc-indexer/logs'
 import { ARC, arcPublicClient } from '@/lib/contracts-arc'
 import { summarizeRpcError } from '@/lib/rpc-error'
 import {
@@ -36,6 +40,8 @@ const USDC_DECIMALS = 6
 const DEFAULT_EVE_DECIMALS = 18
 const REQUEST_CHUNKS = 6
 const BG_CHUNKS = 24
+/** Last ~36k blocks, scanned on the page request so a cook a few minutes ago is not waiting on KV. */
+const HEAD_CHUNKS = 4
 const KV_KEY = 'arcfun:crucible:tape:v1'
 const KV_TTL_SEC = 30 * 24 * 60 * 60
 
@@ -284,18 +290,34 @@ function scheduleRefresh(): void {
   }
 }
 
+async function scanHead(): Promise<{ melts: CrucibleMelt[]; sink: Address }> {
+  const client = arcPublicClient()
+  const toBlock = await client.getBlockNumber()
+  const span = LOG_CHUNK * BigInt(HEAD_CHUNKS)
+  const fromBlock = toBlock >= span ? toBlock - span + 1n : 0n
+  const next = await scanFrom(fromBlock, HEAD_CHUNKS)
+  return { melts: next.melts, sink: next.sink }
+}
+
 export async function fetchCrucibleStats(
   burnedPctLive: number | null,
 ): Promise<CrucibleStats> {
   try {
     const prev = await readKv()
-    if (prev?.melts.length) {
-      const stale = Date.now() - (prev.at || 0) > 20_000
-      if (stale) scheduleRefresh()
-      return statsFrom(prev.melts, burnedPctLive)
+    const head = await scanHead().catch(() => null)
+    const base = prev?.melts?.length ? prev.melts : SEED_MELTS
+    const melts = head?.melts?.length ? mergeMelts(base, head.melts) : base
+    if (head?.melts?.length) {
+      // Do not bump scannedTo from a head window — that would skip the gap behind the cursor.
+      await writeKv({
+        sink: head.sink || prev?.sink || FALLBACK_SINK,
+        scannedTo: prev?.scannedTo || (fromBlockEnv() - 1n).toString(),
+        melts,
+        at: Date.now(),
+      })
     }
-    const row = await refresh(REQUEST_CHUNKS)
-    return statsFrom(row.melts.length ? row.melts : SEED_MELTS, burnedPctLive)
+    scheduleRefresh()
+    return statsFrom(melts.length ? melts : SEED_MELTS, burnedPctLive)
   } catch {
     return statsFrom(SEED_MELTS, burnedPctLive)
   }
