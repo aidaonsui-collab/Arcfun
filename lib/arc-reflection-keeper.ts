@@ -7,7 +7,9 @@
  *   retired Instant factories; CrucibleLock 50/25/10/10/5 for new creates.
  *   After collect, CrucibleLock positions with pendingProjectBurn get
  *   projectBurn(tokenId, minOut) — USDC buys the launch token and sends it to
- *   dead. That call is keeper-gated; the cron wallet must be setKeeper'd.
+ *   dead. Then Crucible.cook() swaps the sink's USDC for $EVE and sends it to
+ *   dead. Both swaps are keeper-gated; the cron wallet must be setKeeper'd on
+ *   CrucibleLock and on the Crucible sink.
  *
  * Instant Reflection:
  *   1. MonLock.collectFees(positionId) — 25% creator / 50% holder-sink / 25% platform;
@@ -35,6 +37,7 @@ import {
 import { INSTANT_REFLECTION_FACTORY_ABI } from './arc-reflection-launchpad'
 import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
 import { minOutFromSlippage } from './arc-swap'
+import { EVE_TOKEN } from './eve'
 
 const MONLOCK_ABI = [
   {
@@ -78,6 +81,53 @@ const POOL_FEE_ABI = [
     outputs: [{ type: 'uint24' }],
   },
 ] as const
+
+const CRUCIBLE_GETTER_ABI = [
+  {
+    type: 'function',
+    name: 'crucible',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }],
+  },
+] as const
+
+const CRUCIBLE_SINK_ABI = [
+  {
+    type: 'function',
+    name: 'cook',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'amountIn', type: 'uint256' },
+      { name: 'minEveOut', type: 'uint256' },
+    ],
+    outputs: [{ type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'cookPaused',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'evePoolFee',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint24' }],
+  },
+  {
+    type: 'function',
+    name: 'eve',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }],
+  },
+] as const
+
+/** CrucibleLock.crucible() on the live Instant locker. */
+const FALLBACK_CRUCIBLE_SINK = '0x0B3Eb6Cef8B2b3b158c560898Ead0127f08AE6B6' as Address
 
 const FEE_SINK_ABI = [
   {
@@ -138,6 +188,10 @@ const MIN_COLLECT_TOKEN = 10n ** 16n // 0.01 token (18dp)
 const MIN_PROJECT_BURN_USDC = 100_000n
 /** Slippage on USDC→launch-token project burn (5%). Same pool as the LP. */
 const PROJECT_BURN_SLIPPAGE_BPS = 500
+/** Skip cook below this — swap gas is not worth sub-dime USDC. */
+const MIN_COOK_USDC = 100_000n
+/** Slippage on USDC→$EVE cook (5%). */
+const COOK_SLIPPAGE_BPS = 500
 
 const POOL_TOKEN0_ABI = [
   {
@@ -290,6 +344,101 @@ async function maybeProjectBurn(opts: {
   }
 }
 
+async function resolveCrucibleSink(
+  client: ReturnType<typeof arcPublicClient>,
+): Promise<Address> {
+  try {
+    const sink = (await client.readContract({
+      address: ARC.INSTANT_LOCKER,
+      abi: CRUCIBLE_GETTER_ABI,
+      functionName: 'crucible',
+    })) as Address
+    if (sink && sink !== '0x0000000000000000000000000000000000000000') return sink
+  } catch {
+    /* locker may still be MonLock */
+  }
+  return FALLBACK_CRUCIBLE_SINK
+}
+
+async function maybeCookCrucible(opts: {
+  client: ReturnType<typeof arcPublicClient>
+  wallet: ReturnType<typeof arcServerWalletClient>
+}): Promise<KeeperCookResult> {
+  const { client, wallet } = opts
+  const sink = await resolveCrucibleSink(client)
+  const out: KeeperCookResult = { sink }
+  try {
+    const paused = (await client.readContract({
+      address: sink,
+      abi: CRUCIBLE_SINK_ABI,
+      functionName: 'cookPaused',
+    })) as boolean
+    if (paused) {
+      out.skippedReason = 'cookPaused'
+      return out
+    }
+    const amountIn = (await client.readContract({
+      address: ARC.USDC,
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [sink],
+    })) as bigint
+    out.usdcIn = amountIn.toString()
+    if (amountIn < MIN_COOK_USDC) {
+      out.skippedReason =
+        amountIn === 0n ? 'sink empty' : `sink ${amountIn.toString()} below dust floor`
+      return out
+    }
+    let eve = EVE_TOKEN
+    let fee = Number(ARC.UNI_POOL_FEE)
+    try {
+      eve = (await client.readContract({
+        address: sink,
+        abi: CRUCIBLE_SINK_ABI,
+        functionName: 'eve',
+      })) as Address
+    } catch {
+      /* fallback EVE_TOKEN */
+    }
+    try {
+      fee = Number(
+        await client.readContract({
+          address: sink,
+          abi: CRUCIBLE_SINK_ABI,
+          functionName: 'evePoolFee',
+        }),
+      )
+    } catch {
+      /* Instant 1% */
+    }
+    if (!Number.isFinite(fee) || fee <= 0) fee = Number(ARC.UNI_POOL_FEE)
+    const quoted = await quoteUsdcToLaunch(eve, amountIn, fee)
+    if (!quoted) {
+      out.skippedReason = 'no Uni V3 USDC→EVE quote'
+      return out
+    }
+    const minOut = minOutFromSlippage(quoted, COOK_SLIPPAGE_BPS)
+    if (minOut <= 0n) {
+      out.skippedReason = 'quoted amountOut too small after slippage'
+      return out
+    }
+    out.minEveOut = minOut.toString()
+    const hash = await wallet.writeContract({
+      address: sink,
+      abi: CRUCIBLE_SINK_ABI,
+      functionName: 'cook',
+      args: [amountIn, minOut],
+      chain: wallet.chain,
+      gas: ARC_SWAP_GAS,
+    })
+    out.tx = hash
+    await client.waitForTransactionReceipt({ hash })
+  } catch (e) {
+    out.error = (e as Error).message?.slice(0, 200)
+  }
+  return out
+}
+
 /**
  * Fee tiers the factory's `_swapQuoteForReward` walks (InstantReflectionUsdcFactory).
  * Keeper must quote the same order so minOut matches the pool reflect() will use.
@@ -393,6 +542,15 @@ export interface KeeperGasTopUpResult {
   reason?: string
 }
 
+export interface KeeperCookResult {
+  sink?: Address
+  skippedReason?: string
+  tx?: `0x${string}`
+  error?: string
+  usdcIn?: string
+  minEveOut?: string
+}
+
 export interface KeeperRunResult {
   ranAt: number
   tokensChecked: number
@@ -400,6 +558,7 @@ export interface KeeperRunResult {
   reflectionChecked: number
   results: KeeperTokenResult[]
   gasTopUp: KeeperGasTopUpResult
+  cook: KeeperCookResult
 }
 
 /** Below this native balance, pull a top-up before doing the token sweep (so the sweep itself
@@ -583,6 +742,7 @@ export async function runReflectionKeeperCycle(privateKey: `0x${string}`): Promi
   const gasTopUp = await maybeTopUpKeeperGas(privateKey)
 
   const instantResults = await collectInstantPositions(privateKey)
+  const cook = await maybeCookCrucible({ client, wallet })
 
   const tokens: Address[] = arcReflectionEnabled()
     ? await listFactoryTokens(factory, INSTANT_REFLECTION_FACTORY_ABI).catch(() => [] as Address[])
@@ -702,6 +862,7 @@ export async function runReflectionKeeperCycle(privateKey: `0x${string}`): Promi
     reflectionChecked: tokens.length,
     results,
     gasTopUp,
+    cook,
   }
 }
 
