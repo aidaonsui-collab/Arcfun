@@ -1,14 +1,13 @@
 /**
  * Arc LP-fee keeper — Instant collect + Instant Reflection sweep.
- * Cron: app/api/arc/keeper/reflect/route.ts + vercel.json (every 15m).
+ * Cron: app/api/arc/keeper/reflect/route.ts + vercel.json (hourly, :00 UTC).
  *
  * Instant (TOKEN/USDC):
  *   collectFees(positionId) on the locker for that factory. MonLock 70/30 for
  *   retired Instant factories; CrucibleLock 50/25/10/10/5 for new creates.
- *   After collect, on the hourly :00 UTC tick only, CrucibleLock positions
- *   with pendingProjectBurn get projectBurn(tokenId, minOut) — USDC buys the
- *   launch token and sends it to dead. Collect still runs every 15m. That
- *   burn call is keeper-gated; the cron wallet must be setKeeper'd.
+ *   After collect, CrucibleLock positions with pendingProjectBurn get
+ *   projectBurn(tokenId, minOut) — USDC buys the launch token and sends it to
+ *   dead. That call is keeper-gated; the cron wallet must be setKeeper'd.
  *
  * Instant Reflection:
  *   1. MonLock.collectFees(positionId) — 25% creator / 50% holder-sink / 25% platform;
@@ -139,13 +138,6 @@ const MIN_COLLECT_TOKEN = 10n ** 16n // 0.01 token (18dp)
 const MIN_PROJECT_BURN_USDC = 100_000n
 /** Slippage on USDC→launch-token project burn (5%). Same pool as the LP. */
 const PROJECT_BURN_SLIPPAGE_BPS = 500
-/**
- * vercel.json hits this route every 15m (:00, :15, :30, :45 UTC). Project burn
- * swaps only on the :00 tick. Minutes < 10 covers a delayed cron start.
- */
-function isHourlyProjectBurnTick(now = new Date()): boolean {
-  return now.getUTCMinutes() < 10
-}
 
 const POOL_TOKEN0_ABI = [
   {
@@ -406,8 +398,6 @@ export interface KeeperRunResult {
   tokensChecked: number
   instantChecked: number
   reflectionChecked: number
-  /** False on :15/:30/:45 ticks — collect still ran, projectBurn did not. */
-  projectBurnThisTick: boolean
   results: KeeperTokenResult[]
   gasTopUp: KeeperGasTopUpResult
 }
@@ -493,7 +483,6 @@ async function listFactoryTokens(
 
 async function collectInstantPositions(
   privateKey: `0x${string}`,
-  opts: { projectBurn: boolean },
 ): Promise<KeeperTokenResult[]> {
   if (!arcInstantEnabled()) return []
   const client = arcPublicClient()
@@ -565,17 +554,15 @@ async function collectInstantPositions(
             r.collectFeesError = (e as Error).message?.slice(0, 200)
           }
         }
-        if (opts.projectBurn) {
-          await maybeProjectBurn({
-            client,
-            wallet,
-            locker,
-            token,
-            positionId,
-            uniPool,
-            r,
-          })
-        }
+        await maybeProjectBurn({
+          client,
+          wallet,
+          locker,
+          token,
+          positionId,
+          uniPool,
+          r,
+        })
       } catch (e) {
         r.collectFeesError = (e as Error).message?.slice(0, 200)
       }
@@ -595,10 +582,7 @@ export async function runReflectionKeeperCycle(privateKey: `0x${string}`): Promi
   // die mid-cycle on some token N of M.
   const gasTopUp = await maybeTopUpKeeperGas(privateKey)
 
-  const projectBurnThisTick = isHourlyProjectBurnTick()
-  const instantResults = await collectInstantPositions(privateKey, {
-    projectBurn: projectBurnThisTick,
-  })
+  const instantResults = await collectInstantPositions(privateKey)
 
   const tokens: Address[] = arcReflectionEnabled()
     ? await listFactoryTokens(factory, INSTANT_REFLECTION_FACTORY_ABI).catch(() => [] as Address[])
@@ -716,7 +700,6 @@ export async function runReflectionKeeperCycle(privateKey: `0x${string}`): Promi
     tokensChecked: results.length,
     instantChecked: instantResults.length,
     reflectionChecked: tokens.length,
-    projectBurnThisTick,
     results,
     gasTopUp,
   }
