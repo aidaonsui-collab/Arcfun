@@ -1,9 +1,9 @@
 /**
  * GET /api/arc/keeper/reflect — Vercel Cron hits this hourly (see vercel.json).
- * Collects Instant locker LP fees (MonLock 70/30 or CrucibleLock 50/25/10/10/5)
- * and, on CrucibleLock, projectBurn()s accrued 10% USDC into the launch token
- * to dead. Then sweeps Instant Reflection (collect → forward → reflect).
- * See lib/arc-reflection-keeper.ts.
+ * Collects Instant locker LP fees (MonLock 70/30 or CrucibleLock 50/25/10/10/5),
+ * projectBurn()s accrued 10% USDC into the launch token to dead, then
+ * Crucible.cook()s the sink's USDC into $EVE to dead. Then Instant Reflection
+ * (collect → forward → reflect). See lib/arc-reflection-keeper.ts.
  *
  * Auth: Vercel Cron sends `Authorization: Bearer $CRON_SECRET` automatically once CRON_SECRET is
  * set as a project env var — https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs.
