@@ -27,7 +27,17 @@ import {
   buildCreateTokenReflectionArc,
   ARC_REFLECTION_CREATE_GAS,
 } from '@/lib/arc-reflection-launchpad'
-import { waitArcCreateConfirmed } from '@/lib/arc-wait-create'
+import { waitArcCreateConfirmed, waitArcTxConfirmed } from '@/lib/arc-wait-create'
+import {
+  HANDLE_PAY_FACTORY,
+  HANDLE_PAY_FACTORY_ABI,
+  HANDLE_PAY_DEPLOY_GAS,
+  handleHashFor,
+  handlePayEnabled,
+  normaliseXHandle,
+  readHandlePayVaultOf,
+  computeHandlePayVault,
+} from '@/lib/handle-pay'
 import { uploadImage } from '@/lib/upload-image'
 import { fmtUsd } from '@/lib/ui-format'
 import { TokenCard } from '@/components/TokenCard'
@@ -35,7 +45,8 @@ import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 import type { PoolToken } from '@/lib/tokens'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
 
-type Step = 'idle' | 'uploading' | 'approving' | 'creating' | 'confirming' | 'registering' | 'done'
+type Step = 'idle' | 'uploading' | 'vault' | 'approving' | 'creating' | 'confirming' | 'registering' | 'done'
+type RewardsMode = 'wallet' | 'handle'
 type LaunchType = 'instant' | 'reflection'
 
 const LAUNCH_TYPES: {
@@ -84,6 +95,9 @@ export function ArcCreateForm({
   const [telegram, setTelegram] = useState('')
   const [website, setWebsite] = useState('')
   const [rewardsWallet, setRewardsWallet] = useState('')
+  const [rewardsMode, setRewardsMode] = useState<RewardsMode>('wallet')
+  const [rewardsHandle, setRewardsHandle] = useState('')
+  const payToHandle = handlePayEnabled()
   /** Holder reward ERC-20 — default Arc USDC (6dp). Pool quote is always USDC. */
   const [rewardToken, setRewardToken] = useState<string>(ARC.USDC)
   const [buyAtLaunch, setBuyAtLaunch] = useState(false)
@@ -114,8 +128,11 @@ export function ArcCreateForm({
   const rwaQuote = quoteId !== 'usdc' ? rwaAssetById(quoteId) : null
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
   const isReflection = launchType === 'reflection'
-  const rewardsOk =
-    !rewardsWallet.trim() || isAddress(rewardsWallet.trim() as Address)
+  const handleNorm = normaliseXHandle(rewardsHandle)
+  const handleMode = payToHandle && rewardsMode === 'handle'
+  const rewardsOk = handleMode
+    ? !!handleNorm
+    : !rewardsWallet.trim() || isAddress(rewardsWallet.trim() as Address)
   const rewardTokenOk = isAddress(rewardToken)
 
   const onPickImage = (f: File | null) => {
@@ -207,7 +224,11 @@ export function ArcCreateForm({
       setError('Reflection factory isn’t live on Arc yet — pick Meme Launch to ship today.')
       return
     }
-    if (!rewardsOk) {
+    if (handleMode && !handleNorm) {
+      setError('Enter a valid X handle (or switch back to wallet).')
+      return
+    }
+    if (!handleMode && !rewardsOk) {
       setError('Rewards wallet must be a valid 0x address (or leave blank to use your wallet).')
       return
     }
@@ -232,10 +253,31 @@ export function ArcCreateForm({
       }
 
       const feeWei = arcCreationFeeWeiFor(address)
-      const rewardsAddr =
-        rewardsWallet.trim() && isAddress(rewardsWallet.trim() as Address)
+      let rewardsAddr: Address | null =
+        !handleMode && rewardsWallet.trim() && isAddress(rewardsWallet.trim() as Address)
           ? (rewardsWallet.trim() as Address)
           : null
+
+      if (handleMode && handleNorm) {
+        setStep('vault')
+        const existing = await readHandlePayVaultOf(handleNorm)
+        if (!existing || /^0x0+$/i.test(existing)) {
+          const vaultHash = await writeContractAsync({
+            address: HANDLE_PAY_FACTORY,
+            abi: HANDLE_PAY_FACTORY_ABI,
+            functionName: 'deployVault',
+            args: [handleHashFor(handleNorm)],
+            chainId: ARC_CHAIN_ID,
+            gas: HANDLE_PAY_DEPLOY_GAS,
+          })
+          await waitArcTxConfirmed(vaultHash)
+        }
+        const vault = await computeHandlePayVault(handleNorm)
+        if (!vault || /^0x0+$/i.test(vault)) {
+          throw new Error('Could not resolve the handle vault address.')
+        }
+        rewardsAddr = vault
+      }
 
       let hash: `0x${string}`
       let token: Address | undefined
@@ -341,6 +383,7 @@ export function ArcCreateForm({
         website: website.trim(),
         streamUrl: '',
         pool: pool || '',
+        rewardsHandle: handleMode && handleNorm ? handleNorm : '',
       }
       const registered = await submitRegister(token, registerPayload)
 
@@ -391,8 +434,9 @@ export function ArcCreateForm({
     )
   }
 
-  const rewardsPreview =
-    rewardsWallet.trim() && isAddress(rewardsWallet.trim() as Address)
+  const rewardsPreview = handleMode && handleNorm
+    ? `@${handleNorm}`
+    : rewardsWallet.trim() && isAddress(rewardsWallet.trim() as Address)
       ? `${rewardsWallet.trim().slice(0, 6)}…${rewardsWallet.trim().slice(-4)}`
       : 'Your wallet'
   const feeUsd = Number(arcCreationFeeWeiFor(address)) / 1e18
@@ -415,6 +459,7 @@ export function ArcCreateForm({
     creator: address || '',
     creatorShort: '',
     creatorFull: address || '',
+    rewardsHandle: handleMode && handleNorm ? handleNorm : undefined,
     currentPrice: 0,
     realSuiRaised: 0,
     threshold: 0,
@@ -637,22 +682,74 @@ export function ArcCreateForm({
               ))}
             </div>
 
-            <Field label="Creator rewards wallet (optional)">
-              <input
-                value={rewardsWallet}
-                onChange={(e) => setRewardsWallet(e.target.value.trim())}
-                placeholder={address || '0x… leave blank to use your connected wallet'}
-                spellCheck={false}
-                className={`${FIELD} font-mono`}
-              />
-              <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
-                Where your share of LP fees is paid (Instant: ~70% of quote-side fees). Defaults to the
-                wallet that signs the create tx. Rewards to {rewardsPreview}.
-              </p>
-              {rewardsWallet.trim() && !rewardsOk && (
-                <p className="mt-1.5 mb-0 text-[12px] text-coral">Enter a valid 0x address.</p>
+            <div>
+              <div className="mb-2 text-xs text-t3">Creator rewards (optional)</div>
+              {payToHandle ? (
+                <div className="mb-3 grid grid-cols-2 gap-1 p-1 rounded-2xl bg-s1 border border-hair">
+                  {(
+                    [
+                      ['wallet', 'Wallet'],
+                      ['handle', 'X handle'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setRewardsMode(key)}
+                      className={`h-9 rounded-xl text-[13px] font-semibold transition-colors ${
+                        rewardsMode === key
+                          ? 'bg-s2 border border-lime-line text-white'
+                          : 'border border-transparent text-t2 hover:text-white'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {handleMode ? (
+                <>
+                  <input
+                    value={rewardsHandle}
+                    onChange={(e) => setRewardsHandle(e.target.value)}
+                    placeholder="@handle or x.com/handle"
+                    spellCheck={false}
+                    className={FIELD}
+                  />
+                  <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
+                    {handleNorm ? (
+                      <>
+                        Creator LP fees go to <span className="text-lime-t">@{handleNorm}</span>
+                        &apos;s on-chain vault. They claim at /claim-handle by verifying the handle.
+                        Your first buy still lands in your wallet. This cannot be changed after launch.
+                      </>
+                    ) : (
+                      'Pay creator fees to an X handle. Leave empty and switch back to Wallet to keep them yourself.'
+                    )}
+                  </p>
+                  {rewardsHandle.trim() && !handleNorm && (
+                    <p className="mt-1.5 mb-0 text-[12px] text-coral">Enter a valid X handle.</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <input
+                    value={rewardsWallet}
+                    onChange={(e) => setRewardsWallet(e.target.value.trim())}
+                    placeholder={address || '0x… leave blank to use your connected wallet'}
+                    spellCheck={false}
+                    className={`${FIELD} font-mono`}
+                  />
+                  <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
+                    Where your share of LP fees is paid (Instant: ~70% of quote-side fees). Defaults to
+                    the wallet that signs the create tx. Rewards to {rewardsPreview}.
+                  </p>
+                  {rewardsWallet.trim() && !rewardsOk && (
+                    <p className="mt-1.5 mb-0 text-[12px] text-coral">Enter a valid 0x address.</p>
+                  )}
+                </>
               )}
-            </Field>
+            </div>
 
             <div className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-s1 border border-hair">
               <div className="flex flex-col gap-0.5 pr-5">
@@ -883,6 +980,8 @@ function stepLabel(step: Step): string {
   switch (step) {
     case 'uploading':
       return 'Uploading image…'
+    case 'vault':
+      return 'Creating handle vault…'
     case 'approving':
       return 'Approve USDC…'
     case 'creating':

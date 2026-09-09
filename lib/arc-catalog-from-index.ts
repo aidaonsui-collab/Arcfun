@@ -124,6 +124,7 @@ export function indexedRowToPoolToken(
     creator,
     creatorShort: shortAddr(creator),
     creatorFull: creator,
+    rewardsHandle: meta?.rewardsHandle || undefined,
     currentPrice: price,
     realSuiRaised: 0,
     threshold: 0,

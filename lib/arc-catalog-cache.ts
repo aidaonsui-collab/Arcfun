@@ -237,7 +237,7 @@ export async function upsertArcCatalogToken(row: PoolToken): Promise<void> {
 
 export async function patchArcCatalogListing(
   address: string,
-  patch: Partial<Pick<PoolToken, 'imageUrl' | 'logoUrl' | 'twitter' | 'telegram' | 'website' | 'description' | 'streamUrl'>>,
+  patch: Partial<Pick<PoolToken, 'imageUrl' | 'logoUrl' | 'twitter' | 'telegram' | 'website' | 'description' | 'streamUrl' | 'rewardsHandle'>>,
 ): Promise<void> {
   const needle = address.toLowerCase()
   if (!needle) return

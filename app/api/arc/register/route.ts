@@ -11,6 +11,7 @@ import { setArcTokenMeta } from '@/lib/arc-token-meta'
 import { patchArcCatalogListing } from '@/lib/arc-catalog-cache'
 import { readPadCreator } from '@/lib/port/origin-token'
 import { sanitizeHttpsUrl, sanitizeTelegram, sanitizeTwitter, sanitizeWebsite } from '@/lib/social-href'
+import { normaliseXHandle } from '@/lib/handle-pay'
 import { limitOr429 } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -29,6 +30,7 @@ export async function POST(req: NextRequest) {
     website?: string
     streamUrl?: string
     pool?: string
+    rewardsHandle?: string
     signature?: string
     timestamp?: number
     nonce?: string
@@ -59,6 +61,7 @@ export async function POST(req: NextRequest) {
     website: typeof body.website === 'string' ? body.website : '',
     streamUrl: typeof body.streamUrl === 'string' ? body.streamUrl : '',
     pool: typeof body.pool === 'string' ? body.pool : '',
+    rewardsHandle: typeof body.rewardsHandle === 'string' ? body.rewardsHandle : '',
   }
   const auth = await verifyTokenRegisterAuth({
     creator,
@@ -96,6 +99,7 @@ export async function POST(req: NextRequest) {
       streamUrl: streamUrl || undefined,
       creator,
       pool,
+      rewardsHandle: payload.rewardsHandle ? normaliseXHandle(payload.rewardsHandle) : '',
       instantLaunch: true,
     })
   } catch {
@@ -111,6 +115,7 @@ export async function POST(req: NextRequest) {
       website,
       description: payload.description.trim().slice(0, 280) || '',
       streamUrl: streamUrl || '',
+      rewardsHandle: payload.rewardsHandle ? normaliseXHandle(payload.rewardsHandle) : undefined,
     })
   } catch {
     /* overlay on read still picks KV up */
