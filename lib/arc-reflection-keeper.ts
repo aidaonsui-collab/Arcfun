@@ -4,7 +4,10 @@
  *
  * Instant (TOKEN/USDC):
  *   collectFees(positionId) on the locker for that factory. MonLock 70/30 for
- *   retired Instant factories; CrucibleLock 50/25/10/10/5 for new creates. No reflect step.
+ *   retired Instant factories; CrucibleLock 50/25/10/10/5 for new creates.
+ *   After collect, CrucibleLock positions with pendingProjectBurn get
+ *   projectBurn(tokenId, minOut) — USDC buys the launch token and sends it to
+ *   dead. That call is keeper-gated; the cron wallet must be setKeeper'd.
  *
  * Instant Reflection:
  *   1. MonLock.collectFees(positionId) — 25% creator / 50% holder-sink / 25% platform;
@@ -21,6 +24,7 @@ import {
   ARC,
   ARC_CHAIN_ID,
   ARC_PLATFORM_WALLET,
+  ARC_SWAP_GAS,
   arcInstantEnabled,
   arcPublicClient,
   arcReflectionEnabled,
@@ -42,6 +46,36 @@ const MONLOCK_ABI = [
       { name: 'amount0', type: 'uint256' },
       { name: 'amount1', type: 'uint256' },
     ],
+  },
+] as const
+
+const CRUCIBLE_LOCK_ABI = [
+  {
+    type: 'function',
+    name: 'pendingProjectBurn',
+    stateMutability: 'view',
+    inputs: [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [{ type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'projectBurn',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'tokenId', type: 'uint256' },
+      { name: 'minLaunchOut', type: 'uint256' },
+    ],
+    outputs: [{ name: 'tokenOut', type: 'uint256' }],
+  },
+] as const
+
+const POOL_FEE_ABI = [
+  {
+    type: 'function',
+    name: 'fee',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint24' }],
   },
 ] as const
 
@@ -100,6 +134,10 @@ const MIN_REFLECT_USDC = 250_000n
  */
 const MIN_COLLECT_USDC = 50_000n
 const MIN_COLLECT_TOKEN = 10n ** 16n // 0.01 token (18dp)
+/** Skip projectBurn below this — swap gas is not worth sub-dime USDC. */
+const MIN_PROJECT_BURN_USDC = 100_000n
+/** Slippage on USDC→launch-token project burn (5%). Same pool as the LP. */
+const PROJECT_BURN_SLIPPAGE_BPS = 500
 
 const POOL_TOKEN0_ABI = [
   {
@@ -152,6 +190,104 @@ async function skipDustCollect(opts: {
     /* simulate failed — try the live collect */
   }
   return null
+}
+
+async function quoteUsdcToLaunch(
+  launchToken: Address,
+  usdcIn: bigint,
+  fee: number,
+): Promise<bigint | null> {
+  if (usdcIn <= 0n || !ARC.UNI_QUOTER) return null
+  const client = arcPublicClient()
+  try {
+    const res = (await client.readContract({
+      address: ARC.UNI_QUOTER,
+      abi: QUOTER_ABI,
+      functionName: 'quoteExactInputSingle',
+      args: [
+        {
+          tokenIn: ARC.USDC,
+          tokenOut: launchToken,
+          amountIn: usdcIn,
+          fee,
+          sqrtPriceLimitX96: 0n,
+        },
+      ],
+    })) as readonly [bigint, bigint, number, bigint]
+    return res[0] > 0n ? res[0] : null
+  } catch {
+    return null
+  }
+}
+
+async function maybeProjectBurn(opts: {
+  client: ReturnType<typeof arcPublicClient>
+  wallet: ReturnType<typeof arcServerWalletClient>
+  locker: Address
+  token: Address
+  positionId: bigint
+  uniPool: Address
+  r: KeeperTokenResult
+}): Promise<void> {
+  const { client, wallet, locker, token, positionId, uniPool, r } = opts
+  let pending: bigint
+  try {
+    pending = (await client.readContract({
+      address: locker,
+      abi: CRUCIBLE_LOCK_ABI,
+      functionName: 'pendingProjectBurn',
+      args: [positionId],
+    })) as bigint
+  } catch {
+    // MonLock and other lockers have no pendingProjectBurn.
+    return
+  }
+  r.projectBurnUsdc = pending.toString()
+  if (pending < MIN_PROJECT_BURN_USDC) {
+    r.projectBurnSkippedReason =
+      pending === 0n ? 'no pending project burn' : `pending ${pending.toString()} below dust floor`
+    return
+  }
+
+  let fee: number = ARC.UNI_POOL_FEE
+  try {
+    fee = Number(
+      await client.readContract({
+        address: uniPool,
+        abi: POOL_FEE_ABI,
+        functionName: 'fee',
+      }),
+    )
+  } catch {
+    /* Instant launches are 1%; fall back */
+  }
+  if (!Number.isFinite(fee) || fee <= 0) fee = Number(ARC.UNI_POOL_FEE)
+
+  const quoted = await quoteUsdcToLaunch(token, pending, fee)
+  if (!quoted) {
+    r.projectBurnSkippedReason = 'no Uni V3 USDC→launch quote'
+    return
+  }
+  const minOut = minOutFromSlippage(quoted, PROJECT_BURN_SLIPPAGE_BPS)
+  if (minOut <= 0n) {
+    r.projectBurnSkippedReason = 'quoted amountOut too small after slippage'
+    return
+  }
+  r.projectBurnMinOut = minOut.toString()
+  try {
+    const hash = await wallet.writeContract({
+      address: locker,
+      abi: CRUCIBLE_LOCK_ABI,
+      functionName: 'projectBurn',
+      args: [positionId, minOut],
+      chain: wallet.chain,
+      gas: ARC_SWAP_GAS,
+    })
+    r.projectBurnTx = hash
+    await client.waitForTransactionReceipt({ hash })
+  } catch (e) {
+    r.projectBurnError = (e as Error).message?.slice(0, 200)
+  }
 }
 
 /**
@@ -230,6 +366,12 @@ export interface KeeperTokenResult {
   collectFeesTx?: `0x${string}`
   collectFeesError?: string
   collectSkippedReason?: string
+  projectBurnTx?: `0x${string}`
+  projectBurnError?: string
+  projectBurnSkippedReason?: string
+  /** USDC sitting in pendingProjectBurn at burn time (6dp). */
+  projectBurnUsdc?: string
+  projectBurnMinOut?: string
   forwardFeesTx?: `0x${string}`
   forwardFeesError?: string
   reflectTx?: `0x${string}`
@@ -397,22 +539,30 @@ async function collectInstantPositions(
         })
         if (skip) {
           r.collectSkippedReason = skip
-          results.push(r)
-          continue
+        } else {
+          try {
+            const hash = await wallet.writeContract({
+              address: locker,
+              abi: MONLOCK_ABI,
+              functionName: 'collectFees',
+              args: [positionId],
+              chain: wallet.chain,
+            })
+            r.collectFeesTx = hash
+            await client.waitForTransactionReceipt({ hash })
+          } catch (e) {
+            r.collectFeesError = (e as Error).message?.slice(0, 200)
+          }
         }
-        try {
-          const hash = await wallet.writeContract({
-            address: locker,
-            abi: MONLOCK_ABI,
-            functionName: 'collectFees',
-            args: [positionId],
-            chain: wallet.chain,
-          })
-          r.collectFeesTx = hash
-          await client.waitForTransactionReceipt({ hash })
-        } catch (e) {
-          r.collectFeesError = (e as Error).message?.slice(0, 200)
-        }
+        await maybeProjectBurn({
+          client,
+          wallet,
+          locker,
+          token,
+          positionId,
+          uniPool,
+          r,
+        })
       } catch (e) {
         r.collectFeesError = (e as Error).message?.slice(0, 200)
       }
