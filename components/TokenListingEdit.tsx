@@ -61,6 +61,8 @@ export function TokenListingEdit({
         website: website.trim(),
         streamUrl: '',
         pool: pool.instantMeta?.uniPool || '',
+        // Must match /api/arc/register auth payload keys (HandlePay added rewardsHandle).
+        rewardsHandle: pool.rewardsHandle || '',
       }
       const prepared = prepareTokenRegisterAuth(token, payload)
       const signature = await signMessageAsync({ message: prepared.message })
