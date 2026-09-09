@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { getArcCatalogToken } from '@/lib/arc-catalog-cache'
 import { getArcTokenMeta } from '@/lib/arc-token-meta'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { isHiddenToken } from '@/lib/tokens'
@@ -17,6 +18,17 @@ function artId(imageUrl: string | undefined, symbol: string): string {
     .slice(0, 12)
 }
 
+async function resolveTokenOg(address: string) {
+  const [meta, row] = await Promise.all([
+    getArcTokenMeta(address).catch(() => null),
+    getArcCatalogToken(address).catch(() => null),
+  ])
+  const imageUrl = meta?.imageUrl || row?.imageUrl || row?.logoUrl || undefined
+  const name = meta?.name || row?.name
+  const symbol = (meta?.symbol || row?.symbol || '').trim() || address.slice(0, 6)
+  return { imageUrl, name, symbol }
+}
+
 /**
  * Next prefers file-based opengraph-image over generateMetadata.images, and the default
  * content-hash query does not change when KV listing art is written after launch. Emit an
@@ -32,11 +44,10 @@ export async function generateImageMetadata({
   if (!isPlausibleEvmAddress(address) || isHiddenToken(address)) {
     return [{ id: 'fallback', alt: 'eve.fun token', size: OG_SIZE, contentType: 'image/png' }]
   }
-  const meta = await getArcTokenMeta(address).catch(() => null)
-  const symbol = (meta?.symbol || '').trim() || address.slice(0, 6)
+  const { imageUrl, symbol } = await resolveTokenOg(address)
   return [
     {
-      id: artId(meta?.imageUrl, symbol),
+      id: artId(imageUrl, symbol),
       alt: `$${symbol} on eve.fun`,
       size: OG_SIZE,
       contentType: 'image/png',
@@ -55,13 +66,8 @@ export default async function Image({
     return fallbackTokenOgImage()
   }
   try {
-    const meta = await getArcTokenMeta(address)
-    return tokenOgImage({
-      address,
-      name: meta?.name,
-      symbol: meta?.symbol,
-      imageUrl: meta?.imageUrl,
-    })
+    const { imageUrl, name, symbol } = await resolveTokenOg(address)
+    return tokenOgImage({ address, name, symbol, imageUrl })
   } catch {
     return fallbackTokenOgImage()
   }

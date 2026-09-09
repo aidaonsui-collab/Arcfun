@@ -3,7 +3,7 @@
  * Reuses Studio's image fetch so remote logos survive ImageResponse.
  */
 import { ImageResponse } from 'next/og'
-import { fetchOgImageSrc } from '@/lib/port/seo'
+import { absoluteAsset, fetchOgImageSrc } from '@/lib/port/seo'
 import { OG_SIZE, fallbackOgImage } from '@/lib/port/og-card'
 
 export { OG_SIZE }
@@ -21,7 +21,13 @@ function shortAddr(a: string): string {
 }
 
 export async function tokenOgImage(t: TokenOgInput) {
-  const art = await fetchOgImageSrc(t.imageUrl, { width: 630, height: 630 })
+  // Prefer a direct https URL — next/og fetches it itself. Prefetch-to-data-URI is a
+  // fallback for awkward hosts; it was returning null intermittently for Vercel Blob and
+  // left Telegram on the letter avatar even when imageUrl was set.
+  const direct = absoluteAsset(t.imageUrl)
+  const art =
+    (direct && /^https:\/\//i.test(direct) ? direct : null) ||
+    (await fetchOgImageSrc(t.imageUrl, { width: 630, height: 630 }))
   const symbol = (t.symbol || '').trim() || shortAddr(t.address)
   const name = (t.name || '').trim() || symbol
 
