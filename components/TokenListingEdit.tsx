@@ -10,6 +10,7 @@ import { getAddress, isAddress, type Address } from 'viem'
 import { useAccount, useSignMessage } from 'wagmi'
 import { Loader2 } from 'lucide-react'
 import { prepareTokenRegisterAuth } from '@/lib/arc-auth'
+import { ARC_PLATFORM_WALLET } from '@/lib/contracts-arc'
 import { uploadImage } from '@/lib/upload-image'
 import type { PoolToken } from '@/lib/tokens'
 
@@ -31,6 +32,11 @@ export function TokenListingEdit({
     isAddress(address) &&
     isAddress(creator) &&
     getAddress(address) === getAddress(creator as Address)
+  const isPlatform =
+    !!address &&
+    isAddress(address) &&
+    getAddress(address) === getAddress(ARC_PLATFORM_WALLET)
+  const canEdit = isCreator || isPlatform
 
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -42,7 +48,7 @@ export function TokenListingEdit({
   const [website, setWebsite] = useState(pool.website || '')
   const [description, setDescription] = useState(pool.description || '')
 
-  if (!isCreator) return null
+  if (!canEdit) return null
 
   const save = async () => {
     setBusy(true)
@@ -108,7 +114,7 @@ export function TokenListingEdit({
       {open ? (
         <div className="mt-3 w-full max-w-md rounded-[16px] border border-hair bg-s2 p-4 flex flex-col gap-3">
           <p className="m-0 text-[12px] text-t3 leading-snug">
-            Image and links are off-chain. Sign once with the launch wallet to stamp them.
+            Image and links are off-chain. Sign once with the launch wallet (or platform wallet) to stamp them.
           </p>
           <label className="text-[12px] font-medium text-t2">
             Pfp
