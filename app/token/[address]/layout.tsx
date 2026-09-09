@@ -74,7 +74,7 @@ export async function generateMetadata({
   const description = meta?.description?.replace(/\s+/g, ' ').trim()
     ? meta.description!.replace(/\s+/g, ' ').trim().slice(0, 220)
     : `Trade $${symbol} on eve.fun. Instant launch on Arc, quoted in USDC.`
-  const ogImage = `${SITE_URL}${path}/opengraph-image?v=${ogArtBust(meta?.imageUrl, symbol)}`
+  const ogImage = `${SITE_URL}${path}/opengraph-image/${ogArtBust(meta?.imageUrl, symbol)}`
 
   return {
     title,
