@@ -4,7 +4,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { type Hex } from 'viem'
-import { waitArcCreateReceipt } from '@/lib/arc-tx-receipt'
+import { waitArcCreateReceipt, waitArcMinedReceipt } from '@/lib/arc-tx-receipt'
 import { limitOr429 } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -21,7 +21,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'invalid hash' }, { status: 400 })
   }
 
+  const minedOnly = req.nextUrl.searchParams.get('mined') === '1'
+
   try {
+    if (minedOnly) {
+      const receipt = await waitArcMinedReceipt(hash as Hex, 25_000)
+      return NextResponse.json({ ok: true, status: receipt.status })
+    }
     const created = await waitArcCreateReceipt(hash as Hex, 25_000)
     return NextResponse.json({
       ok: true,

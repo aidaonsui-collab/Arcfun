@@ -104,6 +104,11 @@ export function TokenCard({
               Reflect
             </span>
           ) : null}
+          {token.rewardsHandle ? (
+            <span className="px-2 py-0.5 rounded-full bg-s2 border border-hair text-lime-t text-[10px] font-semibold">
+              @{token.rewardsHandle}
+            </span>
+          ) : null}
           <span
             className="ml-auto tabular-nums font-semibold"
             style={{ color: chg.stroke }}

@@ -39,7 +39,7 @@ export function parseArcCreateReceipt(receipt: TransactionReceipt): { token?: Ad
   return {}
 }
 
-export async function waitArcCreateReceipt(hash: Hex, timeoutMs = 25_000): Promise<ArcCreateReceipt> {
+export async function waitArcMinedReceipt(hash: Hex, timeoutMs = 25_000): Promise<TransactionReceipt> {
   const client = arcReceiptClient()
   const receipt = await client.waitForTransactionReceipt({
     hash,
@@ -47,8 +47,13 @@ export async function waitArcCreateReceipt(hash: Hex, timeoutMs = 25_000): Promi
     pollingInterval: 800,
   })
   if (receipt.status === 'reverted') {
-    throw new Error('Create transaction reverted')
+    throw new Error('Transaction reverted')
   }
+  return receipt
+}
+
+export async function waitArcCreateReceipt(hash: Hex, timeoutMs = 25_000): Promise<ArcCreateReceipt> {
+  const receipt = await waitArcMinedReceipt(hash, timeoutMs)
   const parsed = parseArcCreateReceipt(receipt)
   if (!parsed.token) {
     throw new Error('Token created, but InstantQuoteTokenCreated / InstantReflectionCreated was missing')

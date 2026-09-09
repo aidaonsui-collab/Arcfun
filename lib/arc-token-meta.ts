@@ -17,6 +17,8 @@ export interface ArcTokenMeta {
   website?: string
   streamUrl?: string
   creator?: string
+  /** Normalized X handle whose HandlePay vault receives Instant creator LP fees. */
+  rewardsHandle?: string
   /** Uni V3 pool if known at register time */
   pool?: string
   instantLaunch?: boolean

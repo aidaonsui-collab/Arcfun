@@ -43,6 +43,8 @@ export interface PoolToken {
   age: string
   creatorShort: string
   creatorFull: string
+  /** Normalized X handle if Instant creator LP fees route to a HandlePay vault. */
+  rewardsHandle?: string
   logoUrl: string
   marketCap: number
   /** Uni V3 pool TVL in USD (USDC reserves + token reserves × spot). */

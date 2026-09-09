@@ -463,6 +463,15 @@ export function TokenPageClient({
                       {creator}
                     </Link>
                   )}
+                  {pool.rewardsHandle ? (
+                    <Link
+                      href={`/claim-handle?h=${encodeURIComponent(pool.rewardsHandle)}`}
+                      className="px-2.5 py-1 rounded-[9px] bg-s2 border border-hair text-xs font-medium text-lime-t whitespace-nowrap hover:border-lime-line hover:text-white transition-colors"
+                      title={`Creator LP fees → @${pool.rewardsHandle}`}
+                    >
+                      Fees → @{pool.rewardsHandle}
+                    </Link>
+                  ) : null}
                 </div>
               </div>
             </div>
