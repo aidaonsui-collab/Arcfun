@@ -1,5 +1,5 @@
 /**
- * GET /api/arc/keeper/reflect — Vercel Cron hits this every 15 minutes (see vercel.json).
+ * GET /api/arc/keeper/reflect — Vercel Cron hits this hourly (see vercel.json).
  * Collects Instant locker LP fees (MonLock 70/30 or CrucibleLock 50/25/10/10/5)
  * and, on CrucibleLock, projectBurn()s accrued 10% USDC into the launch token
  * to dead. Then sweeps Instant Reflection (collect → forward → reflect).
