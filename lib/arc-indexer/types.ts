@@ -75,6 +75,8 @@ export type IndexerState = {
     factories: number
     otcOffers: number
     swapsTokens: number
+    /** true when the cycle stopped on the wall-clock budget before finishing the token batch. */
+    budgetHit?: boolean
     error?: string
     /** `jessica:…` when the home-Mac loop is writing; `vercel-cron` otherwise. */
     worker?: string
