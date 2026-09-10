@@ -3,14 +3,16 @@
  * Signing is Circle Agent Stack (Agent Wallet / CLI), not this server.
  * Runtime is Eve (or any MCP client).
  */
-import { encodeFunctionData, formatUnits, isAddress, parseUnits, type Address } from 'viem'
+import { encodeFunctionData, erc20Abi, formatUnits, isAddress, parseUnits, type Address } from 'viem'
 import {
   ARC,
   ARC_CHAIN_ID,
   ARC_CREATION_FEE_WEI,
   ARC_INSTANT_CREATE_GAS,
   ARC_IS_TESTNET,
+  ARC_MAX_APPROVAL,
   arcCreationFeeWeiFor,
+  arcPublicClient,
   instantLockerForFactory,
   instantProtocolAddresses,
 } from './contracts-arc'
@@ -389,6 +391,20 @@ function preparedStep(p: {
   }
 }
 
+async function allowanceOf(token: Address, owner: Address | undefined, spender: Address): Promise<bigint> {
+  if (!owner) return 0n
+  try {
+    return (await arcPublicClient().readContract({
+      address: token,
+      abi: erc20Abi,
+      functionName: 'allowance',
+      args: [owner, spender],
+    })) as bigint
+  } catch {
+    return 0n
+  }
+}
+
 export async function mcpPrepareLaunch(input: {
   name: string
   symbol: string
@@ -414,16 +430,16 @@ export async function mcpPrepareLaunch(input: {
       ? input.rewardToken
       : ARC.USDC) as Address
     const call = buildCreateTokenReflectionArc(name, symbol, reward, firstBuy, feeWei, rewards)
-    if (firstBuy > 0n) {
+    if (firstBuy > 0n && (await allowanceOf(ARC.USDC, wallet, call.address)) < firstBuy) {
       steps.push(
         preparedStep({
           step: 1,
           kind: 'approve',
           to: ARC.USDC,
-          data: encodeApprove(ARC.USDC, call.address, firstBuy),
-          description: `Approve ${formatUsdc(firstBuy)} USDC to Reflection factory for first buy`,
+          data: encodeApprove(ARC.USDC, call.address, ARC_MAX_APPROVAL),
+          description: `Approve unlimited USDC to Reflection factory (first buy ${formatUsdc(firstBuy)})`,
           functionName: 'approve',
-          args: [call.address, firstBuy],
+          args: [call.address, ARC_MAX_APPROVAL],
           wallet,
         }),
       )
@@ -444,16 +460,16 @@ export async function mcpPrepareLaunch(input: {
     )
   } else {
     const call = buildCreateTokenMemeInstantArc(name, symbol, firstBuy, feeWei, rewards)
-    if (firstBuy > 0n) {
+    if (firstBuy > 0n && (await allowanceOf(ARC.USDC, wallet, call.address)) < firstBuy) {
       steps.push(
         preparedStep({
           step: 1,
           kind: 'approve',
           to: ARC.USDC,
-          data: encodeApprove(ARC.USDC, call.address, firstBuy),
-          description: `Approve ${formatUsdc(firstBuy)} USDC to Instant factory for first buy`,
+          data: encodeApprove(ARC.USDC, call.address, ARC_MAX_APPROVAL),
+          description: `Approve unlimited USDC to Instant factory (first buy ${formatUsdc(firstBuy)})`,
           functionName: 'approve',
-          args: [call.address, firstBuy],
+          args: [call.address, ARC_MAX_APPROVAL],
           wallet,
         }),
       )
@@ -523,21 +539,23 @@ export async function mcpPrepareSwap(input: {
     const poolFee = (await findArcPoolFee(token)) ?? undefined
     let call = buildArcBuy(token, usdcIn, minOut, poolFee)
     call = withRecipient(call, wallet)
+    if ((await allowanceOf(ARC.USDC, wallet, spender)) < usdcIn) {
+      steps.push(
+        preparedStep({
+          step: 1,
+          kind: 'approve',
+          to: ARC.USDC,
+          data: encodeApprove(ARC.USDC, spender, ARC_MAX_APPROVAL),
+          description: `Approve unlimited USDC to ${spender}`,
+          functionName: 'approve',
+          args: [spender, ARC_MAX_APPROVAL],
+          wallet,
+        }),
+      )
+    }
     steps.push(
       preparedStep({
-        step: 1,
-        kind: 'approve',
-        to: ARC.USDC,
-        data: encodeApprove(ARC.USDC, spender, usdcIn),
-        description: `Approve ${formatUsdc(usdcIn)} USDC to ${spender}`,
-        functionName: 'approve',
-        args: [spender, usdcIn],
-        wallet,
-      }),
-    )
-    steps.push(
-      preparedStep({
-        step: 2,
+        step: steps.length + 1,
         kind: 'swap',
         to: call.address,
         data: encodeCall(call.abi, call.functionName, call.args),
@@ -553,8 +571,9 @@ export async function mcpPrepareSwap(input: {
       stack: ARCFUN_MCP.stack,
       eve: {
         runtime: EVE_RUNTIME.product,
-        afterPrepare:
-          'Submit approve, then swap, via Eve submit_prepared_tx with human approval. It runs circle wallet execute.',
+        afterPrepare: steps.some((s) => s.kind === 'approve')
+          ? 'Submit approve, then swap, via Eve submit_prepared_tx with human approval. It runs circle wallet execute.'
+          : 'Allowance already set. Submit the swap via Eve submit_prepared_tx with human approval.',
         sample: EVE_RUNTIME.sample,
       },
       circle: {
@@ -581,21 +600,23 @@ export async function mcpPrepareSwap(input: {
   const minOut = minOutFromSlippage(quoted, slip)
   const sellPoolFee = (await findArcPoolFee(token)) ?? undefined
   const call = buildArcSell(token, tokenIn, minOut, wallet, sellPoolFee)
+  if ((await allowanceOf(token, wallet, spender)) < tokenIn) {
+    steps.push(
+      preparedStep({
+        step: 1,
+        kind: 'approve',
+        to: token,
+        data: encodeApprove(token, spender, ARC_MAX_APPROVAL),
+        description: `Approve unlimited ${pool.symbol} to ${spender}`,
+        functionName: 'approve',
+        args: [spender, ARC_MAX_APPROVAL],
+        wallet,
+      }),
+    )
+  }
   steps.push(
     preparedStep({
-      step: 1,
-      kind: 'approve',
-      to: token,
-      data: encodeApprove(token, spender, tokenIn),
-      description: `Approve ${input.amount} ${pool.symbol} to ${spender}`,
-      functionName: 'approve',
-      args: [spender, tokenIn],
-      wallet,
-    }),
-  )
-  steps.push(
-    preparedStep({
-      step: 2,
+      step: steps.length + 1,
       kind: 'swap',
       to: call.address,
       data: encodeCall(call.abi, call.functionName, call.args),
@@ -611,8 +632,9 @@ export async function mcpPrepareSwap(input: {
     stack: ARCFUN_MCP.stack,
     eve: {
       runtime: EVE_RUNTIME.product,
-      afterPrepare:
-        'Submit approve, then swap, via Eve submit_prepared_tx with human approval. It runs circle wallet execute.',
+      afterPrepare: steps.some((s) => s.kind === 'approve')
+        ? 'Submit approve, then swap, via Eve submit_prepared_tx with human approval. It runs circle wallet execute.'
+        : 'Allowance already set. Submit the swap via Eve submit_prepared_tx with human approval.',
       sample: EVE_RUNTIME.sample,
     },
     circle: {

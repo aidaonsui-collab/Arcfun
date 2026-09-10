@@ -12,6 +12,7 @@ import { waitArcCreateReceipt } from './arc-tx-receipt'
 import {
   ARC,
   ARC_INSTANT_CREATE_GAS,
+  ARC_MAX_APPROVAL,
   arcCreationFeeWeiFor,
   arcPublicClient,
   arcServerWalletClient,
@@ -44,14 +45,22 @@ export async function mintOnArc(args: {
   const rewards = eveBurnAddress()
 
   if (firstBuy > 0n) {
-    const approveHash = await wallet.writeContract({
+    const allowed = (await client.readContract({
       address: ARC.USDC,
       abi: erc20Abi,
-      functionName: 'approve',
-      args: [ARC.INSTANT_FACTORY, firstBuy],
-      chain: wallet.chain,
-    })
-    await client.waitForTransactionReceipt({ hash: approveHash, timeout: 60_000 })
+      functionName: 'allowance',
+      args: [account.address, ARC.INSTANT_FACTORY],
+    })) as bigint
+    if (allowed < firstBuy) {
+      const approveHash = await wallet.writeContract({
+        address: ARC.USDC,
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [ARC.INSTANT_FACTORY, ARC_MAX_APPROVAL],
+        chain: wallet.chain,
+      })
+      await client.waitForTransactionReceipt({ hash: approveHash, timeout: 60_000 })
+    }
   }
 
   const call = buildCreateTokenMemeInstantArc(args.name, args.symbol, firstBuy, feeWei, rewards)
