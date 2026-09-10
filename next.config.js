@@ -1,6 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  serverExternalPackages: ['sharp'],
+  outputFileTracingIncludes: {
+    '/token/**': ['./node_modules/sharp/**/*', './node_modules/@img/**/*'],
+    '/studio/**': ['./node_modules/sharp/**/*', './node_modules/@img/**/*'],
+  },
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'res.cloudinary.com' },

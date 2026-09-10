@@ -12,7 +12,7 @@ import { getArcTokenMeta } from '@/lib/arc-token-meta'
 export { OG_SIZE }
 
 /** Bump when the OG renderer changes so Telegram/X refetch (they pin og:image by URL). */
-export const TOKEN_OG_ART_VERSION = '2'
+export const TOKEN_OG_ART_VERSION = '3'
 
 export type TokenOgInput = {
   address: string

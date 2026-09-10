@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import type { Collection, NftItem } from './types'
 import { formatInt, formatUsdc } from './format'
 import { studioPath } from './path'
+import { rasterToPngDataUri } from '@/lib/og-transcode'
 
 const STUDIO = 'ArcStudio'
 
@@ -128,21 +129,6 @@ function sniffImageType(buf: Buffer, headerType: string): string {
   return headerType
 }
 
-async function pngDataUri(buf: Buffer, width: number, height: number): Promise<string | null> {
-  try {
-    const { default: sharp } = await import('sharp')
-    const png = await sharp(buf)
-      .rotate()
-      .resize(width, height, { fit: 'cover' })
-      .png()
-      .toBuffer()
-    if (png.length < 32 || png.length > 6_000_000) return null
-    return `data:image/png;base64,${png.toString('base64')}`
-  } catch {
-    return null
-  }
-}
-
 /** Prefetch a remote image as a data URI so ImageResponse does not fail the whole card. */
 export async function fetchOgImageSrc(
   url: string | undefined | null,
@@ -153,7 +139,10 @@ export async function fetchOgImageSrc(
   const src = compactCloudinary(abs, size.width, size.height)
   try {
     const res = await fetch(src, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
-    if (!res.ok) return null
+    if (!res.ok) {
+      console.error('[fetchOgImageSrc] fetch', res.status, src.slice(0, 80))
+      return null
+    }
     const buf = Buffer.from(await res.arrayBuffer())
     if (buf.length < 32 || buf.length > 6_000_000) return null
     const headerType = (res.headers.get('content-type') || 'image/jpeg').split(';')[0].trim()
@@ -163,11 +152,12 @@ export async function fetchOgImageSrc(
       return `data:image/svg+xml;base64,${buf.toString('base64')}`
     }
     if (!SATORI_OK.has(kind)) {
-      return pngDataUri(buf, size.width, size.height)
+      return rasterToPngDataUri(buf, size.width, size.height)
     }
     const ct = kind === 'image/jpg' ? 'image/jpeg' : kind
     return `data:${ct};base64,${buf.toString('base64')}`
-  } catch {
+  } catch (e) {
+    console.error('[fetchOgImageSrc]', e)
     return null
   }
 }
