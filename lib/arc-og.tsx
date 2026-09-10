@@ -4,7 +4,7 @@
  */
 import { createHash } from 'node:crypto'
 import { ImageResponse } from 'next/og'
-import { fetchOgImageSrc } from '@/lib/port/seo'
+import { absoluteAsset, fetchOgImageSrc } from '@/lib/port/seo'
 import { OG_SIZE, fallbackOgImage } from '@/lib/port/og-card'
 import { getArcCatalogToken } from '@/lib/arc-catalog-cache'
 import { getArcTokenMeta } from '@/lib/arc-token-meta'
@@ -12,7 +12,7 @@ import { getArcTokenMeta } from '@/lib/arc-token-meta'
 export { OG_SIZE }
 
 /** Bump when the OG renderer changes so Telegram/X refetch (they pin og:image by URL). */
-export const TOKEN_OG_ART_VERSION = '5'
+export const TOKEN_OG_ART_VERSION = '6'
 
 export type TokenOgInput = {
   address: string
@@ -44,9 +44,26 @@ export async function resolveTokenOg(address: string) {
   return { imageUrl, name, symbol, description: meta?.description }
 }
 
+function rasterPngSrc(imageUrl: string | undefined): string | null {
+  const abs = absoluteAsset(imageUrl)
+  if (!abs || !/^https:\/\//i.test(abs)) return null
+  try {
+    const host = new URL(abs).hostname
+    const needsRaster =
+      /(^|\.)public\.blob\.vercel-storage\.com$/i.test(host) ||
+      /(^|\.)res\.cloudinary\.com$/i.test(host) ||
+      /\.(webp|avif)(\?|#|$)/i.test(abs)
+    if (!needsRaster) return abs
+  } catch {
+    return abs
+  }
+  // Let satori HTTP-fetch the PNG. Next's patched fetch inside OG/ISR cannot
+  // reliably call our own origin (401 / empty), which is why data-URI prefetch failed.
+  return `https://www.eve.fun/api/og-raster?u=${encodeURIComponent(abs)}&w=630&h=630`
+}
+
 export async function tokenOgImage(t: TokenOgInput) {
-  // next/og cannot decode webp/avif (Vercel Blob uploads). Prefetch and transcode to PNG.
-  const art = await fetchOgImageSrc(t.imageUrl, { width: 630, height: 630 })
+  const art = rasterPngSrc(t.imageUrl) || (await fetchOgImageSrc(t.imageUrl, { width: 630, height: 630 }))
   const symbol = (t.symbol || '').trim() || shortAddr(t.address)
   const name = (t.name || '').trim() || symbol
 
