@@ -3,6 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   serverExternalPackages: ['sharp'],
   outputFileTracingIncludes: {
+    '/api/og-raster': ['./node_modules/sharp/**/*', './node_modules/@img/**/*'],
     '/token/**': ['./node_modules/sharp/**/*', './node_modules/@img/**/*'],
     '/studio/**': ['./node_modules/sharp/**/*', './node_modules/@img/**/*'],
   },
