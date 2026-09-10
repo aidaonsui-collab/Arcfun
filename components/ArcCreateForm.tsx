@@ -13,10 +13,12 @@ import {
   ARC,
   ARC_CHAIN_ID,
   ARC_INSTANT_CREATE_GAS,
+  ARC_MAX_APPROVAL,
   arcInstantEnabled,
   arcReflectionEnabled,
   arcLaunchesEnabled,
   arcCreationFeeWeiFor,
+  arcPublicClient,
 } from '@/lib/contracts-arc'
 import {
   buildCreateTokenMemeInstantArc,
@@ -294,14 +296,22 @@ export function ArcCreateForm({
       const quoteToken = (rwaQuote?.address as Address) || ARC.USDC
 
       if (firstBuyQuote > 0n) {
-        setStep('approving')
-        await writeContractAsync({
+        const allowed = (await arcPublicClient().readContract({
           address: quoteToken,
           abi: erc20Abi,
-          functionName: 'approve',
-          args: [factory, firstBuyQuote],
-          chainId: ARC_CHAIN_ID,
-        })
+          functionName: 'allowance',
+          args: [address, factory],
+        })) as bigint
+        if (allowed < firstBuyQuote) {
+          setStep('approving')
+          await writeContractAsync({
+            address: quoteToken,
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [factory, ARC_MAX_APPROVAL],
+            chainId: ARC_CHAIN_ID,
+          })
+        }
       }
 
       if (isReflection) {

@@ -20,7 +20,7 @@
  * 2026-08-06: thirdweb (`https://5042.rpc.thirdweb.com`) is BANNED as an Arc endpoint — see the
  * block above ARC_RPC_URLS. It is not a weak fallback, it is a poisoned one.
  */
-import { createPublicClient, createWalletClient, defineChain, fallback, http, isAddress, type Address } from 'viem'
+import { createPublicClient, createWalletClient, defineChain, fallback, http, isAddress, maxUint256, type Address } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { rwaInstantFactories, rwaLockerForFactory } from './arc-rwa-assets'
 
@@ -299,6 +299,8 @@ export const ARC_INSTANT_CREATE_GAS = 12_000_000n
 
 /** ERC-20 approve — skip public-RPC eth_estimateGas (typical ~46k). */
 export const ARC_ERC20_APPROVE_GAS = 80_000n
+/** Unlimited allowance for Instant buy/sell/launch. First spend is still approve+tx; later skips. */
+export const ARC_MAX_APPROVAL = maxUint256
 /** Uni V3 swap via FeeRouter / ReferralRouter — skip estimateGas. Measured Instant fills sit well under this. */
 export const ARC_SWAP_GAS = 500_000n
 

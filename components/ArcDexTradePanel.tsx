@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useAccount, useConnectorClient, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi, formatUnits, type Address } from 'viem'
 import { Loader2, AlertCircle, CheckCircle, ExternalLink, ArrowDownUp } from 'lucide-react'
-import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_SWAP_GAS } from '@/lib/contracts-arc'
+import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_MAX_APPROVAL, ARC_SWAP_GAS } from '@/lib/contracts-arc'
 import {
   arcSwapConfigured,
   arcSwapSpender,
@@ -212,13 +212,12 @@ export function ArcDexTradePanel({
     setStatusMsg('')
     try {
       if (needApprove) {
-        const inAmt = mode === 'buy' ? parseUsdc(amount) : parseToken(amount, tokDec)
         setStatusMsg(mode === 'buy' ? 'Approve USDC…' : `Approve ${symbol}…`)
         await writeContractAsync({
           address: mode === 'buy' ? ARC.USDC : token,
           abi: erc20Abi,
           functionName: 'approve',
-          args: [spender, inAmt],
+          args: [spender, ARC_MAX_APPROVAL],
           chainId: ARC_CHAIN_ID,
           gas: ARC_ERC20_APPROVE_GAS,
         })
