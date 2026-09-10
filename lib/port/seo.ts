@@ -109,6 +109,43 @@ function compactCloudinary(url: string, width: number, height: number): string {
 /** next/og (satori) only sizes/paints png, jpeg, gif, svg. WebP/AVIF throw and the <img> is empty. */
 const SATORI_OK = new Set(['image/png', 'image/apng', 'image/jpeg', 'image/jpg', 'image/gif', 'image/svg+xml'])
 
+function rasterApiOrigin(): string {
+  const vercel = (process.env.VERCEL_URL || '').trim().replace(/^https?:\/\//, '').replace(/\/$/, '')
+  if (vercel) return `https://${vercel}`
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    'https://www.eve.fun'
+  )
+    .replace(/\/$/, '')
+    .replace('arcfun.vercel.app', 'www.eve.fun')
+    .replace('www.arcfun.co', 'www.eve.fun')
+    .replace('arcfun.co', 'www.eve.fun')
+}
+
+/** OG image bundles often drop sharp natives. Transcode in /api/og-raster instead. */
+async function rasterViaApi(
+  src: string,
+  size: { width: number; height: number },
+): Promise<string | null> {
+  const origin = rasterApiOrigin()
+  if (!origin.startsWith('https://')) return null
+  const api = `${origin}/api/og-raster?u=${encodeURIComponent(src)}&w=${size.width}&h=${size.height}`
+  try {
+    const res = await fetch(api, { cache: 'no-store', signal: AbortSignal.timeout(12_000) })
+    if (!res.ok) {
+      console.error('[fetchOgImageSrc] raster api', res.status)
+      return null
+    }
+    const png = Buffer.from(await res.arrayBuffer())
+    if (png.length < 32 || png[0] !== 0x89) return null
+    return `data:image/png;base64,${png.toString('base64')}`
+  } catch (e) {
+    console.error('[fetchOgImageSrc] raster api', e)
+    return null
+  }
+}
+
 function sniffImageType(buf: Buffer, headerType: string): string {
   if (
     buf.length >= 12 &&
@@ -152,6 +189,8 @@ export async function fetchOgImageSrc(
       return `data:image/svg+xml;base64,${buf.toString('base64')}`
     }
     if (!SATORI_OK.has(kind)) {
+      const viaApi = await rasterViaApi(src, size)
+      if (viaApi) return viaApi
       return rasterToPngDataUri(buf, size.width, size.height)
     }
     const ct = kind === 'image/jpg' ? 'image/jpeg' : kind
