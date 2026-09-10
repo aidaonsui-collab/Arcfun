@@ -80,8 +80,9 @@ const DEEP_BACKFILL_BLOCKS = 300_000n
  *  serverless timeout. Does not apply to the one-time cold-start scan (see DEEP_BACKFILL_BLOCKS). */
 const CATCHUP_MAX_BLOCKS = 200_000n
 const MAX_TRADES = 50
-/** How many trades to retain per token in KV. */
-const TRADES_CAP = 400
+/** How many trades to retain per token in KV. Exported so volume-window code can tell when a
+ *  token's tape is saturated and its 24h metrics have quietly stopped covering a full day. */
+export const TRADES_CAP = 400
 const FRESH_MS = 6_000
 
 const tradesKvKey = (token: string) => `arcfun:trades:${token.toLowerCase()}`
@@ -360,6 +361,98 @@ export async function sumSwapUsd(
   let usd = 0
   for (const t of trades) usd += t.valueUsd || 0
   return usd
+}
+
+/** Scan a little past 24h so hour-bucket boundaries never clip a real swap. */
+const WINDOW_COVER_SECONDS = 26 * 3600
+
+/**
+ * The trailing-~26h swap set for a token, straight from chain — bypassing the KV tape.
+ *
+ * The tape is capped at TRADES_CAP swaps (it's the activity feed, not history). For a token
+ * doing more than TRADES_CAP swaps/day the cap lands *inside* the 24h window, so every metric
+ * derived from the tape — volume1h/6h/12h/24h, the buy/sell split, 24h price change — silently
+ * only covers the most recent TRADES_CAP swaps. computeVolumeWindows() calls this to recompute
+ * those over the real block range, but only when the tape is actually saturated within a day
+ * (the common low-volume token still takes the free tape-only path).
+ *
+ * Timestamps are approximated from block height via a 2-sample block-time estimate rather than a
+ * getBlock per swap: a few seconds of slop is immaterial for hour-scale buckets and a sparkline,
+ * and a busy token would otherwise cost hundreds of getBlock round trips per refresh.
+ *
+ * Ascending (oldest→newest). Returns null when the pool can't be resolved or every getLogs chunk
+ * failed — the caller keeps the tape numbers in that case rather than trusting a partial scan.
+ */
+export async function fetchOnChain24hSwaps(token: Address): Promise<EvmTrade[] | null> {
+  const orient = await resolvePool(token)
+  if (!orient) return null
+  const client = arcLogsClient()
+
+  let head: bigint
+  let headTs: number
+  let blockTimeSec: number
+  try {
+    head = await client.getBlockNumber()
+    const headBlk = await client.getBlock({ blockNumber: head })
+    headTs = Number(headBlk.timestamp)
+    const probeBack = head > 40_000n ? 40_000n : head > 2n ? head / 2n : 1n
+    const probeBlk = await client.getBlock({ blockNumber: head - probeBack })
+    const dt = headTs - Number(probeBlk.timestamp)
+    blockTimeSec = dt > 0 ? dt / Number(probeBack) : 1
+  } catch (e) {
+    console.warn('[arc-trades] on-chain window head/probe', summarizeRpcError(e))
+    return null
+  }
+
+  const spanBlocks = BigInt(Math.ceil(WINDOW_COVER_SECONDS / Math.max(blockTimeSec, 0.05)))
+  const fromBlock = head > spanBlocks ? head - spanBlocks : 0n
+
+  const out: EvmTrade[] = []
+  let anyChunkOk = false
+  let cursor = fromBlock
+  while (cursor <= head) {
+    const chunkEnd = cursor + CHUNK - 1n > head ? head : cursor + CHUNK - 1n
+    let logs: V3SwapLog[]
+    try {
+      logs = await getSwapLogs(orient.pool, cursor, chunkEnd)
+      anyChunkOk = true
+    } catch (e) {
+      console.warn('[arc-trades] on-chain window getLogs', summarizeRpcError(e))
+      cursor = chunkEnd + 1n
+      continue
+    }
+    for (const log of logs) {
+      const a0 = log.args.amount0 as bigint
+      const a1 = log.args.amount1 as bigint
+      const tokenDelta = orient.tokenIs0 ? a0 : a1
+      const quoteDelta = orient.tokenIs0 ? a1 : a0
+      const tokenAmt = abs(tokenDelta)
+      const quoteAmt = abs(quoteDelta)
+      if (tokenAmt === 0n || quoteAmt === 0n) continue
+      const blk = log.blockNumber ?? head
+      const ts = Math.round(headTs - Number(head - blk) * blockTimeSec)
+      const tokenHuman = Number(formatUnits(tokenAmt, orient.tokenDecimals))
+      const quoteHuman = Number(formatUnits(quoteAmt, orient.quoteDecimals))
+      const price = tokenHuman > 0 ? quoteHuman / tokenHuman : 0
+      out.push({
+        txHash: (log.transactionHash ?? ZERO) as `0x${string}`,
+        logIndex: Number(log.logIndex ?? 0),
+        blockNumber: Number(blk),
+        ts,
+        isBuy: tokenDelta < 0n,
+        trader: (log.args.recipient as Address) || (log.args.sender as Address) || ZERO,
+        tokenAmount: tokenHuman,
+        nativeAmount: quoteHuman,
+        valueUsd: quoteHuman, // quote ≈ USD (USDC pools; RWA-quote pools inherit the same approximation as scanSwapRange)
+        price,
+        priceUsd: price,
+      })
+    }
+    cursor = chunkEnd + 1n
+  }
+  if (!anyChunkOk) return null
+  out.sort((a, b) => a.blockNumber - b.blockNumber || (a.logIndex ?? 0) - (b.logIndex ?? 0))
+  return out
 }
 
 /**
