@@ -62,6 +62,23 @@ const MAX_FACTORY_CHUNKS = 24
 const HOT_BATCH = 8
 const ROTATE_BATCH = 12
 
+/**
+ * Wall-clock budget for one cron cycle. The route's maxDuration is 300s; this leaves ~60s for
+ * cold start, the closing saveState + count reads, and the response. Without it, a cycle where
+ * Arc's public RPCs are slow runs every token's trade-sync + lifetime volume scan long past 300s,
+ * gets killed mid-run, saves nothing, and the next cycle restarts from the same cursor — a
+ * permanent stall until the RPCs recover (observed 2026-09-10: ~20 min of back-to-back 504s, the
+ * volume store frozen the whole time). With the budget the cycle stops early and saves partial
+ * progress, so the hot tokens still refresh every cycle and the rotation resumes where it left off.
+ *
+ * INDEXER_CYCLE_BUDGET_MS overrides it — a long-running daemon (lib/arc-indexer/daemon.ts) that
+ * isn't bounded by a 300s function limit can raise it.
+ */
+const CYCLE_BUDGET_MS = (() => {
+  const raw = Number(process.env.INDEXER_CYCLE_BUDGET_MS)
+  return Number.isFinite(raw) && raw >= 30_000 ? raw : 240_000
+})()
+
 const ALL_TOKENS_ABI = [
   {
     type: 'function',
@@ -230,9 +247,10 @@ async function scanFactoryEvents(
 
 async function catchUpSwapsAndVolume(
   state: IndexerState,
-): Promise<{ state: IndexerState; tokens: number }> {
+  deadline: number,
+): Promise<{ state: IndexerState; tokens: number; budgetHit: boolean }> {
   const all = await listIndexedTokens()
-  if (!all.length) return { state, tokens: 0 }
+  if (!all.length) return { state, tokens: 0, budgetHit: false }
 
   // Hottest first, but a tape that stopped updating ranks above a token that
   // genuinely just traded: lastTradeAt 3h ago with a cursor at head is the EVE
@@ -264,18 +282,21 @@ async function catchUpSwapsAndVolume(
     rotated.push(all[(start + i) % all.length])
   }
 
-  // A token in both sets is processed once.
-  const seen = new Set<string>()
-  const batch: IndexedToken[] = []
-  for (const t of [...hot, ...rotated]) {
-    const key = t.token.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    batch.push(t)
-  }
-
   let n = 0
-  for (const t of batch) {
+  let budgetHit = false
+  const processed = new Set<string>()
+
+  // Returns false only when the wall-clock budget is spent *before* this token's work starts —
+  // the caller uses that to stop without counting the token as covered. A dedupe hit or an RPC
+  // error still returns true (the slot is done; retrying it forever gains nothing).
+  const runOne = async (t: IndexedToken): Promise<boolean> => {
+    const key = t.token.toLowerCase()
+    if (processed.has(key)) return true
+    if (Date.now() >= deadline) {
+      budgetHit = true
+      return false
+    }
+    processed.add(key)
     try {
       // Sync directly rather than via fetchArcTrades: this call never used fetchArcTrades's
       // return value, only its blocking sync side effect, and computeVolumeWindows right below
@@ -290,6 +311,21 @@ async function catchUpSwapsAndVolume(
     } catch (e) {
       console.warn('[arc-indexer] swap/volume', t.token, summarizeRpcError(e))
     }
+    return true
+  }
+
+  // Hot tokens first — the ones people are actually looking at get refreshed even on a cycle
+  // that never reaches the rotation.
+  for (const t of hot) {
+    if (!(await runOne(t))) break
+  }
+
+  // Then the round-robin. The cursor advances only past slots we actually reached, so a cycle
+  // cut short by the budget resumes here next time instead of skipping quiet tokens.
+  let rotatedConsumed = 0
+  for (const t of rotated) {
+    if (!(await runOne(t))) break
+    rotatedConsumed++
   }
 
   return {
@@ -299,15 +335,18 @@ async function catchUpSwapsAndVolume(
       // otherwise overlap with the hot set (a currently-hot token that also happened to be next
       // in line) would advance the pointer too slowly, or leave it stuck if the two kept
       // overlapping, defeating the coverage guarantee.
-      swapRotate: (start + rotated.length) % Math.max(all.length, 1),
+      swapRotate: (start + rotatedConsumed) % Math.max(all.length, 1),
     },
     tokens: n,
+    budgetHit,
   }
 }
 
 export type IndexerRunResult = {
   ok: boolean
   ms: number
+  /** true when the cycle stopped on CYCLE_BUDGET_MS before finishing the token batch. */
+  budgetHit?: boolean
   kvConfigured: boolean
   seeded: number
   factories: number
@@ -322,10 +361,12 @@ export type IndexerRunResult = {
 
 export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
   const t0 = Date.now()
+  const deadline = t0 + CYCLE_BUDGET_MS
   let seeded = 0
   let factories = 0
   let otcOffers = 0
   let swapsTokens = 0
+  let budgetHit = false
 
   // Load state BEFORE the try that ends in saveState(). A failed KV read must abort the whole
   // cycle without writing anything: loadState()'s zeroed default is only correct for a genuine
@@ -393,9 +434,16 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
     //  - catchUpOtcDeskStats() likewise raced its own per-chain settledCursor between the two.
     //
     // One owner per dataset: this cron does factories + swaps/volume, the OTC cron does OTC.
-    const s = await catchUpSwapsAndVolume(state)
-    state = s.state
-    swapsTokens = s.tokens
+    // Skip the phase entirely if the factory scan already ate the budget — still fall through
+    // to saveState so the factory cursor progress isn't lost.
+    if (Date.now() < deadline) {
+      const s = await catchUpSwapsAndVolume(state, deadline)
+      state = s.state
+      swapsTokens = s.tokens
+      budgetHit = s.budgetHit
+    } else {
+      budgetHit = true
+    }
 
     const ms = Date.now() - t0
     state = {
@@ -407,6 +455,7 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
         factories,
         otcOffers,
         swapsTokens,
+        budgetHit,
         worker: indexerWorkerName(),
       },
     }
@@ -415,6 +464,7 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
     return {
       ok: true,
       ms,
+      budgetHit,
       kvConfigured: kvConfigured(),
       seeded,
       factories,
