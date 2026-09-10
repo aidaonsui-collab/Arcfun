@@ -105,6 +105,44 @@ function compactCloudinary(url: string, width: number, height: number): string {
   return `${m[1]}w_${width},h_${height},c_fill,q_70,f_jpg/${rest}`
 }
 
+/** next/og (satori) only sizes/paints png, jpeg, gif, svg. WebP/AVIF throw and the <img> is empty. */
+const SATORI_OK = new Set(['image/png', 'image/apng', 'image/jpeg', 'image/jpg', 'image/gif', 'image/svg+xml'])
+
+function sniffImageType(buf: Buffer, headerType: string): string {
+  if (
+    buf.length >= 12 &&
+    buf.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buf.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return 'image/webp'
+  }
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return 'image/png'
+  }
+  if (buf.length >= 6 && buf.subarray(0, 3).toString('ascii') === 'GIF') return 'image/gif'
+  if (buf.length >= 12 && buf.subarray(4, 8).toString('ascii') === 'ftyp') {
+    const brand = buf.subarray(8, 12).toString('ascii')
+    if (brand === 'avif' || brand === 'avis') return 'image/avif'
+  }
+  return headerType
+}
+
+async function pngDataUri(buf: Buffer, width: number, height: number): Promise<string | null> {
+  try {
+    const { default: sharp } = await import('sharp')
+    const png = await sharp(buf)
+      .rotate()
+      .resize(width, height, { fit: 'cover' })
+      .png()
+      .toBuffer()
+    if (png.length < 32 || png.length > 6_000_000) return null
+    return `data:image/png;base64,${png.toString('base64')}`
+  } catch {
+    return null
+  }
+}
+
 /** Prefetch a remote image as a data URI so ImageResponse does not fail the whole card. */
 export async function fetchOgImageSrc(
   url: string | undefined | null,
@@ -114,12 +152,20 @@ export async function fetchOgImageSrc(
   if (!abs) return null
   const src = compactCloudinary(abs, size.width, size.height)
   try {
-    const res = await fetch(src, { cache: 'no-store' })
+    const res = await fetch(src, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
     if (!res.ok) return null
     const buf = Buffer.from(await res.arrayBuffer())
     if (buf.length < 32 || buf.length > 6_000_000) return null
-    const ct = (res.headers.get('content-type') || 'image/jpeg').split(';')[0].trim()
-    if (!ct.startsWith('image/')) return null
+    const headerType = (res.headers.get('content-type') || 'image/jpeg').split(';')[0].trim()
+    if (!headerType.startsWith('image/') && !sniffImageType(buf, '').startsWith('image/')) return null
+    const kind = sniffImageType(buf, headerType)
+    if (kind === 'image/svg+xml') {
+      return `data:image/svg+xml;base64,${buf.toString('base64')}`
+    }
+    if (!SATORI_OK.has(kind)) {
+      return pngDataUri(buf, size.width, size.height)
+    }
+    const ct = kind === 'image/jpg' ? 'image/jpeg' : kind
     return `data:${ct};base64,${buf.toString('base64')}`
   } catch {
     return null

@@ -2,11 +2,17 @@
  * Open Graph cards for Instant token pages — pfp + name/symbol, Arcfun chrome.
  * Reuses Studio's image fetch so remote logos survive ImageResponse.
  */
+import { createHash } from 'node:crypto'
 import { ImageResponse } from 'next/og'
-import { absoluteAsset, fetchOgImageSrc } from '@/lib/port/seo'
+import { fetchOgImageSrc } from '@/lib/port/seo'
 import { OG_SIZE, fallbackOgImage } from '@/lib/port/og-card'
+import { getArcCatalogToken } from '@/lib/arc-catalog-cache'
+import { getArcTokenMeta } from '@/lib/arc-token-meta'
 
 export { OG_SIZE }
+
+/** Bump when the OG renderer changes so Telegram/X refetch (they pin og:image by URL). */
+export const TOKEN_OG_ART_VERSION = '2'
 
 export type TokenOgInput = {
   address: string
@@ -20,14 +26,27 @@ function shortAddr(a: string): string {
   return `${a.slice(0, 6)}…${a.slice(-4)}`
 }
 
+export function tokenOgArtId(imageUrl: string | undefined, symbol: string): string {
+  return createHash('sha256')
+    .update(`${imageUrl || ''}|${symbol}|${TOKEN_OG_ART_VERSION}`)
+    .digest('hex')
+    .slice(0, 12)
+}
+
+export async function resolveTokenOg(address: string) {
+  const [meta, row] = await Promise.all([
+    getArcTokenMeta(address).catch(() => null),
+    getArcCatalogToken(address).catch(() => null),
+  ])
+  const imageUrl = meta?.imageUrl || row?.imageUrl || row?.logoUrl || undefined
+  const name = meta?.name || row?.name
+  const symbol = (meta?.symbol || row?.symbol || '').trim() || address.slice(0, 6)
+  return { imageUrl, name, symbol, description: meta?.description }
+}
+
 export async function tokenOgImage(t: TokenOgInput) {
-  // Prefer a direct https URL — next/og fetches it itself. Prefetch-to-data-URI is a
-  // fallback for awkward hosts; it was returning null intermittently for Vercel Blob and
-  // left Telegram on the letter avatar even when imageUrl was set.
-  const direct = absoluteAsset(t.imageUrl)
-  const art =
-    (direct && /^https:\/\//i.test(direct) ? direct : null) ||
-    (await fetchOgImageSrc(t.imageUrl, { width: 630, height: 630 }))
+  // next/og cannot decode webp/avif (Vercel Blob uploads). Prefetch and transcode to PNG.
+  const art = await fetchOgImageSrc(t.imageUrl, { width: 630, height: 630 })
   const symbol = (t.symbol || '').trim() || shortAddr(t.address)
   const name = (t.name || '').trim() || symbol
 

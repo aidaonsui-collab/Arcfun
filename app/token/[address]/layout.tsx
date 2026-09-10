@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
-import { createHash } from 'node:crypto'
-import { getArcTokenMeta } from '@/lib/arc-token-meta'
+import { resolveTokenOg, tokenOgArtId } from '@/lib/arc-og'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { isHiddenToken } from '@/lib/tokens'
 
@@ -41,16 +40,6 @@ function shortAddr(a: string): string {
   return `${a.slice(0, 6)}…${a.slice(-4)}`
 }
 
-/** Telegram/X pin og:image by URL. Next's file-route content hash does not change when KV
- *  meta (pfp) is written after launch, so first crawl (letter avatar) sticks forever. Bust on
- *  imageUrl/symbol so a later Sign-and-save produces a new URL crawlers will refetch. */
-function ogArtBust(imageUrl: string | undefined, symbol: string): string {
-  return createHash('sha256')
-    .update(`${imageUrl || ''}|${symbol}`)
-    .digest('hex')
-    .slice(0, 12)
-}
-
 export async function generateMetadata({
   params,
 }: {
@@ -67,14 +56,14 @@ export async function generateMetadata({
     }
   }
 
-  const meta = await getArcTokenMeta(address).catch(() => null)
-  const symbol = (meta?.symbol || '').trim() || shortAddr(address)
-  const name = (meta?.name || '').trim() || symbol
+  const meta = await resolveTokenOg(address)
+  const symbol = (meta.symbol || '').trim() || shortAddr(address)
+  const name = (meta.name || '').trim() || symbol
   const title = `$${symbol} — ${name} | ${SITE}`
-  const description = meta?.description?.replace(/\s+/g, ' ').trim()
+  const description = meta.description?.replace(/\s+/g, ' ').trim()
     ? meta.description!.replace(/\s+/g, ' ').trim().slice(0, 220)
     : `Trade $${symbol} on eve.fun. Instant launch on Arc, quoted in USDC.`
-  const ogImage = `${SITE_URL}${path}/opengraph-image/${ogArtBust(meta?.imageUrl, symbol)}`
+  const ogImage = `${SITE_URL}${path}/opengraph-image/${tokenOgArtId(meta.imageUrl, symbol)}`
 
   return {
     title,

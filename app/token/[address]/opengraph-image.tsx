@@ -1,33 +1,18 @@
-import { createHash } from 'node:crypto'
-import { getArcCatalogToken } from '@/lib/arc-catalog-cache'
-import { getArcTokenMeta } from '@/lib/arc-token-meta'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { isHiddenToken } from '@/lib/tokens'
-import { fallbackTokenOgImage, OG_SIZE, tokenOgImage } from '@/lib/arc-og'
+import {
+  fallbackTokenOgImage,
+  OG_SIZE,
+  resolveTokenOg,
+  tokenOgArtId,
+  tokenOgImage,
+} from '@/lib/arc-og'
 
 export const runtime = 'nodejs'
 export const alt = 'eve.fun token'
 export const size = OG_SIZE
 export const contentType = 'image/png'
 export const revalidate = 60
-
-function artId(imageUrl: string | undefined, symbol: string): string {
-  return createHash('sha256')
-    .update(`${imageUrl || ''}|${symbol}`)
-    .digest('hex')
-    .slice(0, 12)
-}
-
-async function resolveTokenOg(address: string) {
-  const [meta, row] = await Promise.all([
-    getArcTokenMeta(address).catch(() => null),
-    getArcCatalogToken(address).catch(() => null),
-  ])
-  const imageUrl = meta?.imageUrl || row?.imageUrl || row?.logoUrl || undefined
-  const name = meta?.name || row?.name
-  const symbol = (meta?.symbol || row?.symbol || '').trim() || address.slice(0, 6)
-  return { imageUrl, name, symbol }
-}
 
 /**
  * Next prefers file-based opengraph-image over generateMetadata.images, and the default
@@ -47,7 +32,7 @@ export async function generateImageMetadata({
   const { imageUrl, symbol } = await resolveTokenOg(address)
   return [
     {
-      id: artId(imageUrl, symbol),
+      id: tokenOgArtId(imageUrl, symbol),
       alt: `$${symbol} on eve.fun`,
       size: OG_SIZE,
       contentType: 'image/png',
