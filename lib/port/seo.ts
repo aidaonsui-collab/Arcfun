@@ -110,8 +110,8 @@ function compactCloudinary(url: string, width: number, height: number): string {
 const SATORI_OK = new Set(['image/png', 'image/apng', 'image/jpeg', 'image/jpg', 'image/gif', 'image/svg+xml'])
 
 function rasterApiOrigin(): string {
-  const vercel = (process.env.VERCEL_URL || '').trim().replace(/^https?:\/\//, '').replace(/\/$/, '')
-  if (vercel) return `https://${vercel}`
+  // Use the public alias, not VERCEL_URL — the unique *.vercel.app host is
+  // deployment-protected and the OG function gets 401 HTML instead of PNG.
   return (
     process.env.NEXT_PUBLIC_SITE_URL ||
     process.env.NEXT_PUBLIC_APP_URL ||
