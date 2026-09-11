@@ -59,6 +59,27 @@ function sanitizeSnapshot(snap: CatalogSnapshot): CatalogSnapshot {
   }
 }
 
+/** Identity upsert writes KV from one instance; another lambda's memory can be
+ *  newer-looking by FRESH_MS while missing the just-launched token. Prefer the
+ *  snapshot with the later `at`. */
+function pickFresher(
+  a: CatalogSnapshot | null | undefined,
+  b: CatalogSnapshot | null | undefined,
+): CatalogSnapshot | null {
+  const ua = isUsableCatalogSnapshot(a) ? sanitizeSnapshot(a) : null
+  const ub = isUsableCatalogSnapshot(b) ? sanitizeSnapshot(b) : null
+  if (!ua) return ub
+  if (!ub) return ua
+  return ub.at > ua.at ? ub : ua
+}
+
+function launchCreatedAt(row: PoolToken, fallback?: number): number {
+  const n = row.createdAt
+  if (typeof n === 'number' && n > 0) return n
+  if (typeof fallback === 'number' && fallback > 0) return fallback
+  return Math.floor(Date.now() / 1000)
+}
+
 async function readKv(): Promise<CatalogSnapshot | null> {
   try {
     const row = await kv.get<CatalogSnapshot>(KV_KEY)
@@ -104,7 +125,7 @@ async function rebuild(): Promise<CatalogSnapshot> {
     } catch {
       /* indexer optional */
     }
-    const prev = isUsableCatalogSnapshot(memory) ? memory : await readKv()
+    const prev = pickFresher(memory, await readKv())
     // A factory timeout (common after adding the Crucible Instant factory) used
     // to throw and freeze the last snapshot, so a just-launched token stayed off
     // home even though /token/[addr] worked. Keep tokens the rebuild missed.
@@ -174,7 +195,7 @@ async function overlaySnapshot(snap: CatalogSnapshot): Promise<CatalogSnapshot> 
 }
 
 export async function getArcHomeCatalog(): Promise<CatalogSnapshot> {
-  const snap = isUsableCatalogSnapshot(memory) ? sanitizeSnapshot(memory) : await readKv()
+  const snap = pickFresher(memory, await readKv())
   if (snap && snap.tokens.length > 0) {
     memory = snap
     if (Date.now() - snap.at > FRESH_MS) scheduleRefresh()
@@ -197,7 +218,7 @@ export async function getArcHomeCatalog(): Promise<CatalogSnapshot> {
 export async function getArcCatalogToken(address: string): Promise<PoolToken | null> {
   const needle = (address || '').toLowerCase()
   if (!needle || isHiddenToken(needle)) return null
-  const snap = isUsableCatalogSnapshot(memory) ? memory : await readKv()
+  const snap = pickFresher(memory, await readKv())
   const hit =
     snap?.tokens.find((t) =>
       [t.coinType, t.poolId, t.id].some((v) => (v || '').toLowerCase() === needle),
@@ -219,11 +240,19 @@ export async function getArcCatalogToken(address: string): Promise<PoolToken | n
 export async function upsertArcCatalogToken(row: PoolToken): Promise<void> {
   const id = catalogId(row)
   if (!id || isHiddenToken(id)) return
-  const snap = isUsableCatalogSnapshot(memory) ? memory : await readKv()
+  const snap = pickFresher(memory, await readKv())
   const tokens = snap?.tokens ? [...snap.tokens] : []
   const idx = tokens.findIndex((t) => catalogId(t) === id)
-  if (idx >= 0) tokens[idx] = { ...tokens[idx], ...row }
-  else tokens.unshift(row)
+  if (idx >= 0) {
+    const prev = tokens[idx]
+    tokens[idx] = {
+      ...prev,
+      ...row,
+      createdAt: launchCreatedAt(row, prev.createdAt),
+    }
+  } else {
+    tokens.unshift({ ...row, createdAt: launchCreatedAt(row) })
+  }
   const next: CatalogSnapshot = sanitizeSnapshot(
     cloneJson({
       tokens,
