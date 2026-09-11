@@ -53,6 +53,26 @@ function partsUntil(target: Date, now: Date) {
   return { d, h, m, past: ms === 0 }
 }
 
+type VaultSnapshot = {
+  configured: boolean
+  treasuryAddress: string | null
+  usdcBalance: string
+  totalRoutedUsdc: string
+  approvedRwaCount: number
+  status: 'unconfigured' | 'escrowing' | 'awaiting_rwa_market'
+}
+
+const VAULT_STATUS_LABEL: Record<VaultSnapshot['status'], string> = {
+  unconfigured: 'Stub',
+  escrowing: 'Escrowing',
+  awaiting_rwa_market: 'Awaiting market',
+}
+
+function usdcNum(raw: string): number {
+  const n = Number(raw)
+  return Number.isFinite(n) ? n / 1e6 : 0
+}
+
 export function VaultPageClient() {
   const { address, isConnected } = useAccount()
   const [tab, setTab] = useState<Tab>('overview')
@@ -62,11 +82,25 @@ export function VaultPageClient() {
   const [rwaFilter, setRwaFilter] = useState<'all' | VaultRwaStatus>('all')
   const [selected, setSelected] = useState<VaultRwa | null>(null)
   const [now, setNow] = useState<Date | null>(null)
+  const [snapshot, setSnapshot] = useState<VaultSnapshot | null>(null)
 
   useEffect(() => {
     setNow(new Date())
     const id = setInterval(() => setNow(new Date()), 30_000)
     return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/arc/vault', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d: VaultSnapshot) => {
+        if (!cancelled) setSnapshot(d)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const clock = now ? partsUntil(new Date(VAULT_NETWORK.windowDate), now) : null
@@ -75,15 +109,31 @@ export function VaultPageClient() {
   const tiles = preview
     ? [
         { label: 'TVL', value: formatVaultUsd(VAULT_PREVIEW.tvl, 0), sub: 'sample board' },
-        { label: 'USDC routed', value: formatVaultUsd(VAULT_PREVIEW.usdcRouted, 0), sub: 'creator fees to vault' },
+        { label: 'USDC routed', value: formatVaultUsd(VAULT_PREVIEW.usdcRouted, 0), sub: 'platform fees to vault' },
         { label: 'RWA held', value: '$0', sub: 'none approved yet' },
         { label: 'Status', value: 'Preview', sub: 'not live' },
       ]
     : [
-        { label: 'TVL', value: '…', sub: 'waiting on Arc RWA' },
-        { label: 'USDC routed', value: '$0', sub: 'creator fees to vault' },
-        { label: 'RWA held', value: '…', sub: 'none approved yet' },
-        { label: 'Status', value: 'Stub', sub: 'no fees move yet' },
+        {
+          label: 'TVL',
+          value: snapshot ? formatVaultUsd(usdcNum(snapshot.usdcBalance), 0) : '…',
+          sub: snapshot?.configured ? 'live treasury balance' : 'treasury not configured',
+        },
+        {
+          label: 'USDC routed',
+          value: snapshot ? formatVaultUsd(usdcNum(snapshot.totalRoutedUsdc), 0) : '$0',
+          sub: 'platform fees to vault, lifetime',
+        },
+        {
+          label: 'RWA held',
+          value: '$0',
+          sub: snapshot?.approvedRwaCount ? `${snapshot.approvedRwaCount} approved` : 'none approved yet',
+        },
+        {
+          label: 'Status',
+          value: snapshot ? VAULT_STATUS_LABEL[snapshot.status] : 'Stub',
+          sub: snapshot?.configured ? 'reading live chain data' : 'no fees move yet',
+        },
       ]
 
   return (
@@ -105,12 +155,12 @@ export function VaultPageClient() {
           <div>
             <p className="m-0 text-[11px] font-semibold uppercase tracking-[0.14em] text-t3">The Eve Vault</p>
             <h1 className="m-0 mt-3 text-[32px] sm:text-[44px] font-semibold tracking-display leading-[1.08] text-white">
-              Creator fees into real assets.
+              Platform fees into real assets.
             </h1>
             <p className="mt-4 mb-0 max-w-xl text-[16px] text-t2 leading-relaxed">
-              When tokenized RWAs are live on Arc, Instant creator USDC can buy into a curated vault
-              instead of sitting idle. This board is ready. The money is not. No fee split changes,
-              no routing, until an explicit yes.
+              When tokenized RWAs are live on Arc, Instant's own platform-fee USDC can buy into a
+              curated vault instead of sitting idle. This board is ready. The money is not. No fee
+              split changes, no routing, until an explicit yes.
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-2">
               <button
@@ -167,6 +217,7 @@ export function VaultPageClient() {
             onInspect={setSelected}
             onMonthlyFees={setMonthlyFees}
             onEveSlice={setEveSlice}
+            usdcRouted={snapshot ? usdcNum(snapshot.totalRoutedUsdc) : 0}
           />
         ) : null}
         {tab === 'holdings' ? (
@@ -205,6 +256,7 @@ function Overview({
   onInspect,
   onMonthlyFees,
   onEveSlice,
+  usdcRouted,
 }: {
   tiles: { label: string; value: string; sub: string }[]
   preview: boolean
@@ -217,6 +269,7 @@ function Overview({
   onInspect: (r: VaultRwa) => void
   onMonthlyFees: (n: number) => void
   onEveSlice: (n: number) => void
+  usdcRouted: number
 }) {
   const series = useMemo(
     () =>
@@ -291,8 +344,8 @@ function Overview({
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <MiniStat
               label="USDC routed"
-              value={preview ? formatVaultUsd(VAULT_PREVIEW.usdcRouted, 0) : '$0'}
-              hint="creator fees to vault"
+              value={preview ? formatVaultUsd(VAULT_PREVIEW.usdcRouted, 0) : formatVaultUsd(usdcRouted, 0)}
+              hint="platform fees to vault, lifetime"
             />
             <MiniStat
               label="Last Instant legs"
@@ -503,7 +556,7 @@ function Holdings({
           <MiniStat
             label="Instant USDC"
             value={preview ? formatVaultUsd(1840, 0) : '$0'}
-            hint="accrued creator fees"
+            hint="accrued platform fees"
           />
           <MiniStat label={`${VAULT.shareSymbol} shares`} value="0.00" hint="ERC-4626 · none minted" />
         </div>
