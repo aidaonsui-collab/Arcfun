@@ -12,6 +12,11 @@ export function fmtUsd(n: number | undefined | null): string {
   if (abs >= 1_000) return `$${(n / 1_000).toFixed(1)}K`
   if (abs >= 1) return `$${n.toFixed(2)}`
   if (abs >= 0.0001) return `$${n.toFixed(4)}`
+  // A dust-sized trade (e.g. a $0.00003 buy) used to render as raw JS scientific notation
+  // ("$3.00e-5") here — technically correct, unreadable to anyone who isn't parsing exponents.
+  // Match the same "<0.0001" treatment already used for tiny token amounts elsewhere (e.g.
+  // ArcDexTradePanel's fmtTok) rather than switching notation.
+  if (abs >= 1e-8) return n < 0 ? '-<$0.0001' : '<$0.0001'
   return `$${n.toExponential(2)}`
 }
 
@@ -20,6 +25,8 @@ export function fmtPrice(n: number | undefined | null): string {
   if (n >= 1) return `$${n.toFixed(2)}`
   if (n >= 0.01) return `$${n.toFixed(4)}`
   if (n >= 0.000001) return `$${n.toFixed(6)}`
+  // Same fix as fmtUsd above — avoid raw scientific notation for a merely-very-small price.
+  if (n >= 1e-8) return '<$0.000001'
   return `$${n.toExponential(2)}`
 }
 
