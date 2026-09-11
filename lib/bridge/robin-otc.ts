@@ -192,10 +192,9 @@ export function getPaymentChain(id: OtcPaymentChainId | number): OtcPaymentChain
 }
 
 export function robinOtcEnabled(): boolean {
-  // Desk is on. NEXT_PUBLIC_ROBIN_OTC_ENABLED=0 takes it down without a code change.
-  if (process.env.NEXT_PUBLIC_ROBIN_OTC_ENABLED === '0') return false
-  if (process.env.NEXT_PUBLIC_ROBIN_OTC_ENABLED === '1') return true
-  return true
+  // Arc OTC sunset (2026-09-11): desk hard-off. Env cannot re-enable.
+  // Residual API/keeper routes still gate on this and no-op.
+  return false
 }
 
 /** Total open depth across active offers (USDC 6dp) — uses available when present. */
