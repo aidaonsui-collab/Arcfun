@@ -158,42 +158,46 @@ async function scanFactoryEvents(
   const from = cursor + 1n
   let found = 0
 
-  if (arcInstantEnabled() && ARC.INSTANT_FACTORY !== ZERO) {
-    const { logs, scannedTo } = await scanLogsChunked(client, {
-      address: ARC.INSTANT_FACTORY,
-      event: INSTANT_CREATED,
-      fromBlock: from,
-      toBlock: head,
-      maxChunks: MAX_FACTORY_CHUNKS,
-    })
-    for (const log of logs) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const args = (log as any).args as {
-        token?: Address
-        creator?: Address
-        pool?: Address
-      }
-      if (!args?.token) continue
-      const createdBlock = Number(log.blockNumber ?? 0n)
-      let createdAt = 0
-      try {
-        if (log.blockNumber != null) {
-          const block = await client.getBlock({ blockNumber: log.blockNumber })
-          createdAt = Number(block.timestamp)
-        }
-      } catch {
-        /* attachLaunchCreatedAt backfills */
-      }
-      await upsertToken({
-        token: args.token,
-        creator: args.creator || ZERO,
-        pool: args.pool || ZERO,
-        factory: ARC.INSTANT_FACTORY,
-        kind: 'instant',
-        createdAt,
-        createdBlock,
+  if (arcInstantEnabled()) {
+    let scannedTo = from
+    for (const factory of instantCatalogFactories()) {
+      const scanned = await scanLogsChunked(client, {
+        address: factory,
+        event: INSTANT_CREATED,
+        fromBlock: from,
+        toBlock: head,
+        maxChunks: MAX_FACTORY_CHUNKS,
       })
-      found++
+      if (scanned.scannedTo > scannedTo) scannedTo = scanned.scannedTo
+      for (const log of scanned.logs) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const args = (log as any).args as {
+          token?: Address
+          creator?: Address
+          pool?: Address
+        }
+        if (!args?.token) continue
+        const createdBlock = Number(log.blockNumber ?? 0n)
+        let createdAt = 0
+        try {
+          if (log.blockNumber != null) {
+            const block = await client.getBlock({ blockNumber: log.blockNumber })
+            createdAt = Number(block.timestamp)
+          }
+        } catch {
+          /* attachLaunchCreatedAt backfills */
+        }
+        await upsertToken({
+          token: args.token,
+          creator: args.creator || ZERO,
+          pool: args.pool || ZERO,
+          factory,
+          kind: 'instant',
+          createdAt,
+          createdBlock,
+        })
+        found++
+      }
     }
     state = { ...state, factoryCursor: scannedTo.toString() }
   }

@@ -97,8 +97,10 @@ export function HomeClient({
     if (kind === 'meme') list = list.filter((t) => !isReflectionToken(t))
     if (sort === 'New') {
       list.sort((a, b) => {
-        const ta = a.createdAt ?? 0
-        const tb = b.createdAt ?? 0
+        // Missing createdAt is a just-stamped launch, not an old one. Sorting
+        // those to 0 put them under every aged token on Recent.
+        const ta = a.createdAt && a.createdAt > 0 ? a.createdAt : Number.POSITIVE_INFINITY
+        const tb = b.createdAt && b.createdAt > 0 ? b.createdAt : Number.POSITIVE_INFINITY
         if (tb !== ta) return tb - ta
         return (a.symbol || a.name || '').localeCompare(b.symbol || b.name || '')
       })
@@ -234,7 +236,7 @@ export function HomeClient({
           ) : (
             <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map((t, i) => (
-                <TokenCard key={i} token={t} />
+                <TokenCard key={t.coinType || t.poolId || t.id || i} token={t} />
               ))}
             </div>
           )}
