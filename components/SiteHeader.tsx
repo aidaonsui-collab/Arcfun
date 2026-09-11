@@ -1,15 +1,14 @@
 'use client'
 
 /**
- * Sticky nav — eve.fun brand mark + wordmark, Crucible, Studio, OTC, Profile, wallet chip.
- * Mobile: Home, Crucible, ArcStudio, Create collection, Profile, Arc OTC, Docs.
+ * Sticky nav — eve.fun brand mark + wordmark, Crucible, Studio, Profile, wallet chip.
+ * Mobile: Home, Crucible, ArcStudio, Create collection, Profile, Docs.
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { FormEvent, useEffect, useState } from 'react'
 import { useAccount, useConnect } from 'wagmi'
 import {
-  ArrowLeftRight,
   BookOpen,
   CircleUser,
   Flame,
@@ -67,7 +66,6 @@ export function SiteHeader() {
   }, [menuOpen])
 
   const onStudio = pathname.startsWith('/studio')
-  const onOtc = pathname.startsWith('/otc')
   const onProfile =
     pathname.startsWith('/creator') ||
     pathname.startsWith('/portfolio') ||
@@ -132,7 +130,6 @@ export function SiteHeader() {
             [
               ['/crucible', 'Crucible', pathname.startsWith('/crucible')],
               ['/studio', 'Studio', onStudio],
-              ['/otc', 'OTC', onOtc],
               [profileHref, 'Profile', onProfile],
             ] as const
           ).map(([href, label, on]) => (
@@ -240,7 +237,6 @@ export function SiteHeader() {
                   {isPending ? 'Connecting…' : 'Connect wallet'}
                 </button>
               )}
-              {navRow('/otc', 'Arc OTC', ArrowLeftRight)}
               {navRow('/docs', 'Docs', BookOpen)}
             </div>
           </aside>

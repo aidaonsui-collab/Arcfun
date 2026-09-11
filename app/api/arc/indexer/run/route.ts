@@ -1,6 +1,6 @@
 /**
  * GET /api/arc/indexer/run — Vercel Cron (or manual with CRON_SECRET).
- * Advances Arc event index: factories, OTC offers, swap catch-up + volume windows.
+ * Advances Arc event index: factories, swap catch-up + volume windows. (OTC desk sunset — OTC scanning lives only behind robinOtcEnabled, which is hard-off.)
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { runArcIndexerCycle } from '@/lib/arc-indexer/run'
