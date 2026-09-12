@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Script, console2} from "forge-std/Script.sol";
+import {StdConstants} from "forge-std/StdConstants.sol";
 import {PoolManager} from "v4-core/PoolManager.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
@@ -56,13 +57,22 @@ contract DeployRwaInstantV4Testnet is Script {
             console2.log("PoolManager (fresh)   ", address(manager));
         }
 
-        // Salt-mine the hook address BEFORE broadcasting the real deploy — forge script re-runs
-        // this function during simulation, so `deployer`'s nonce at the moment of the real
-        // CREATE2 call is what matters, not any nonce this dry run consumes.
-        (address predicted, bytes32 salt) =
-            HookMiner.find(deployer, REQUIRED_HOOK_FLAGS, type(RwaFeeHook).creationCode, abi.encode(address(manager)));
+        // Salt-mine against forge-std's CREATE2_FACTORY, NOT `deployer` — a salted
+        // `new X{salt}()` inside a broadcast from an EOA is relayed through that canonical
+        // factory (forge-std's StdConstants.CREATE2_FACTORY), so that factory is the real CREATE2
+        // sender, and `msg.sender` inside RwaFeeHook's own constructor is that factory too (which
+        // is why the constructor takes an explicit owner_ instead of defaulting to msg.sender).
+        // Hook owner starts as `deployer` (the broadcasting EOA) so the setFactory call right
+        // below — sent from `deployer` — succeeds; handed off to the real `owner` at the end
+        // alongside the factory, same as before. Originally mined against `deployer` here and
+        // never caught because the test suite deploys the hook directly (no broadcast, no proxy)
+        // — caught by actually running this path against a live Anvil node (see
+        // script/LocalAnvilDemo.s.sol) rather than shipping it only forge-test-verified.
+        (address predicted, bytes32 salt) = HookMiner.find(
+            StdConstants.CREATE2_FACTORY, REQUIRED_HOOK_FLAGS, type(RwaFeeHook).creationCode, abi.encode(address(manager), deployer)
+        );
 
-        RwaFeeHook hook = new RwaFeeHook{salt: salt}(manager);
+        RwaFeeHook hook = new RwaFeeHook{salt: salt}(manager, deployer);
         require(address(hook) == predicted, "hook address mismatch - salt mining and deploy sender disagree");
 
         RwaInstantV4Factory factory = new RwaInstantV4Factory(manager, hook, platformWallet, crucible);

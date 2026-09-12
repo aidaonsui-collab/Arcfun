@@ -63,9 +63,45 @@ cycle, split by weight) or **rotating** (one asset per cycle, cycling through th
 
 Proven by `test/BasketVault.t.sol` (10 tests, part of the same `forge test` run below): real
 launch-with-vault wiring, weight validation, pull + convert in both payout modes against real v4
-pools for two mock "stock" assets, the disperse cap + ownership gates. Not built: the off-chain
-keeper script that would actually compute and submit `disperse` batches (same gap #234's plain
-launch path has for the crucible leg — this is the next layer up, not re-solved here).
+pools for two mock "stock" assets, the disperse cap + ownership gates.
+
+### The off-chain keeper — `scripts/basket-vault-keeper.ts`
+
+Reads a vault's live basket/pending balances, pulls whatever `RwaFeeHook` has accrued to it,
+converts via the same live v4 pools (minOut computed from the pool's real on-chain
+`sqrtPriceX96`, read via `extsload` — the same slot formula as v4-core's own `StateLibrary`, not
+an approximation), scans the launched token's Transfer logs for real current holder balances, and
+submits `disperse` batches pro-rata. Dry-run by default (`--yes` to broadcast), reads
+`KEEPER_PRIVATE_KEY`/`RPC_URL` from `.env.local` — same convention as `scripts/cook-crucible.ts`.
+See the script's own header comment for full usage.
+
+**Verified end-to-end, not just written and unit-tested**: `script/LocalAnvilDemo.s.sol` deploys
+the whole stack (`PoolManager`, a real CREATE2-mined `RwaFeeHook`, `RwaInstantV4Factory`, a
+basket-enabled launch, two seeded RWA-mock pools) to a local Anvil node via a real
+`forge script --broadcast`, generates real fee accrual with real buy/sell swaps, and gives two
+addresses real launched-token balances. The keeper script was then run against that live
+deployment — pull, convert, and disperse all landed as real, confirmed Anvil transactions, with
+holders receiving real basket-asset balances matching their pro-rata share.
+
+That exercise is *why* this is trustworthy rather than "compiles and looks right": it caught two
+real, previously-"not proven" bugs that 21/21 passing unit tests never exercised, because tests
+deploy contracts directly rather than through a `forge script` broadcast:
+
+1. **`RwaFeeHook`'s constructor set `owner = msg.sender`.** A salted `new X{salt}()` inside a
+   broadcast from an EOA is relayed through Foundry's canonical CREATE2 factory
+   (forge-std's `StdConstants.CREATE2_FACTORY`) — `msg.sender` inside that constructor is the
+   factory contract, not the deploying EOA, permanently locking `setFactory`/`transferOwnership`
+   to an address nobody controls. Fixed: the constructor now takes an explicit `owner_` param.
+2. **`RwaInstantV4Factory._createToken`'s single-sided launch tick was off by one tick-spacing**
+   for the "token is currency1" case (`tickUpper - TICK_SPACING` instead of `tickUpper`) — that
+   sits *inside* the range rather than pinned at its edge, so the position wasn't actually
+   single-sided, and settlement wanted 1 wei of a quote currency the factory never held. Every
+   existing test happened to deploy `LaunchToken18` at an address below the mock quote's, so this
+   branch (any launch where the token address lands *above* its quote's) was silently never
+   exercised. Fixed: uses `tickUpper` exactly, matching the already-correct symmetric case.
+
+Both fixes ship in the same change as the keeper script, with the full 21/21 suite re-verified
+green after each.
 
 ## Deliberately simpler than the v3 factory, for now
 

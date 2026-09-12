@@ -74,9 +74,10 @@ contract BasketVaultTest is Test {
         swapRouter = new PoolSwapTest(IPoolManager(address(manager)));
         liquidityRouter = new PoolModifyLiquidityTest(IPoolManager(address(manager)));
 
-        (address hookAddr, bytes32 salt) =
-            HookMiner.find(address(this), REQUIRED_FLAGS, type(RwaFeeHook).creationCode, abi.encode(address(manager)));
-        hook = new RwaFeeHook{salt: salt}(IPoolManager(address(manager)));
+        (address hookAddr, bytes32 salt) = HookMiner.find(
+            address(this), REQUIRED_FLAGS, type(RwaFeeHook).creationCode, abi.encode(address(manager), address(this))
+        );
+        hook = new RwaFeeHook{salt: salt}(IPoolManager(address(manager)), address(this));
         require(address(hook) == hookAddr, "hook address mismatch");
 
         factory = new RwaInstantV4Factory(IPoolManager(address(manager)), hook, platform, defaultCrucible);

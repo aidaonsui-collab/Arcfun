@@ -194,9 +194,21 @@ contract RwaInstantV4Factory is IUnlockCallback {
         // Single-sided, 100% token: initialize AT the extreme edge of the usable range on the
         // token's side, so the whole rest of the range holds only the token. See the contract
         // top-comment for why there's no caller-chosen starting valuation.
+        //
+        // Must be *exactly* tickLower (token is currency0) or *exactly* tickUpper (token is
+        // currency1), not one tick-spacing inside it — LiquidityAmounts' underlying math is only
+        // 100%-single-sided at currentTick <= tickLower or currentTick >= tickUpper; anything
+        // strictly between is a genuinely mixed position needing a nonzero amount of the OTHER
+        // currency too. An earlier version used `tickUpper - TICK_SPACING` for the currency1
+        // case, which sits just inside the range: every existing test happened to deploy
+        // LaunchToken18 at an address below the mock quote's (tokenIsCurrency0 == true), so the
+        // buggy branch was never exercised and 21/21 tests still passed. Caught by actually
+        // broadcasting a launch against a live Anvil PoolManager (script/LocalAnvilDemo.s.sol)
+        // with a token address that landed above its quote's — settling the launch then reverted
+        // wanting 1 wei of quote the factory never held.
         int24 tickLower = TickMath.minUsableTick(TICK_SPACING);
         int24 tickUpper = TickMath.maxUsableTick(TICK_SPACING);
-        int24 startTick = tokenIsCurrency0 ? tickLower : tickUpper - TICK_SPACING;
+        int24 startTick = tokenIsCurrency0 ? tickLower : tickUpper;
         uint160 startSqrtPriceX96 = TickMath.getSqrtPriceAtTick(startTick);
 
         poolManager.initialize(key, startSqrtPriceX96);
