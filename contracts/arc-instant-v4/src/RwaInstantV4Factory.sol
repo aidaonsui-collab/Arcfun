@@ -15,6 +15,7 @@ import {CurrencySettler} from "./libraries/CurrencySettler.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {LaunchToken18} from "./LaunchToken18.sol";
 import {RwaFeeHook} from "./RwaFeeHook.sol";
+import {BasketVault} from "./BasketVault.sol";
 
 /// @title RwaInstantV4Factory
 /// @notice Launch a fixed-1B-supply token into a v4 pool quoted against an RWA asset (USYC,
@@ -124,7 +125,32 @@ contract RwaInstantV4Factory is IUnlockCallback {
         returns (address token, PoolId id)
     {
         if (quote == address(0) || creator == address(0)) revert ZeroAddress();
-        bytes memory result = poolManager.unlock(abi.encode(uint8(1), name, symbol, quote, creator, msg.sender));
+        bytes memory result =
+            poolManager.unlock(abi.encode(uint8(1), name, symbol, quote, creator, crucible));
+        bytes32 idBytes;
+        (token, idBytes) = abi.decode(result, (address, bytes32));
+        id = PoolId.wrap(idBytes);
+    }
+
+    /// @notice Same launch, except the CRUCIBLE_BPS leg accrues to a dedicated BasketVault
+    ///         (deployed here, one per pool — see BasketVault's top comment for why it's never a
+    ///         shared address) instead of the factory's plain `crucible` wallet. The creator
+    ///         configures what that leg converts into via `BasketVault.setBasket` after launch —
+    ///         "fully automatic, no relaunches."
+    /// @param vaultOwner Keeper/ops address allowed to call the vault's `disperse` — see
+    ///        BasketVault. Can be changed later via the vault's own transferOwnership.
+    function createTokenWithBasketVault(
+        string calldata name,
+        string calldata symbol,
+        address quote,
+        address creator,
+        address vaultOwner
+    ) external returns (address token, PoolId id, address vault) {
+        if (quote == address(0) || creator == address(0) || vaultOwner == address(0)) revert ZeroAddress();
+        // A plain contract deploy touches none of the PoolManager's locked accounting, so unlike
+        // everything below it, this doesn't need to run inside unlock().
+        vault = address(new BasketVault(hook, poolManager, creator, vaultOwner));
+        bytes memory result = poolManager.unlock(abi.encode(uint8(1), name, symbol, quote, creator, vault));
         bytes32 idBytes;
         (token, idBytes) = abi.decode(result, (address, bytes32));
         id = PoolId.wrap(idBytes);
@@ -135,15 +161,15 @@ contract RwaInstantV4Factory is IUnlockCallback {
         if (msg.sender != address(poolManager)) revert NotSelf();
         uint8 action = abi.decode(data[:32], (uint8));
         if (action == 1) {
-            (, string memory name, string memory symbol, address quote, address creator,) =
+            (, string memory name, string memory symbol, address quote, address creator, address crucibleAddr) =
                 abi.decode(data, (uint8, string, string, address, address, address));
-            (address token, PoolId id) = _createToken(name, symbol, quote, creator);
+            (address token, PoolId id) = _createToken(name, symbol, quote, creator, crucibleAddr);
             return abi.encode(token, PoolId.unwrap(id));
         }
         revert UnknownAction();
     }
 
-    function _createToken(string memory name, string memory symbol, address quote, address creator)
+    function _createToken(string memory name, string memory symbol, address quote, address creator, address crucibleAddr)
         internal
         returns (address token, PoolId id)
     {
@@ -168,15 +194,27 @@ contract RwaInstantV4Factory is IUnlockCallback {
         // Single-sided, 100% token: initialize AT the extreme edge of the usable range on the
         // token's side, so the whole rest of the range holds only the token. See the contract
         // top-comment for why there's no caller-chosen starting valuation.
+        //
+        // Must be *exactly* tickLower (token is currency0) or *exactly* tickUpper (token is
+        // currency1), not one tick-spacing inside it — LiquidityAmounts' underlying math is only
+        // 100%-single-sided at currentTick <= tickLower or currentTick >= tickUpper; anything
+        // strictly between is a genuinely mixed position needing a nonzero amount of the OTHER
+        // currency too. An earlier version used `tickUpper - TICK_SPACING` for the currency1
+        // case, which sits just inside the range: every existing test happened to deploy
+        // LaunchToken18 at an address below the mock quote's (tokenIsCurrency0 == true), so the
+        // buggy branch was never exercised and 21/21 tests still passed. Caught by actually
+        // broadcasting a launch against a live Anvil PoolManager (script/LocalAnvilDemo.s.sol)
+        // with a token address that landed above its quote's — settling the launch then reverted
+        // wanting 1 wei of quote the factory never held.
         int24 tickLower = TickMath.minUsableTick(TICK_SPACING);
         int24 tickUpper = TickMath.maxUsableTick(TICK_SPACING);
-        int24 startTick = tokenIsCurrency0 ? tickLower : tickUpper - TICK_SPACING;
+        int24 startTick = tokenIsCurrency0 ? tickLower : tickUpper;
         uint160 startSqrtPriceX96 = TickMath.getSqrtPriceAtTick(startTick);
 
         poolManager.initialize(key, startSqrtPriceX96);
         id = key.toId();
 
-        hook.registerPool(key, creator, platformWallet, crucible, CREATOR_BPS, CRUCIBLE_BPS, PLATFORM_BPS, HOOK_FEE_BPS);
+        hook.registerPool(key, creator, platformWallet, crucibleAddr, CREATOR_BPS, CRUCIBLE_BPS, PLATFORM_BPS, HOOK_FEE_BPS);
 
         uint160 sqrtA = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtB = TickMath.getSqrtPriceAtTick(tickUpper);

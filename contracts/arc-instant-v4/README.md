@@ -32,6 +32,77 @@ settle atomically inside every swap. No cron, no keeper, nothing to keep alive.
   `modifyLiquidity` with a negative delta on it. That's the "no NFT withdraw, creator can't rug"
   guarantee CrucibleLock gives structurally instead of via a revert-guarded function.
 
+## Holder payout baskets — `BasketVault.sol`
+
+"Earn RWAs automatically, just for holding," from [based.bid](https://x.com/basedbidx/status/2081029361965080803): a creator-configured basket of assets (stocks, ETFs, other RWAs) that a
+pool's fees convert into and pay out to holders, either **all-at-once** (every asset, every
+cycle, split by weight) or **rotating** (one asset per cycle, cycling through the list).
+
+- **One `BasketVault` per pool, never a shared address.** `RwaFeeHook.owed[recipient][currency]`
+  is keyed globally by (address, currency) across every pool the hook serves. A single router
+  address reused as `crucible` for two pools that happen to share a quote currency (likely —
+  most RWA launches would share the same RWA quote) would have both pools' fees landing in the
+  same slot with no way to tell whose money is whose. `RwaInstantV4Factory.createTokenWithBasketVault`
+  deploys a fresh vault per launch specifically to make that structurally impossible rather than a
+  bookkeeping problem to get right.
+- **`pull(currency)`** — permissionless, claims whatever accrued to the vault from the hook (the
+  vault *is* that pool's sole crucible recipient, so this is unambiguous).
+- **`convert(fromCurrency, minOuts)`** — swaps the pulled balance into the basket via real v4
+  pools (creator supplies the pool key per basket asset at `setBasket` time — mismatches revert
+  rather than silently routing through the wrong pool). AllAtOnce splits by weight in one call;
+  Rotating sends the whole amount to the next asset in line and advances the pointer.
+- **`disperse(asset, holders[], amounts[])`** — **not** computed on-chain. Enumerating "every
+  current holder and their exact balance" cheaply on-chain is a real unsolved problem for a plain
+  ERC-20; this mirrors the pattern already proven in production for $EVE holder rewards
+  (`lib/arc-eve-holder-rewards.ts`): a keeper reads real balances off-chain, computes the pro-rata
+  weights, and submits them here. The contract's only enforcement is `sum(amounts) <=
+  pendingDistribution[asset]` and an owner gate on who can call it — it cannot verify the weights
+  are *correct*, same trust boundary the existing EVE rewards keeper already operates under.
+- **`setBasket(...)` is creator-only and callable any time** — "fully automatic, no relaunches":
+  changing what holders earn never touches the token or its pool.
+
+Proven by `test/BasketVault.t.sol` (10 tests, part of the same `forge test` run below): real
+launch-with-vault wiring, weight validation, pull + convert in both payout modes against real v4
+pools for two mock "stock" assets, the disperse cap + ownership gates.
+
+### The off-chain keeper — `scripts/basket-vault-keeper.ts`
+
+Reads a vault's live basket/pending balances, pulls whatever `RwaFeeHook` has accrued to it,
+converts via the same live v4 pools (minOut computed from the pool's real on-chain
+`sqrtPriceX96`, read via `extsload` — the same slot formula as v4-core's own `StateLibrary`, not
+an approximation), scans the launched token's Transfer logs for real current holder balances, and
+submits `disperse` batches pro-rata. Dry-run by default (`--yes` to broadcast), reads
+`KEEPER_PRIVATE_KEY`/`RPC_URL` from `.env.local` — same convention as `scripts/cook-crucible.ts`.
+See the script's own header comment for full usage.
+
+**Verified end-to-end, not just written and unit-tested**: `script/LocalAnvilDemo.s.sol` deploys
+the whole stack (`PoolManager`, a real CREATE2-mined `RwaFeeHook`, `RwaInstantV4Factory`, a
+basket-enabled launch, two seeded RWA-mock pools) to a local Anvil node via a real
+`forge script --broadcast`, generates real fee accrual with real buy/sell swaps, and gives two
+addresses real launched-token balances. The keeper script was then run against that live
+deployment — pull, convert, and disperse all landed as real, confirmed Anvil transactions, with
+holders receiving real basket-asset balances matching their pro-rata share.
+
+That exercise is *why* this is trustworthy rather than "compiles and looks right": it caught two
+real, previously-"not proven" bugs that 21/21 passing unit tests never exercised, because tests
+deploy contracts directly rather than through a `forge script` broadcast:
+
+1. **`RwaFeeHook`'s constructor set `owner = msg.sender`.** A salted `new X{salt}()` inside a
+   broadcast from an EOA is relayed through Foundry's canonical CREATE2 factory
+   (forge-std's `StdConstants.CREATE2_FACTORY`) — `msg.sender` inside that constructor is the
+   factory contract, not the deploying EOA, permanently locking `setFactory`/`transferOwnership`
+   to an address nobody controls. Fixed: the constructor now takes an explicit `owner_` param.
+2. **`RwaInstantV4Factory._createToken`'s single-sided launch tick was off by one tick-spacing**
+   for the "token is currency1" case (`tickUpper - TICK_SPACING` instead of `tickUpper`) — that
+   sits *inside* the range rather than pinned at its edge, so the position wasn't actually
+   single-sided, and settlement wanted 1 wei of a quote currency the factory never held. Every
+   existing test happened to deploy `LaunchToken18` at an address below the mock quote's, so this
+   branch (any launch where the token address lands *above* its quote's) was silently never
+   exercised. Fixed: uses `tickUpper` exactly, matching the already-correct symmetric case.
+
+Both fixes ship in the same change as the keeper script, with the full 21/21 suite re-verified
+green after each.
+
 ## Deliberately simpler than the v3 factory, for now
 
 - **No starting-valuation bonding math.** v3's `launchVirtualQuote` picks a deliberate initial
@@ -64,11 +135,11 @@ quote, and swaps both directions:
 forge test -vv
 ```
 
-11/11 passing, including a 256-run fuzz test that the creator/platform/crucible split holds
-*exactly* to the bps constants across trade sizes from 1 to 500,000 quote units, and a directional
-test proving the fee correctly lands in the token on a buy and the quote on a sell (the highest-risk
-part of this build — v4's specified/unspecified-currency accounting is genuinely easy to get
-backwards, and this is what confirms it isn't).
+21/21 passing (11 for the launch path, 10 for BasketVault), including a 256-run fuzz test that
+the creator/platform/crucible split holds *exactly* to the bps constants across trade sizes from
+1 to 500,000 quote units, and a directional test proving the fee correctly lands in the token on
+a buy and the quote on a sell (the highest-risk part of this build — v4's specified/unspecified-
+currency accounting is genuinely easy to get backwards, and this is what confirms it isn't).
 
 **Not proven / explicitly unverified:**
 - **Arc's real v4 `PoolManager` address.** There's an address that's *plausibly* it

@@ -40,9 +40,9 @@ contract RwaInstantV4Test is Test {
         swapRouter = new PoolSwapTest(IPoolManager(address(manager)));
 
         (address hookAddr, bytes32 salt) = HookMiner.find(
-            address(this), REQUIRED_FLAGS, type(RwaFeeHook).creationCode, abi.encode(address(manager))
+            address(this), REQUIRED_FLAGS, type(RwaFeeHook).creationCode, abi.encode(address(manager), deployer)
         );
-        hook = new RwaFeeHook{salt: salt}(IPoolManager(address(manager)));
+        hook = new RwaFeeHook{salt: salt}(IPoolManager(address(manager)), deployer);
         require(address(hook) == hookAddr, "hook address mismatch");
 
         factory = new RwaInstantV4Factory(IPoolManager(address(manager)), hook, platform, crucible);

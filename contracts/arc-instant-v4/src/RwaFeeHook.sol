@@ -101,7 +101,17 @@ contract RwaFeeHook is IHooks {
         _;
     }
 
-    constructor(IPoolManager manager_) {
+    /// @param owner_ Explicit owner, NOT defaulted to msg.sender — this contract must be
+    ///        CREATE2-deployed with a mined salt (its address encodes its permission bits), and
+    ///        `forge script` broadcasts a salted `new X{salt}()` from an EOA through Foundry's
+    ///        canonical CREATE2 factory (forge-std's StdConstants.CREATE2_FACTORY), not the EOA
+    ///        directly. `msg.sender` inside this constructor would then be that factory contract
+    ///        — an address nobody controls — permanently locking out setFactory/transferOwnership.
+    ///        Caught by actually running a deploy script against a live Anvil node rather than
+    ///        only unit-testing this contract (tests instantiate it directly, where msg.sender
+    ///        really is the test contract, which is why this never showed up there).
+    constructor(IPoolManager manager_, address owner_) {
+        if (owner_ == address(0)) revert ZeroAddress();
         // Validates that THIS contract's address (whatever it was CREATE2-deployed to) actually
         // carries the AFTER_SWAP + AFTER_SWAP_RETURNS_DELTA bits and nothing else — deploying to
         // a wrong-bit address silently makes the PoolManager skip calling afterSwap at all,
@@ -127,7 +137,7 @@ contract RwaFeeHook is IHooks {
             })
         );
         poolManager = manager_;
-        owner = msg.sender;
+        owner = owner_;
     }
 
     // ── admin ──────────────────────────────────────────────────────────────────────────────
