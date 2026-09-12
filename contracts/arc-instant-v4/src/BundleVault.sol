@@ -12,15 +12,15 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CurrencySettler} from "./libraries/CurrencySettler.sol";
 import {RwaFeeHook} from "./RwaFeeHook.sol";
 
-/// @title BasketVault
-/// @notice "Earn RWAs automatically, just for holding" — one of these per basket-enabled pool,
+/// @title BundleVault
+/// @notice "Earn RWAs automatically, just for holding" — one of these per bundle-enabled pool,
 ///         registered as that pool's `crucible` recipient in RwaFeeHook. Pulls the accrued leg,
-///         converts it into a creator-configured basket of assets (stocks/ETFs/other RWAs —
+///         converts it into a creator-configured bundle of assets (stocks/ETFs/other RWAs —
 ///         anything with a real v4 pool against the pulled currency), and holds the converted
 ///         balance for holders to be paid out from.
 ///
 ///         ONE VAULT PER POOL, DELIBERATELY — not a single shared router address reused across
-///         every basket-enabled launch. RwaFeeHook.owed[recipient][currency] is keyed by
+///         every bundle-enabled launch. RwaFeeHook.owed[recipient][currency] is keyed by
 ///         (recipient address, currency) globally across every pool that hook serves. If the same
 ///         router address were registered as `crucible` for two different pools that happen to
 ///         share a quote currency (extremely likely — most RWA launches would share the same
@@ -36,18 +36,18 @@ import {RwaFeeHook} from "./RwaFeeHook.sol";
 ///         amounts on-chain via `disperse`. This contract's only enforcement is that a submitted
 ///         batch can never exceed what actually converted for holders — same trust boundary the
 ///         existing EVE rewards keeper already operates under, not a new one.
-contract BasketVault is IUnlockCallback {
+contract BundleVault is IUnlockCallback {
     using CurrencyLibrary for Currency;
     using CurrencySettler for Currency;
     using SafeCast for int256;
 
     enum PayoutMode {
-        AllAtOnce, // every convert() splits the full pulled amount across every basket asset by weight
+        AllAtOnce, // every convert() splits the full pulled amount across every bundle asset by weight
         Rotating // every convert() sends the full pulled amount to just the next asset in line
 
     }
 
-    struct BasketAsset {
+    struct BundleAsset {
         Currency asset;
         uint16 weightBps; // used in AllAtOnce; stored but ignored in Rotating
         PoolKey poolKey; // the (fromCurrency <-> asset) pool to route the conversion swap through
@@ -56,7 +56,7 @@ contract BasketVault is IUnlockCallback {
     error ZeroAddress();
     error NotOwner();
     error NotCreator();
-    error EmptyBasket();
+    error EmptyBundle();
     error BadWeights();
     error LengthMismatch();
     error NotSelf();
@@ -66,15 +66,15 @@ contract BasketVault is IUnlockCallback {
     error SlippageExceeded();
 
     event OwnerTransferred(address indexed previous, address indexed next);
-    event BasketConfigured(PayoutMode mode, uint256 assetCount);
+    event BundleConfigured(PayoutMode mode, uint256 assetCount);
     event Pulled(Currency indexed currency, uint256 amount);
     event Converted(Currency indexed fromCurrency, Currency indexed toAsset, uint256 amountIn, uint256 amountOut);
     event Dispersed(Currency indexed asset, uint256 totalPaid, uint256 recipients);
 
     RwaFeeHook public immutable hook;
     IPoolManager public immutable poolManager;
-    /// @notice The launch's creator — the only one allowed to reconfigure the basket. Matches the
-    ///         tweet's "fully automatic, no relaunches": changing the payout basket never touches
+    /// @notice The launch's creator — the only one allowed to reconfigure the bundle. Matches the
+    ///         tweet's "fully automatic, no relaunches": changing the payout bundle never touches
     ///         the token or its pool.
     address public immutable creator;
     /// @notice Keeper/ops address allowed to submit `disperse` batches. Settable because the
@@ -83,12 +83,12 @@ contract BasketVault is IUnlockCallback {
     address public owner;
 
     PayoutMode public mode;
-    BasketAsset[] public basket;
+    BundleAsset[] public bundle;
     uint256 public rotateIndex;
 
-    /// @notice Pulled from the hook but not yet swapped into the basket, per source currency.
+    /// @notice Pulled from the hook but not yet swapped into the bundle, per source currency.
     mapping(Currency => uint256) public pendingConvert;
-    /// @notice Converted and waiting for `disperse` to pay it out to holders, per basket asset.
+    /// @notice Converted and waiting for `disperse` to pay it out to holders, per bundle asset.
     mapping(Currency => uint256) public pendingDistribution;
 
     modifier onlyCreator() {
@@ -120,29 +120,29 @@ contract BasketVault is IUnlockCallback {
     ///         Each entry's poolKey must be the real (currency you intend to `convert` from,
     ///         this asset) v4 pool — mismatches revert at convert() time via PoolMismatch, not
     ///         silently route through the wrong pool.
-    function setBasket(
+    function setBundle(
         address[] calldata assets,
         uint16[] calldata weightsBps,
         PoolKey[] calldata poolKeys,
         PayoutMode mode_
     ) external onlyCreator {
-        if (assets.length == 0) revert EmptyBasket();
+        if (assets.length == 0) revert EmptyBundle();
         if (assets.length != weightsBps.length || assets.length != poolKeys.length) revert LengthMismatch();
-        delete basket;
+        delete bundle;
         uint256 sum;
         for (uint256 i; i < assets.length; i++) {
             if (assets[i] == address(0)) revert ZeroAddress();
             sum += weightsBps[i];
-            basket.push(BasketAsset({asset: Currency.wrap(assets[i]), weightBps: weightsBps[i], poolKey: poolKeys[i]}));
+            bundle.push(BundleAsset({asset: Currency.wrap(assets[i]), weightBps: weightsBps[i], poolKey: poolKeys[i]}));
         }
         if (mode_ == PayoutMode.AllAtOnce && sum != 10_000) revert BadWeights();
         mode = mode_;
         rotateIndex = 0;
-        emit BasketConfigured(mode_, assets.length);
+        emit BundleConfigured(mode_, assets.length);
     }
 
-    function basketLength() external view returns (uint256) {
-        return basket.length;
+    function bundleLength() external view returns (uint256) {
+        return bundle.length;
     }
 
     /// @notice Permissionless: pull whatever accrued to this vault from the hook for `currency`.
@@ -155,12 +155,12 @@ contract BasketVault is IUnlockCallback {
         emit Pulled(currency, pulled);
     }
 
-    /// @notice Swap `fromCurrency`'s full pending balance into the basket.
-    ///         AllAtOnce: `minOuts` must have one entry per basket asset, in order.
+    /// @notice Swap `fromCurrency`'s full pending balance into the bundle.
+    ///         AllAtOnce: `minOuts` must have one entry per bundle asset, in order.
     ///         Rotating: `minOuts` must have exactly one entry, for whichever asset is next.
     function convert(Currency fromCurrency, uint256[] calldata minOuts) external returns (uint256 totalIn) {
-        uint256 n = basket.length;
-        if (n == 0) revert EmptyBasket();
+        uint256 n = bundle.length;
+        if (n == 0) revert EmptyBundle();
         uint256 amount = pendingConvert[fromCurrency];
         if (amount == 0) revert NothingPending();
         pendingConvert[fromCurrency] = 0;
@@ -170,20 +170,20 @@ contract BasketVault is IUnlockCallback {
             uint256 distributed;
             for (uint256 i; i < n; i++) {
                 // Last leg absorbs rounding dust rather than risk leaving wei behind.
-                uint256 amtIn = i == n - 1 ? amount - distributed : (amount * basket[i].weightBps) / 10_000;
+                uint256 amtIn = i == n - 1 ? amount - distributed : (amount * bundle[i].weightBps) / 10_000;
                 distributed += amtIn;
                 if (amtIn == 0) continue;
-                _swapAndCredit(fromCurrency, basket[i], amtIn, minOuts[i]);
+                _swapAndCredit(fromCurrency, bundle[i], amtIn, minOuts[i]);
             }
         } else {
             if (minOuts.length != 1) revert LengthMismatch();
-            _swapAndCredit(fromCurrency, basket[rotateIndex], amount, minOuts[0]);
+            _swapAndCredit(fromCurrency, bundle[rotateIndex], amount, minOuts[0]);
             rotateIndex = (rotateIndex + 1) % n;
         }
         totalIn = amount;
     }
 
-    function _swapAndCredit(Currency fromCurrency, BasketAsset memory a, uint256 amountIn, uint256 minOut) internal {
+    function _swapAndCredit(Currency fromCurrency, BundleAsset memory a, uint256 amountIn, uint256 minOut) internal {
         bytes memory result =
             poolManager.unlock(abi.encode(a.poolKey, fromCurrency, a.asset, amountIn, minOut));
         uint256 amountOut = abi.decode(result, (uint256));

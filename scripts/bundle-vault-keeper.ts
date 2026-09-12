@@ -1,18 +1,18 @@
 /**
- * BasketVault keeper — pulls accrued RWA-basket fees out of RwaFeeHook into one launch's
- * BasketVault, converts them into the creator-configured basket via the vault's live v4 pools,
+ * BundleVault keeper — pulls accrued RWA-bundle fees out of RwaFeeHook into one launch's
+ * BundleVault, converts them into the creator-configured bundle via the vault's live v4 pools,
  * computes real holder pro-rata weights, and submits disperse() batches.
  *
  * Same trust model as the already-running $EVE holder-rewards keeper
  * (lib/arc-eve-holder-rewards.ts): payout weights are computed off-chain from real balances and
- * submitted as exact amounts — BasketVault.disperse()'s only on-chain guarantee is that a
- * submitted batch can never exceed what actually converted for holders (see BasketVault.sol's
+ * submitted as exact amounts — BundleVault.disperse()'s only on-chain guarantee is that a
+ * submitted batch can never exceed what actually converted for holders (see BundleVault.sol's
  * top comment for why holder enumeration isn't done on-chain). NOT wired into any cron, same as
  * scripts/cook-crucible.ts — a manual/scheduled-externally trigger, one invocation per
- * basket-enabled launch (one vault per pool, deliberately).
+ * bundle-enabled launch (one vault per pool, deliberately).
  *
  * Verified end-to-end before being written up as done: deployed a real PoolManager +
- * RwaFeeHook + RwaInstantV4Factory + a basket-enabled launch + two seeded RWA pools to a local
+ * RwaFeeHook + RwaInstantV4Factory + a bundle-enabled launch + two seeded RWA pools to a local
  * Anvil node (contracts/arc-instant-v4/script/LocalAnvilDemo.s.sol) and ran this script against
  * it. That caught two real, previously-"not proven" bugs in the surrounding contracts/scripts
  * that forge's unit tests never exercised (deploying the hook directly in-test never triggers
@@ -33,28 +33,28 @@
  * Holder balances here are computed directly from this one token's own Transfer logs, not via
  * lib/evm-holders.ts's getRawHolderBalances — that helper's ledger is keyed off
  * ARC.INSTANT_FACTORY (the V3 pad) and a KV-backed cache built for indexing every pad token at
- * production scale; a V4/BasketVault launch isn't in that registry yet. A from-scratch scan is
+ * production scale; a V4/BundleVault launch isn't in that registry yet. A from-scratch scan is
  * the right size for "one token, on demand" — wire this into evm-holders.ts's ledger instead if
- * basket-enabled launches ever need the same always-warm indexing the V3 pad gets.
+ * bundle-enabled launches ever need the same always-warm indexing the V3 pad gets.
  *
  * Setup — same convention as scripts/cook-crucible.ts:
  *   KEEPER_PRIVATE_KEY=0x...   in .env.local (gitignored). Never paste it in chat.
- *   RPC_URL=http://127.0.0.1:8545   (or a real Arc RPC once a basket-enabled launch exists there)
+ *   RPC_URL=http://127.0.0.1:8545   (or a real Arc RPC once a bundle-enabled launch exists there)
  *
  * Usage — dry run first (reads live on-chain state, prints the full plan, sends nothing):
- *   npx tsx scripts/basket-vault-keeper.ts --vault 0x... --token 0x... \
+ *   npx tsx scripts/bundle-vault-keeper.ts --vault 0x... --token 0x... \
  *     --currency 0xQuote[,0xOtherCurrency] --from-block 0
  *
  * Then, once the plan looks right:
- *   npx tsx scripts/basket-vault-keeper.ts --vault 0x... --token 0x... \
+ *   npx tsx scripts/bundle-vault-keeper.ts --vault 0x... --token 0x... \
  *     --currency 0xQuote --from-block 0 --yes
  *
  * Required:
- *   --vault        BasketVault address
+ *   --vault        BundleVault address
  *   --token        the launched token (for the holder-balance Transfer-log scan)
  *   --currency     comma-separated currencies to pull()/convert() (whatever RwaFeeHook has
  *                  actually accrued to this vault — typically the launch's quote asset; only
- *                  pass one this vault's basket can actually route, see the per-currency
+ *                  pass one this vault's bundle can actually route, see the per-currency
  *                  "convertible?" check this script prints)
  *   --from-block   block the token was launched at (0 is fine for a fresh local chain; on a real
  *                  chain, pass the launch tx's block so the log scan isn't unbounded)
@@ -83,7 +83,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 
 // ── ABIs — hand-written from the vendored contracts, not fetched from an explorer (none of this
 //    is deployed anywhere with a verified ABI yet). Keep in sync with
-//    contracts/arc-instant-v4/src/{BasketVault,RwaFeeHook}.sol. ──────────────────────────────
+//    contracts/arc-instant-v4/src/{BundleVault,RwaFeeHook}.sol. ──────────────────────────────
 const VAULT_ABI = [
   { type: 'function', name: 'hook', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'poolManager', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
@@ -91,10 +91,10 @@ const VAULT_ABI = [
   { type: 'function', name: 'owner', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'mode', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8' }] },
   { type: 'function', name: 'rotateIndex', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'basketLength', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'bundleLength', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
   {
     type: 'function',
-    name: 'basket',
+    name: 'bundle',
     stateMutability: 'view',
     inputs: [{ type: 'uint256' }],
     outputs: [
@@ -155,7 +155,7 @@ const erc20Abi = [
 const TRANSFER_EVENT = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)')
 
 type PoolKeyTuple = { currency0: Address; currency1: Address; fee: number; tickSpacing: number; hooks: Address }
-type BasketEntry = { asset: Address; weightBps: number; poolKey: PoolKeyTuple }
+type BundleEntry = { asset: Address; weightBps: number; poolKey: PoolKeyTuple }
 
 function parseArgs() {
   const args = process.argv.slice(2)
@@ -283,40 +283,40 @@ async function main() {
   console.log('vault:', vault)
   console.log('token:', token)
 
-  const [hook, poolManagerAddr, creator, vaultOwner, mode, rotateIndex, basketLen] = await Promise.all([
+  const [hook, poolManagerAddr, creator, vaultOwner, mode, rotateIndex, bundleLen] = await Promise.all([
     publicClient.readContract({ address: vault, abi: VAULT_ABI, functionName: 'hook' }),
     publicClient.readContract({ address: vault, abi: VAULT_ABI, functionName: 'poolManager' }),
     publicClient.readContract({ address: vault, abi: VAULT_ABI, functionName: 'creator' }),
     publicClient.readContract({ address: vault, abi: VAULT_ABI, functionName: 'owner' }),
     publicClient.readContract({ address: vault, abi: VAULT_ABI, functionName: 'mode' }),
     publicClient.readContract({ address: vault, abi: VAULT_ABI, functionName: 'rotateIndex' }),
-    publicClient.readContract({ address: vault, abi: VAULT_ABI, functionName: 'basketLength' }),
+    publicClient.readContract({ address: vault, abi: VAULT_ABI, functionName: 'bundleLength' }),
   ])
   console.log('hook:', hook, '| poolManager:', poolManagerAddr, '| creator:', creator, '| vault owner:', vaultOwner)
   const isKeeperTheOwner = (vaultOwner as string).toLowerCase() === account.address.toLowerCase()
-  console.log('mode:', mode === 0 ? 'AllAtOnce' : 'Rotating', '| rotateIndex:', rotateIndex, '| basket size:', basketLen)
+  console.log('mode:', mode === 0 ? 'AllAtOnce' : 'Rotating', '| rotateIndex:', rotateIndex, '| bundle size:', bundleLen)
   if (!isKeeperTheOwner) {
     console.log(`\n⚠ your address is NOT this vault's owner (owner is ${vaultOwner}) — disperse() will revert; pull()/convert() are permissionless and will still work.`)
   }
 
-  const basket: BasketEntry[] = []
-  for (let i = 0n; i < (basketLen as bigint); i++) {
+  const bundle: BundleEntry[] = []
+  for (let i = 0n; i < (bundleLen as bigint); i++) {
     const [asset, weightBps, poolKey] = (await publicClient.readContract({
       address: vault,
       abi: VAULT_ABI,
-      functionName: 'basket',
+      functionName: 'bundle',
       args: [i],
     })) as unknown as [Address, number, PoolKeyTuple]
-    basket.push({ asset, weightBps, poolKey })
+    bundle.push({ asset, weightBps, poolKey })
   }
-  for (const b of basket) {
+  for (const b of bundle) {
     const [sym, dec] = await Promise.all([
       publicClient.readContract({ address: b.asset, abi: erc20Abi, functionName: 'symbol' }).catch(() => '?'),
       publicClient.readContract({ address: b.asset, abi: erc20Abi, functionName: 'decimals' }).catch(() => 18),
     ])
-    console.log(`  basket asset: ${b.asset} (${sym}, ${dec}dp) weight ${b.weightBps / 100}% pool ${b.poolKey.currency0}/${b.poolKey.currency1}`)
+    console.log(`  bundle asset: ${b.asset} (${sym}, ${dec}dp) weight ${b.weightBps / 100}% pool ${b.poolKey.currency0}/${b.poolKey.currency1}`)
   }
-  if (basket.length === 0) throw new Error('This vault has no basket configured yet — creator must call setBasket() first.')
+  if (bundle.length === 0) throw new Error('This vault has no bundle configured yet — creator must call setBundle() first.')
 
   console.log('\n── per-currency plan ──')
   const plans: { currency: Address; owed: bigint; convertible: boolean; minOuts: bigint[] }[] = []
@@ -325,14 +325,14 @@ async function main() {
     const pendingAlready = (await publicClient.readContract({ address: vault, abi: VAULT_ABI, functionName: 'pendingConvert', args: [currency] })) as bigint
     const totalToConvert = owed + pendingAlready
 
-    const relevantAssets = mode === 0 ? basket : [basket[Number(rotateIndex)]]
+    const relevantAssets = mode === 0 ? bundle : [bundle[Number(rotateIndex)]]
     const convertible = relevantAssets.every(
       (b) => b.poolKey.currency0.toLowerCase() === currency.toLowerCase() || b.poolKey.currency1.toLowerCase() === currency.toLowerCase(),
     )
 
     console.log(`\ncurrency ${currency}: owed-in-hook ${owed} + already-pending ${pendingAlready} = ${totalToConvert} to convert`)
     if (!convertible) {
-      console.log('  ✗ NOT convertible — at least one basket asset in scope has no pool paired with this currency. Will pull() (moves it into pendingConvert) but skip convert().')
+      console.log('  ✗ NOT convertible — at least one bundle asset in scope has no pool paired with this currency. Will pull() (moves it into pendingConvert) but skip convert().')
       plans.push({ currency, owed, convertible: false, minOuts: [] })
       continue
     }
@@ -345,19 +345,19 @@ async function main() {
     const minOuts: bigint[] = []
     if (mode === 0) {
       let distributed = 0n
-      for (let i = 0; i < basket.length; i++) {
-        const amtIn = i === basket.length - 1 ? totalToConvert - distributed : (totalToConvert * BigInt(basket[i].weightBps)) / 10_000n
+      for (let i = 0; i < bundle.length; i++) {
+        const amtIn = i === bundle.length - 1 ? totalToConvert - distributed : (totalToConvert * BigInt(bundle[i].weightBps)) / 10_000n
         distributed += amtIn
-        const poolId = computePoolId(basket[i].poolKey)
+        const poolId = computePoolId(bundle[i].poolKey)
         const sqrtPriceX96 = await readSlot0SqrtPriceX96(publicClient, poolManagerAddr as Address, poolId)
-        const fromIsCurrency0 = basket[i].poolKey.currency0.toLowerCase() === currency.toLowerCase()
+        const fromIsCurrency0 = bundle[i].poolKey.currency0.toLowerCase() === currency.toLowerCase()
         const est = amtIn > 0n ? estimateAmountOut(amtIn, sqrtPriceX96, fromIsCurrency0) : 0n
         const minOut = (est * BigInt(Math.round((100 - slippagePct) * 100))) / 10_000n
         minOuts.push(minOut)
-        console.log(`  -> ${basket[i].asset}: amountIn ${amtIn}, live-price estimate ${est}, minOut (${slippagePct}% floor) ${minOut}`)
+        console.log(`  -> ${bundle[i].asset}: amountIn ${amtIn}, live-price estimate ${est}, minOut (${slippagePct}% floor) ${minOut}`)
       }
     } else {
-      const b = basket[Number(rotateIndex)]
+      const b = bundle[Number(rotateIndex)]
       const poolId = computePoolId(b.poolKey)
       const sqrtPriceX96 = await readSlot0SqrtPriceX96(publicClient, poolManagerAddr as Address, poolId)
       const fromIsCurrency0 = b.poolKey.currency0.toLowerCase() === currency.toLowerCase()
@@ -381,12 +381,12 @@ async function main() {
   if (holders.size === 0) console.log('  (nothing to disperse to yet even after converting — no eligible holders found)')
 
   console.log('\n── projected disperse batches (pro-rata by current balance; run again after convert() for the real pendingDistribution) ──')
-  for (const b of basket) {
+  for (const b of bundle) {
     const pendingNow = (await publicClient.readContract({ address: vault, abi: VAULT_ABI, functionName: 'pendingDistribution', args: [b.asset] })) as bigint
     const plannedAdd = plans
       .filter((p) => p.convertible)
       .reduce((sum, p, idx) => {
-        const relevantAssets = mode === 0 ? basket : [basket[Number(rotateIndex)]]
+        const relevantAssets = mode === 0 ? bundle : [bundle[Number(rotateIndex)]]
         const assetIdx = relevantAssets.findIndex((x) => x.asset === b.asset)
         return assetIdx === -1 ? sum : sum + (p.minOuts[assetIdx] ?? 0n)
         // NB: uses each leg's minOut as a conservative stand-in for the real convert() output,
@@ -428,7 +428,7 @@ async function main() {
     await publicClient.waitForTransactionReceipt({ hash: pullHash, timeout: 120_000 })
 
     if (!plan.convertible) {
-      console.log('  (not convertible with the current basket — leaving it in pendingConvert)')
+      console.log('  (not convertible with the current bundle — leaving it in pendingConvert)')
       continue
     }
     console.log(`Converting ${plan.currency}...`)
@@ -450,7 +450,7 @@ async function main() {
   }
 
   console.log('\n── dispersing real converted balances (re-read fresh from chain, not the pre-convert estimate) ──')
-  for (const b of basket) {
+  for (const b of bundle) {
     const pendingFinal = (await publicClient.readContract({ address: vault, abi: VAULT_ABI, functionName: 'pendingDistribution', args: [b.asset] })) as bigint
     if (pendingFinal === 0n || totalHeld === 0n || holders.size === 0) continue
     const addrs: Address[] = []

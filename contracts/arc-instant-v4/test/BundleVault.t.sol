@@ -17,7 +17,7 @@ import {LiquidityAmounts} from "../src/libraries/LiquidityAmounts.sol";
 
 import {RwaFeeHook} from "../src/RwaFeeHook.sol";
 import {RwaInstantV4Factory} from "../src/RwaInstantV4Factory.sol";
-import {BasketVault} from "../src/BasketVault.sol";
+import {BundleVault} from "../src/BundleVault.sol";
 import {MockRwaToken} from "./MockRwaToken.sol";
 import {HookMiner} from "./utils/HookMiner.sol";
 
@@ -28,7 +28,7 @@ interface IERC20Like {
     function decimals() external view returns (uint8);
 }
 
-/// @dev A second, third RWA-style asset — "stocks" the basket converts into. Plain 18dp ERC-20s;
+/// @dev A second, third RWA-style asset — "stocks" the bundle converts into. Plain 18dp ERC-20s;
 ///      what they represent doesn't matter to the contract, only that a real pool exists for them.
 contract MockStock is MockRwaToken {
     string public stockName;
@@ -42,7 +42,7 @@ contract MockStock is MockRwaToken {
     }
 }
 
-contract BasketVaultTest is Test {
+contract BundleVaultTest is Test {
     using PoolIdLibrary for PoolKey;
 
     PoolManager manager;
@@ -67,7 +67,7 @@ contract BasketVaultTest is Test {
     address token;
     PoolId launchPoolId;
     bool tokenIsCurrency0;
-    BasketVault vault;
+    BundleVault vault;
 
     function setUp() public {
         manager = new PoolManager(address(this));
@@ -91,11 +91,11 @@ contract BasketVaultTest is Test {
         vm.prank(trader);
         quote.approve(address(swapRouter), type(uint256).max);
 
-        // Launch the token with a dedicated BasketVault instead of the plain crucible wallet.
-        (token, launchPoolId, ) = factory.createTokenWithBasketVault("Test RWA Token", "TRWA", address(quote), creator, vaultOwner);
+        // Launch the token with a dedicated BundleVault instead of the plain crucible wallet.
+        (token, launchPoolId, ) = factory.createTokenWithBundleVault("Test RWA Token", "TRWA", address(quote), creator, vaultOwner);
         tokenIsCurrency0 = token < address(quote);
         (,,, address regCrucible,,,,) = hook.configs(launchPoolId);
-        vault = BasketVault(regCrucible);
+        vault = BundleVault(regCrucible);
 
         // Seed two-sided liquidity for quote<->stockA and quote<->stockB so the vault has
         // something real to swap against — plain vanilla pools, no hook, standard 0.3% tier.
@@ -203,8 +203,8 @@ contract BasketVaultTest is Test {
         assertTrue(token2 != address(0));
     }
 
-    // ── basket config ──────────────────────────────────────────────────────────────────────
-    function test_onlyCreator_canSetBasket() public {
+    // ── bundle config ──────────────────────────────────────────────────────────────────────
+    function test_onlyCreator_canSetBundle() public {
         address[] memory assets = new address[](1);
         assets[0] = address(stockA);
         uint16[] memory weights = new uint16[](1);
@@ -212,12 +212,12 @@ contract BasketVaultTest is Test {
         PoolKey[] memory keys = new PoolKey[](1);
         keys[0] = _quotePoolKey(address(stockA));
 
-        vm.expectRevert(BasketVault.NotCreator.selector);
-        vault.setBasket(assets, weights, keys, BasketVault.PayoutMode.AllAtOnce);
+        vm.expectRevert(BundleVault.NotCreator.selector);
+        vault.setBundle(assets, weights, keys, BundleVault.PayoutMode.AllAtOnce);
 
         vm.prank(creator);
-        vault.setBasket(assets, weights, keys, BasketVault.PayoutMode.AllAtOnce);
-        assertEq(vault.basketLength(), 1);
+        vault.setBundle(assets, weights, keys, BundleVault.PayoutMode.AllAtOnce);
+        assertEq(vault.bundleLength(), 1);
     }
 
     function test_allAtOnce_weightsMustSumTo10000() public {
@@ -232,12 +232,12 @@ contract BasketVaultTest is Test {
         keys[1] = _quotePoolKey(address(stockB));
 
         vm.prank(creator);
-        vm.expectRevert(BasketVault.BadWeights.selector);
-        vault.setBasket(assets, weights, keys, BasketVault.PayoutMode.AllAtOnce);
+        vm.expectRevert(BundleVault.BadWeights.selector);
+        vault.setBundle(assets, weights, keys, BundleVault.PayoutMode.AllAtOnce);
     }
 
     // ── pull + convert: the actual point ──────────────────────────────────────────────────
-    function _configureTwoAssetBasket(BasketVault.PayoutMode mode) internal {
+    function _configureTwoAssetBundle(BundleVault.PayoutMode mode) internal {
         address[] memory assets = new address[](2);
         assets[0] = address(stockA);
         assets[1] = address(stockB);
@@ -248,11 +248,11 @@ contract BasketVaultTest is Test {
         keys[0] = _quotePoolKey(address(stockA));
         keys[1] = _quotePoolKey(address(stockB));
         vm.prank(creator);
-        vault.setBasket(assets, weights, keys, mode);
+        vault.setBundle(assets, weights, keys, mode);
     }
 
     function test_pull_and_convert_allAtOnce_splitsIntoBothStocksByWeight() public {
-        _configureTwoAssetBasket(BasketVault.PayoutMode.AllAtOnce);
+        _configureTwoAssetBundle(BundleVault.PayoutMode.AllAtOnce);
 
         // Generate quote-side fee accrual: buy the launch token, so the "unspecified" (token)
         // side is taxed... we need the QUOTE side taxed instead, so sell after buying.
@@ -297,7 +297,7 @@ contract BasketVaultTest is Test {
     }
 
     function test_convert_rotating_cyclesThroughAssets() public {
-        _configureTwoAssetBasket(BasketVault.PayoutMode.Rotating);
+        _configureTwoAssetBundle(BundleVault.PayoutMode.Rotating);
         Currency quoteCurrency = Currency.wrap(address(quote));
 
         // Fund the vault directly via a real fee accrual is fiddly to repeat twice in one test;
@@ -338,26 +338,26 @@ contract BasketVaultTest is Test {
     }
 
     function test_convert_revertsWithNothingPending() public {
-        _configureTwoAssetBasket(BasketVault.PayoutMode.AllAtOnce);
+        _configureTwoAssetBundle(BundleVault.PayoutMode.AllAtOnce);
         uint256[] memory minOuts = new uint256[](2);
-        vm.expectRevert(BasketVault.NothingPending.selector);
+        vm.expectRevert(BundleVault.NothingPending.selector);
         vault.convert(Currency.wrap(address(quote)), minOuts);
     }
 
     function test_convert_wrongMinOutsLength_reverts() public {
-        _configureTwoAssetBasket(BasketVault.PayoutMode.AllAtOnce);
+        _configureTwoAssetBundle(BundleVault.PayoutMode.AllAtOnce);
         _buyLaunchToken(20_000e6);
         _sellHalf();
         vault.pull(Currency.wrap(address(quote)));
         uint256[] memory wrongLen = new uint256[](1);
         wrongLen[0] = 1;
-        vm.expectRevert(BasketVault.LengthMismatch.selector);
+        vm.expectRevert(BundleVault.LengthMismatch.selector);
         vault.convert(Currency.wrap(address(quote)), wrongLen);
     }
 
     // ── disperse ───────────────────────────────────────────────────────────────────────────
     function test_disperse_paysHoldersAndEnforcesCap() public {
-        _configureTwoAssetBasket(BasketVault.PayoutMode.AllAtOnce);
+        _configureTwoAssetBundle(BundleVault.PayoutMode.AllAtOnce);
         _buyLaunchToken(50_000e6);
         _sellHalf();
         Currency quoteCurrency = Currency.wrap(address(quote));
@@ -379,7 +379,7 @@ contract BasketVaultTest is Test {
         amounts[1] = pending - amounts[0];
 
         // Not the vault owner — must revert.
-        vm.expectRevert(BasketVault.NotOwner.selector);
+        vm.expectRevert(BundleVault.NotOwner.selector);
         vault.disperse(stockACur, holders, amounts);
 
         // Cannot exceed pending, even from the real owner.
@@ -387,7 +387,7 @@ contract BasketVaultTest is Test {
         tooMuch[0] = pending;
         tooMuch[1] = pending;
         vm.prank(vaultOwner);
-        vm.expectRevert(BasketVault.ExceedsPending.selector);
+        vm.expectRevert(BundleVault.ExceedsPending.selector);
         vault.disperse(stockACur, holders, tooMuch);
 
         vm.prank(vaultOwner);
@@ -398,7 +398,7 @@ contract BasketVaultTest is Test {
     }
 
     function test_transferOwnership_onlyOwner() public {
-        vm.expectRevert(BasketVault.NotOwner.selector);
+        vm.expectRevert(BundleVault.NotOwner.selector);
         vault.transferOwnership(trader);
 
         vm.prank(vaultOwner);

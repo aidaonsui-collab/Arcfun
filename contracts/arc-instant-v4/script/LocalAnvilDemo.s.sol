@@ -17,7 +17,7 @@ import {TickMath} from "v4-core/libraries/TickMath.sol";
 
 import {RwaFeeHook} from "../src/RwaFeeHook.sol";
 import {RwaInstantV4Factory} from "../src/RwaInstantV4Factory.sol";
-import {BasketVault} from "../src/BasketVault.sol";
+import {BundleVault} from "../src/BundleVault.sol";
 import {LiquidityAmounts} from "../src/libraries/LiquidityAmounts.sol";
 import {MockRwaToken} from "../test/MockRwaToken.sol";
 import {HookMiner} from "../test/utils/HookMiner.sol";
@@ -32,11 +32,11 @@ interface IERC20Like {
 /**
  * @title LocalAnvilDemo
  * @notice LOCAL DEV ONLY — not a testnet or mainnet deploy script. Stands up the whole
- *         BasketVault stack on a plain `anvil` node (no fork, no relation to Arc) so
- *         scripts/basket-vault-keeper.ts has something real to run against — nothing in this
+ *         BundleVault stack on a plain `anvil` node (no fork, no relation to Arc) so
+ *         scripts/bundle-vault-keeper.ts has something real to run against — nothing in this
  *         package is deployed anywhere else, see the README.
  *
- *         Deliberately mirrors test/BasketVault.t.sol's setUp() as real broadcast transactions
+ *         Deliberately mirrors test/BundleVault.t.sol's setUp() as real broadcast transactions
  *         instead of Foundry's in-memory test EVM: this is what proves the keeper script talks
  *         to a genuinely deployed contract over a real RPC, the same shape it'll use against Arc,
  *         not just against forge's test harness.
@@ -91,8 +91,8 @@ contract LocalAnvilDemo is Script {
         stockB.mint(deployer, 10_000_000e6);
 
         (address token, PoolId launchId, address vaultAddr) =
-            factory.createTokenWithBasketVault("Local Demo Token", "DEMO", address(quote), deployer, deployer);
-        BasketVault vault = BasketVault(vaultAddr);
+            factory.createTokenWithBundleVault("Local Demo Token", "DEMO", address(quote), deployer, deployer);
+        BundleVault vault = BundleVault(vaultAddr);
 
         // Seed real two-sided liquidity for quote<->stockA and quote<->stockB (both 6dp here, so
         // raw price 1 is a fine 1:1 start — no decimals adjustment needed, unlike the Foundry
@@ -100,7 +100,7 @@ contract LocalAnvilDemo is Script {
         PoolKey memory keyA = _seedPool(manager, liquidityRouter, address(quote), address(stockA));
         PoolKey memory keyB = _seedPool(manager, liquidityRouter, address(quote), address(stockB));
 
-        // Configure a 70/30 all-at-once basket.
+        // Configure a 70/30 all-at-once bundle.
         address[] memory assets = new address[](2);
         assets[0] = address(stockA);
         assets[1] = address(stockB);
@@ -110,9 +110,9 @@ contract LocalAnvilDemo is Script {
         PoolKey[] memory keys = new PoolKey[](2);
         keys[0] = keyA;
         keys[1] = keyB;
-        vault.setBasket(assets, weights, keys, BasketVault.PayoutMode.AllAtOnce);
+        vault.setBundle(assets, weights, keys, BundleVault.PayoutMode.AllAtOnce);
 
-        // Buy, then sell half — the sell leg taxes the quote side, which is what the basket
+        // Buy, then sell half — the sell leg taxes the quote side, which is what the bundle
         // converts. Also gives `deployer` a real launch-token balance; send a slice to holder2
         // so the keeper's disperse step has two real holders to pro-rate across.
         bool tokenIsCurrency0 = token < address(quote);

@@ -15,7 +15,7 @@ import {CurrencySettler} from "./libraries/CurrencySettler.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {LaunchToken18} from "./LaunchToken18.sol";
 import {RwaFeeHook} from "./RwaFeeHook.sol";
-import {BasketVault} from "./BasketVault.sol";
+import {BundleVault} from "./BundleVault.sol";
 
 /// @title RwaInstantV4Factory
 /// @notice Launch a fixed-1B-supply token into a v4 pool quoted against an RWA asset (USYC,
@@ -132,14 +132,14 @@ contract RwaInstantV4Factory is IUnlockCallback {
         id = PoolId.wrap(idBytes);
     }
 
-    /// @notice Same launch, except the CRUCIBLE_BPS leg accrues to a dedicated BasketVault
-    ///         (deployed here, one per pool — see BasketVault's top comment for why it's never a
+    /// @notice Same launch, except the CRUCIBLE_BPS leg accrues to a dedicated BundleVault
+    ///         (deployed here, one per pool — see BundleVault's top comment for why it's never a
     ///         shared address) instead of the factory's plain `crucible` wallet. The creator
-    ///         configures what that leg converts into via `BasketVault.setBasket` after launch —
+    ///         configures what that leg converts into via `BundleVault.setBundle` after launch —
     ///         "fully automatic, no relaunches."
     /// @param vaultOwner Keeper/ops address allowed to call the vault's `disperse` — see
-    ///        BasketVault. Can be changed later via the vault's own transferOwnership.
-    function createTokenWithBasketVault(
+    ///        BundleVault. Can be changed later via the vault's own transferOwnership.
+    function createTokenWithBundleVault(
         string calldata name,
         string calldata symbol,
         address quote,
@@ -149,7 +149,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
         if (quote == address(0) || creator == address(0) || vaultOwner == address(0)) revert ZeroAddress();
         // A plain contract deploy touches none of the PoolManager's locked accounting, so unlike
         // everything below it, this doesn't need to run inside unlock().
-        vault = address(new BasketVault(hook, poolManager, creator, vaultOwner));
+        vault = address(new BundleVault(hook, poolManager, creator, vaultOwner));
         bytes memory result = poolManager.unlock(abi.encode(uint8(1), name, symbol, quote, creator, vault));
         bytes32 idBytes;
         (token, idBytes) = abi.decode(result, (address, bytes32));
