@@ -7,7 +7,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 contract MockRwaToken is ERC20 {
     constructor() ERC20("US Yield Coin (mock)", "USYC") {}
 
-    function decimals() public pure override returns (uint8) {
+    function decimals() public pure virtual override returns (uint8) {
         return 6;
     }
 

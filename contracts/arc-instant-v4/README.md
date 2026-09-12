@@ -32,6 +32,41 @@ settle atomically inside every swap. No cron, no keeper, nothing to keep alive.
   `modifyLiquidity` with a negative delta on it. That's the "no NFT withdraw, creator can't rug"
   guarantee CrucibleLock gives structurally instead of via a revert-guarded function.
 
+## Holder payout baskets — `BasketVault.sol`
+
+"Earn RWAs automatically, just for holding," from [based.bid](https://x.com/basedbidx/status/2081029361965080803): a creator-configured basket of assets (stocks, ETFs, other RWAs) that a
+pool's fees convert into and pay out to holders, either **all-at-once** (every asset, every
+cycle, split by weight) or **rotating** (one asset per cycle, cycling through the list).
+
+- **One `BasketVault` per pool, never a shared address.** `RwaFeeHook.owed[recipient][currency]`
+  is keyed globally by (address, currency) across every pool the hook serves. A single router
+  address reused as `crucible` for two pools that happen to share a quote currency (likely —
+  most RWA launches would share the same RWA quote) would have both pools' fees landing in the
+  same slot with no way to tell whose money is whose. `RwaInstantV4Factory.createTokenWithBasketVault`
+  deploys a fresh vault per launch specifically to make that structurally impossible rather than a
+  bookkeeping problem to get right.
+- **`pull(currency)`** — permissionless, claims whatever accrued to the vault from the hook (the
+  vault *is* that pool's sole crucible recipient, so this is unambiguous).
+- **`convert(fromCurrency, minOuts)`** — swaps the pulled balance into the basket via real v4
+  pools (creator supplies the pool key per basket asset at `setBasket` time — mismatches revert
+  rather than silently routing through the wrong pool). AllAtOnce splits by weight in one call;
+  Rotating sends the whole amount to the next asset in line and advances the pointer.
+- **`disperse(asset, holders[], amounts[])`** — **not** computed on-chain. Enumerating "every
+  current holder and their exact balance" cheaply on-chain is a real unsolved problem for a plain
+  ERC-20; this mirrors the pattern already proven in production for $EVE holder rewards
+  (`lib/arc-eve-holder-rewards.ts`): a keeper reads real balances off-chain, computes the pro-rata
+  weights, and submits them here. The contract's only enforcement is `sum(amounts) <=
+  pendingDistribution[asset]` and an owner gate on who can call it — it cannot verify the weights
+  are *correct*, same trust boundary the existing EVE rewards keeper already operates under.
+- **`setBasket(...)` is creator-only and callable any time** — "fully automatic, no relaunches":
+  changing what holders earn never touches the token or its pool.
+
+Proven by `test/BasketVault.t.sol` (10 tests, part of the same `forge test` run below): real
+launch-with-vault wiring, weight validation, pull + convert in both payout modes against real v4
+pools for two mock "stock" assets, the disperse cap + ownership gates. Not built: the off-chain
+keeper script that would actually compute and submit `disperse` batches (same gap #234's plain
+launch path has for the crucible leg — this is the next layer up, not re-solved here).
+
 ## Deliberately simpler than the v3 factory, for now
 
 - **No starting-valuation bonding math.** v3's `launchVirtualQuote` picks a deliberate initial
@@ -64,11 +99,11 @@ quote, and swaps both directions:
 forge test -vv
 ```
 
-11/11 passing, including a 256-run fuzz test that the creator/platform/crucible split holds
-*exactly* to the bps constants across trade sizes from 1 to 500,000 quote units, and a directional
-test proving the fee correctly lands in the token on a buy and the quote on a sell (the highest-risk
-part of this build — v4's specified/unspecified-currency accounting is genuinely easy to get
-backwards, and this is what confirms it isn't).
+21/21 passing (11 for the launch path, 10 for BasketVault), including a 256-run fuzz test that
+the creator/platform/crucible split holds *exactly* to the bps constants across trade sizes from
+1 to 500,000 quote units, and a directional test proving the fee correctly lands in the token on
+a buy and the quote on a sell (the highest-risk part of this build — v4's specified/unspecified-
+currency accounting is genuinely easy to get backwards, and this is what confirms it isn't).
 
 **Not proven / explicitly unverified:**
 - **Arc's real v4 `PoolManager` address.** There's an address that's *plausibly* it
