@@ -11,10 +11,13 @@ import {Currency} from "v4-core/types/Currency.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
+import {TickMath} from "v4-core/libraries/TickMath.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import {BalanceDelta, BalanceDeltaLibrary} from "v4-core/types/BalanceDelta.sol";
 
 import {RwaFeeHook} from "../src/RwaFeeHook.sol";
 import {RwaInstantV4Factory} from "../src/RwaInstantV4Factory.sol";
+import {VirtualQuote} from "../src/libraries/VirtualQuote.sol";
 import {MockRwaToken} from "./MockRwaToken.sol";
 import {HookMiner} from "./utils/HookMiner.sol";
 
@@ -260,6 +263,61 @@ contract RwaInstantV4Test is Test {
         vm.expectRevert();
         factory.transferOwnership(trader);
         vm.stopPrank();
+    }
+
+    // ── launchVirtualQuote + first buy ─────────────────────────────────────────────────────
+    uint256 constant VQ_6DP = 5_500e6; // same raw units Instant V3 uses for ~$5.2k FDV
+
+    function test_virtualQuote_opensOffTheTickEdge() public {
+        (address token, PoolId id,) = factory.createToken("VQ", "VQ", address(quote), creator, VQ_6DP, 0);
+        bool tokenIsCurrency0 = token < address(quote);
+        (uint160 sqrtPrice,,,) = StateLibrary.getSlot0(IPoolManager(address(manager)), id);
+
+        int24 minU = TickMath.minUsableTick(factory.TICK_SPACING());
+        int24 maxU = TickMath.maxUsableTick(factory.TICK_SPACING());
+        uint160 edge = TickMath.getSqrtPriceAtTick(tokenIsCurrency0 ? minU : maxU - factory.TICK_SPACING());
+        assertTrue(sqrtPrice != edge, "virtual quote should not sit on the usable-tick edge");
+
+        uint160 ideal = VirtualQuote.sqrtPriceX96(tokenIsCurrency0, VQ_6DP, VirtualQuote.VIRTUAL_TOKEN_INIT);
+        uint256 distIdeal = sqrtPrice > ideal ? sqrtPrice - ideal : ideal - sqrtPrice;
+        uint256 distEdge = sqrtPrice > edge ? sqrtPrice - edge : edge - sqrtPrice;
+        assertLt(distIdeal, distEdge);
+        assertTrue(token != address(0));
+    }
+
+    function test_firstBuy_sameTxPullsQuoteAndPaysBuyer() public {
+        uint256 buyIn = 100e6;
+        quote.mint(creator, buyIn);
+        vm.startPrank(creator);
+        quote.approve(address(factory), buyIn);
+        (address token,, uint256 tokensOut) =
+            factory.createToken("FB", "FB", address(quote), creator, VQ_6DP, buyIn);
+        vm.stopPrank();
+
+        assertGt(tokensOut, 0);
+        assertEq(IERC20Like(token).balanceOf(creator), tokensOut);
+        assertEq(quote.balanceOf(address(factory)), 0);
+        assertEq(quote.balanceOf(creator), 0);
+        // First buy is a real swap, so the hook taxes it (token side on a buy).
+        assertGt(hook.owed(creator, Currency.wrap(token)), 0);
+        // Must not dump almost the whole supply — that is the zero-valuation edge start.
+        assertLt(tokensOut, factory.TOTAL_SUPPLY() / 10);
+    }
+
+    function test_firstBuy_zeroSkipsSwap() public {
+        (address token,, uint256 tokensOut) = factory.createToken("Z", "Z", address(quote), creator, VQ_6DP, 0);
+        assertEq(tokensOut, 0);
+        assertEq(IERC20Like(token).balanceOf(creator), 0);
+    }
+
+    function test_setLaunchVirtualQuote_usedWhenPerCreateIsZero() public {
+        factory.setLaunchVirtualQuote(VQ_6DP);
+        (address token, PoolId id) = factory.createToken("DEF", "DEF", address(quote), creator);
+        (uint160 sqrtPrice,,,) = StateLibrary.getSlot0(IPoolManager(address(manager)), id);
+        bool tokenIsCurrency0 = token < address(quote);
+        int24 minU = TickMath.minUsableTick(factory.TICK_SPACING());
+        uint160 edge = TickMath.getSqrtPriceAtTick(tokenIsCurrency0 ? minU : TickMath.maxUsableTick(factory.TICK_SPACING()) - factory.TICK_SPACING());
+        assertTrue(sqrtPrice != edge);
     }
 
 }

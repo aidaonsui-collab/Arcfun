@@ -34,16 +34,14 @@ settle atomically inside every swap. No cron, no keeper, nothing to keep alive.
 
 ## Deliberately simpler than the v3 factory, for now
 
-- **No starting-valuation bonding math.** v3's `launchVirtualQuote` picks a deliberate initial
-  price. This always starts at the literal floor/ceiling of the tick range and lets the market
-  walk the price up (or down) through trading — sidesteps needing this contract to reason about
-  an arbitrary RWA quote's decimals or a "fair" launch valuation. A caller-supplied virtual quote
-  is a reasonable follow-up.
-- **No first-buy-in-the-same-transaction.** v3's `createTokenMemeInstantQuote` takes a
-  `firstBuyQuoteAmount` and buys atomically at creation. Folding a swap into the same `unlock()`
-  as the liquidity mint is a real correctness-sensitive addition on top of an already-dense
-  callback — left out until this path has real usage. Creator can swap immediately after in a
-  second transaction.
+- **Starting valuation is optional.** `createToken(..., launchVirtualQuote, firstBuyQuoteAmount)`
+  uses the same raw-unit encoding as Instant V3 (`VIRTUAL_TOKEN_INIT` vs quote raw). 0 falls
+  back to the factory default (`setLaunchVirtualQuote`); if that is also 0 the pool still opens
+  at the usable-tick edge. Pass `5500e6` on a 6dp quote for the ~$5.2k FDV Instant uses on USDC.
+- **First buy is in the create tx.** Nonzero `firstBuyQuoteAmount` is pulled from the caller
+  (approve the factory) and swapped quote→token inside the same `unlock()` as the LP mint. The
+  hook taxes that swap like any other. 0 skips the swap. The original 4-arg `createToken` is
+  launch-only.
 - **The "crucible" leg only accrues — nothing burns automatically yet.** v3's project-burn leg
   buys back and burns the launch token; there's no guaranteed launch-token/EVE route for an
   arbitrary RWA pair. The crucible leg here just piles up as a withdrawable balance in whatever
