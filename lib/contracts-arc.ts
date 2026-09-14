@@ -432,6 +432,9 @@ export const ARC = {
     process.env.NEXT_PUBLIC_ARC_INSTANT_LOCKER,
     '0xE522907807CdDF006b433a103356d2c30ac39209',
   ),
+  /** Uniswap v4 Instant factory. ZERO until deployed — create tx stays on INSTANT_FACTORY. */
+  INSTANT_V4_FACTORY: envAddr(process.env.NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY, ZERO),
+  INSTANT_V4_HOOK: envAddr(process.env.NEXT_PUBLIC_ARC_INSTANT_V4_HOOK, ZERO),
   BPS_SOURCE: envAddr(
     process.env.NEXT_PUBLIC_ARC_BPS_SOURCE,
     '0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE',
@@ -588,6 +591,15 @@ export function arcReflectionEnabled(): boolean {
  */
 export function arcLaunchesEnabled(): boolean {
   return process.env.NEXT_PUBLIC_ARC_LAUNCHES_ENABLED !== '0'
+}
+
+/**
+ * Create-form fee split chooser (v4 Instant). Off until explicitly set.
+ * The live create tx stays on V3 Instant until NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY is set
+ * in a later PR — this flag only reveals the slider UI.
+ */
+export function arcInstantV4UiEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_ARC_INSTANT_V4 === '1'
 }
 
 /**

@@ -17,6 +17,7 @@ import {
   arcInstantEnabled,
   arcReflectionEnabled,
   arcLaunchesEnabled,
+  arcInstantV4UiEnabled,
   arcCreationFeeWeiFor,
   arcPublicClient,
 } from '@/lib/contracts-arc'
@@ -43,6 +44,14 @@ import {
 import { uploadImage } from '@/lib/upload-image'
 import { fmtUsd } from '@/lib/ui-format'
 import { TokenCard } from '@/components/TokenCard'
+import { FeeSplitCard } from '@/components/FeeSplitCard'
+import {
+  FEE_SPLIT_PRESETS,
+  MIN_REFLECT_HOLDERS_BPS,
+  foldHoldersIntoCreator,
+  splitValid,
+  type FeeSplit,
+} from '@/lib/eve-fee-split'
 import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 import type { PoolToken } from '@/lib/tokens'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
@@ -68,6 +77,23 @@ const LAUNCH_TYPES: {
   },
 ]
 
+const LAUNCH_TYPES_V4: {
+  key: LaunchType
+  title: string
+  body: string
+}[] = [
+  {
+    key: 'instant',
+    title: 'Meme',
+    body: 'Tradable from block one. You pick the pool fee and where it goes.',
+  },
+  {
+    key: 'reflection',
+    title: 'Reflect',
+    body: 'Holders take a cut of every swap. At least 20% on the fee card.',
+  },
+]
+
 const FIRST_BUY_PRESETS = ['100', '250', '1000']
 
 export function ArcCreateForm({
@@ -87,6 +113,8 @@ export function ArcCreateForm({
   const [launchType, setLaunchType] = useState<LaunchType>('instant')
   /** Instant quote asset. `usdc` is the live factory; an RWA id is plug-and-play. */
   const [quoteId, setQuoteId] = useState('usdc')
+  const [feeSplit, setFeeSplit] = useState<FeeSplit>(FEE_SPLIT_PRESETS.creator)
+  const [feeOpen, setFeeOpen] = useState(false)
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
   const [description, setDescription] = useState('')
@@ -130,6 +158,10 @@ export function ArcCreateForm({
   const rwaQuote = quoteId !== 'usdc' ? rwaAssetById(quoteId) : null
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
   const isReflection = launchType === 'reflection'
+  const v4Ui = arcInstantV4UiEnabled()
+  const hideHolders = Boolean(rwaQuote)
+  const minHoldersBps = isReflection ? MIN_REFLECT_HOLDERS_BPS : 0
+  const feeOk = !v4Ui || splitValid(feeSplit, { hideHolders, minHoldersBps }).ok
   const handleNorm = normaliseXHandle(rewardsHandle)
   const handleMode = payToHandle && rewardsMode === 'handle'
   const rewardsOk = handleMode
@@ -431,6 +463,7 @@ export function ArcCreateForm({
     // just retrying the metadata save the banner is there for.
     !pendingRegister &&
     rewardsOk &&
+    feeOk &&
     (isReflection
       ? reflectionLive && rewardTokenOk
       : configured)
@@ -519,7 +552,7 @@ export function ArcCreateForm({
     <div className={compact ? 'hidden' : ''}>
       <div className="mb-2 text-xs text-t3">Type</div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {LAUNCH_TYPES.map((lt) => (
+      {(v4Ui ? LAUNCH_TYPES_V4 : LAUNCH_TYPES).map((lt) => (
         <TypeCard
           key={lt.key}
           active={launchType === lt.key && (lt.key !== 'instant' || quoteId === 'usdc')}
@@ -532,6 +565,8 @@ export function ArcCreateForm({
               ? () => {
                   setLaunchType(lt.key)
                   setQuoteId('usdc')
+                  if (lt.key === 'reflection') setFeeSplit(FEE_SPLIT_PRESETS.reflect)
+                  else if (isReflection) setFeeSplit(FEE_SPLIT_PRESETS.creator)
                 }
               : undefined
           }
@@ -545,11 +580,14 @@ export function ArcCreateForm({
           body={
             a.permissioned
               ? `Instant TOKEN/${a.symbol}. Permissioned — wallet must be allowlisted.`
-              : `Same Instant mint + LP lock, quoted in ${a.symbol}.`
+              : v4Ui
+                ? `Same Instant mint + LP lock, quoted in ${a.symbol}. Holders slice is off.`
+                : `Same Instant mint + LP lock, quoted in ${a.symbol}.`
           }
           onClick={() => {
             setLaunchType('instant')
             setQuoteId(a.id)
+            setFeeSplit(foldHoldersIntoCreator(feeSplit))
           }}
         />
       ))}
@@ -573,6 +611,20 @@ export function ArcCreateForm({
 
         {typePicker}
 
+        {v4Ui && launchesLive ? (
+          <div className="mt-3">
+            <FeeSplitCard
+              split={feeSplit}
+              onChange={setFeeSplit}
+              hideHolders={hideHolders}
+              minHoldersBps={minHoldersBps}
+              preview={ARC.INSTANT_V4_FACTORY === '0x0000000000000000000000000000000000000000'}
+              open={feeOpen}
+              onOpenChange={setFeeOpen}
+            />
+          </div>
+        ) : null}
+
         {!launchesLive ? (
           <div className="mt-6 rounded-[22px] border border-hair bg-s1 px-5 py-6 text-center">
             <p className="m-0 text-[15px] font-semibold tracking-tightish text-white">
@@ -588,6 +640,16 @@ export function ArcCreateForm({
             {isReflection && (
               <div className="mt-3 p-5 rounded-2xl bg-s1 border border-lime-line space-y-4">
                 <div className="flex flex-col gap-1">
+                  {v4Ui ? (
+                    <>
+                      <span className="text-[15px] font-semibold tracking-tightish">Holder reward token</span>
+                      <span className="text-[13px] text-t2 leading-snug">
+                        Holders slice is set on the fee card. This address is what they earn when
+                        reflect() runs on the live Instant locker.
+                      </span>
+                    </>
+                  ) : (
+                    <>
                   <span className="text-[15px] font-semibold tracking-tightish">LP fee split</span>
                   <span className="text-[13px] text-t2 leading-snug">
                     Quote-side LP fees: <strong className="text-white">20% holders</strong> ·{' '}
@@ -597,6 +659,8 @@ export function ArcCreateForm({
                     <strong className="text-white">10% platform</strong>. Referrals pay 0.05% on
                     eve.fun buys, not from this collect. Launch-token fees burn.
                   </span>
+                    </>
+                  )}
                   {!reflectionLive ? (
                     <span className="text-[12px] text-coral mt-1">
                       Reflection factory not configured — switch to Meme Launch.
@@ -751,7 +815,8 @@ export function ArcCreateForm({
                     className={`${FIELD} font-mono`}
                   />
                   <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
-                    Where your share of LP fees is paid (Instant: ~70% of quote-side fees). Defaults to
+                    Where the creator slice of the pool fee is paid
+                    {v4Ui ? '' : ' (Instant: ~70% of quote-side fees)'}. Defaults to
                     the wallet that signs the create tx. Rewards to {rewardsPreview}.
                   </p>
                   {rewardsWallet.trim() && !rewardsOk && (

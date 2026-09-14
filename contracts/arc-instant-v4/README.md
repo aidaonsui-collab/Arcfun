@@ -1,10 +1,26 @@
 # arc-instant-v4
 
-The RWA-paired launch path, built natively on Uniswap v4 instead of the pad's existing v3
-(`contracts/arc-instant`). Came out of a session comparing v3 vs v4 for eve.fun: don't migrate
-the live Meme/Reflection pad, but build the not-yet-shipped RWA pairing (`lib/arc-rwa-assets.ts`
-on the app side — USYC/BUIDL/tokenized CRCL, currently all "Soon") on v4 from the start, since
-that's new code either way and it's where this kind of liquidity is actually heading.
+Uniswap v4 Instant for eve.fun. New meme / reflect / RWA launches go here. The live V3 Instant
+factory (`0x05BF…`) and CrucibleLock keeper stay up for tokens already on that path — they are
+not migrated.
+
+Two factories share one hook:
+
+- **`EveFeeHook.sol`** — `AFTER_SWAP` + `AFTER_SWAP_RETURNS_DELTA`. One swap fee (0.3–3%), same
+  on buy and sell. 100% of that fee is allocated creator / burn / holders / auto-LP / platform,
+  with a 10% platform floor. Burn of the launch token happens in-swap to `0xdead`; quote-side
+  burn accrues to `pendingBurn` (cannot `swap()` the same pool in `afterSwap`). Auto-LP and
+  holders accrue pull-based like creator. Multiple factories can be allowed on the same hook.
+- **`EveInstantV4Factory.sol`** — USDC (or any ERC-20 quote) Instant for meme + reflect. Per-create
+  split, virtual quote, same-tx first buy. No Crucible leg. Auto-LP slice accrues to the factory
+  until donate/flush lands. Holders slice accrues to the address passed at create.
+- **`RwaFeeHook.sol` / `RwaInstantV4Factory.sol`** — earlier 50/40/10 sketch. RWA creates will
+  point at `EveFeeHook` instead; do not grow a second split model.
+
+Create UI: `/create` shows the fee chooser when `NEXT_PUBLIC_ARC_INSTANT_V4=1`. The live create
+transaction still hits V3 Instant until `NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY` is set.
+
+The rest of this file is the original RWA sketch (still accurate for `RwaFeeHook`).
 
 ## What v4 buys here, concretely
 
