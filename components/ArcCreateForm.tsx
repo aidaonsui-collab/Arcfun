@@ -28,6 +28,16 @@ import {
 } from '@/lib/arc-instant-launchpad'
 import { buildCreateTokenEveV4 } from '@/lib/eve-instant-v4-launchpad'
 import { liveRwaQuoteAssets, pendingRwaQuoteAssets, rwaAssetById } from '@/lib/arc-rwa-assets'
+import { BundleBasketCard } from '@/components/BundleBasketCard'
+import {
+  RWA_V4_FACTORY_ABI,
+  basketValid,
+  buildCreateTokenWithBundle,
+  buildSetBasket,
+  rwaBundleFactoryReady,
+  type BasketRow,
+  type BundlePayoutMode,
+} from '@/lib/rwa-bundle'
 import {
   buildCreateTokenReflectionArc,
   ARC_REFLECTION_CREATE_GAS,
@@ -58,7 +68,16 @@ import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 import type { PoolToken } from '@/lib/tokens'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
 
-type Step = 'idle' | 'uploading' | 'vault' | 'approving' | 'creating' | 'confirming' | 'registering' | 'done'
+type Step =
+  | 'idle'
+  | 'uploading'
+  | 'vault'
+  | 'approving'
+  | 'creating'
+  | 'confirming'
+  | 'basket'
+  | 'registering'
+  | 'done'
 type RewardsMode = 'wallet' | 'handle'
 type LaunchType = 'instant' | 'reflection'
 
@@ -117,6 +136,9 @@ export function ArcCreateForm({
   const [quoteId, setQuoteId] = useState('usdc')
   const [feeSplit, setFeeSplit] = useState<FeeSplit>(FEE_SPLIT_PRESETS.creator)
   const [feeOpen, setFeeOpen] = useState(false)
+  const [bundleOn, setBundleOn] = useState(false)
+  const [bundleMode, setBundleMode] = useState<BundlePayoutMode>('all')
+  const [basketRows, setBasketRows] = useState<BasketRow[]>([])
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
   const [description, setDescription] = useState('')
@@ -145,6 +167,11 @@ export function ArcCreateForm({
     token: Address
     payload: Record<string, unknown>
   } | null>(null)
+  const [pendingBasket, setPendingBasket] = useState<{
+    token: Address
+    sink: Address
+    quote: Address
+  } | null>(null)
   const [registerError, setRegisterError] = useState<string | null>(null)
   const [registering, setRegistering] = useState(false)
 
@@ -162,9 +189,25 @@ export function ArcCreateForm({
   const isReflection = launchType === 'reflection'
   const v4Ui = arcInstantV4UiEnabled()
   const v4Live = arcInstantV4Enabled()
-  const hideHolders = Boolean(rwaQuote)
-  const minHoldersBps = isReflection ? MIN_REFLECT_HOLDERS_BPS : 0
+  const bundleLive = Boolean(
+    v4Live &&
+      rwaQuote &&
+      rwaBundleFactoryReady(rwaQuote.factory) &&
+      (rwaQuote.factory as string).toLowerCase() !== ARC.INSTANT_FACTORY.toLowerCase(),
+  )
+  const hideHolders = Boolean(rwaQuote) && !bundleOn
+  const minHoldersBps = isReflection
+    ? MIN_REFLECT_HOLDERS_BPS
+    : bundleOn
+      ? 100
+      : 0
   const feeOk = !v4Ui || splitValid(feeSplit, { hideHolders, minHoldersBps }).ok
+  const basketCheck = bundleOn
+    ? basketValid(basketRows, {
+        quote: ((rwaQuote?.address as Address) || ARC.USDC) as Address,
+        mode: bundleMode,
+      })
+    : { ok: true, reason: null as string | null }
   const handleNorm = normaliseXHandle(rewardsHandle)
   const handleMode = payToHandle && rewardsMode === 'handle'
   const rewardsOk = handleMode
@@ -295,7 +338,7 @@ export function ArcCreateForm({
           ? (rewardsWallet.trim() as Address)
           : null
 
-      if (handleMode && handleNorm) {
+      if (handleMode && handleNorm && !bundleOn) {
         setStep('vault')
         const existing = await readHandlePayVaultOf(handleNorm)
         if (!existing || /^0x0+$/i.test(existing)) {
@@ -323,13 +366,16 @@ export function ArcCreateForm({
       const quoteDecimals = rwaQuote?.decimals || 6
       const firstBuyQuote =
         buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcQuote(firstBuy, quoteDecimals) : 0n
-      const factory = v4Live
-        ? ARC.INSTANT_V4_FACTORY
-        : isReflection
-          ? ARC.REFLECTION_FACTORY
-          : rwaQuote?.factory
-            ? (rwaQuote.factory as Address)
-            : ARC.INSTANT_FACTORY
+      const factory =
+        bundleOn && bundleLive && rwaQuote?.factory
+          ? (rwaQuote.factory as Address)
+          : v4Live
+            ? ARC.INSTANT_V4_FACTORY
+            : isReflection
+              ? ARC.REFLECTION_FACTORY
+              : rwaQuote?.factory
+                ? (rwaQuote.factory as Address)
+                : ARC.INSTANT_FACTORY
       const quoteToken = (rwaQuote?.address as Address) || ARC.USDC
 
       if (firstBuyQuote > 0n) {
@@ -351,7 +397,62 @@ export function ArcCreateForm({
         }
       }
 
-      if (v4Live) {
+      if (v4Live && bundleOn && bundleLive) {
+        setStep('creating')
+        const creator = address
+        const call = buildCreateTokenWithBundle({
+          factory,
+          name: name.trim(),
+          symbol: symbol.trim(),
+          quote: quoteToken,
+          creator,
+          firstBuyQuoteRaw: firstBuyQuote,
+          split: feeSplit,
+        })
+        hash = await writeContractAsync({
+          address: call.address,
+          abi: call.abi as never,
+          functionName: call.functionName as never,
+          args: call.args as never,
+          chainId: call.chainId,
+          gas: ARC_INSTANT_CREATE_GAS,
+        })
+        setStep('confirming')
+        const created = await waitArcCreateConfirmed(hash)
+        token = created.token
+        pool = created.pool
+        const row = (await arcPublicClient().readContract({
+          address: factory,
+          abi: RWA_V4_FACTORY_ABI,
+          functionName: 'poolOf',
+          args: [token],
+        })) as readonly [Address, Address, Address, Address, `0x${string}`]
+        const sink = row[3]
+        if (!sink || /^0x0+$/i.test(sink)) {
+          throw new Error('Token launched but the bundle sink address was missing.')
+        }
+        setStep('basket')
+        try {
+          const basketCall = buildSetBasket({
+            sink,
+            rows: basketRows,
+            quote: quoteToken,
+            mode: bundleMode,
+          })
+          const basketHash = await writeContractAsync({
+            address: basketCall.address,
+            abi: basketCall.abi as never,
+            functionName: basketCall.functionName as never,
+            args: basketCall.args as never,
+            chainId: basketCall.chainId,
+            gas: 1_200_000n,
+          })
+          await waitArcTxConfirmed(basketHash)
+        } catch (e) {
+          setPendingBasket({ token, sink, quote: quoteToken })
+          throw e
+        }
+      } else if (v4Live) {
         setStep('creating')
         const creator = rewardsAddr || address
         const call = buildCreateTokenEveV4({
@@ -497,6 +598,8 @@ export function ArcCreateForm({
     !pendingRegister &&
     rewardsOk &&
     feeOk &&
+    !pendingBasket &&
+    (!bundleOn || (bundleLive && basketCheck.ok)) &&
     (v4Live
       ? true
       : isReflection
@@ -600,6 +703,7 @@ export function ArcCreateForm({
               ? () => {
                   setLaunchType(lt.key)
                   setQuoteId('usdc')
+                  setBundleOn(false)
                   if (lt.key === 'reflection') setFeeSplit(FEE_SPLIT_PRESETS.reflect)
                   else if (isReflection) setFeeSplit(FEE_SPLIT_PRESETS.creator)
                 }
@@ -616,12 +720,13 @@ export function ArcCreateForm({
             a.permissioned
               ? `Instant TOKEN/${a.symbol}. Permissioned — wallet must be allowlisted.`
               : v4Ui
-                ? `Same Instant mint + LP lock, quoted in ${a.symbol}. Holders slice is off.`
+                ? `Same Instant mint + LP lock, quoted in ${a.symbol}. Optional holder basket.`
                 : `Same Instant mint + LP lock, quoted in ${a.symbol}.`
           }
           onClick={() => {
             setLaunchType('instant')
             setQuoteId(a.id)
+            setBundleOn(false)
             setFeeSplit(foldHoldersIntoCreator(feeSplit))
           }}
         />
@@ -647,7 +752,7 @@ export function ArcCreateForm({
         {typePicker}
 
         {v4Ui && launchesLive ? (
-          <div className="mt-3">
+          <div className="mt-3 space-y-3">
             <FeeSplitCard
               split={feeSplit}
               onChange={setFeeSplit}
@@ -657,6 +762,28 @@ export function ArcCreateForm({
               open={feeOpen}
               onOpenChange={setFeeOpen}
             />
+            {rwaQuote ? (
+              <BundleBasketCard
+                enabled={bundleOn}
+                onEnabled={(on) => {
+                  setBundleOn(on)
+                  if (on) {
+                    setRewardsMode('wallet')
+                    if (feeSplit.holdersBps === 0) setFeeSplit(FEE_SPLIT_PRESETS.reflect)
+                  } else {
+                    setFeeSplit(foldHoldersIntoCreator(feeSplit))
+                  }
+                }}
+                mode={bundleMode}
+                onMode={setBundleMode}
+                rows={basketRows}
+                onRows={setBasketRows}
+                quoteId={rwaQuote.id}
+                quoteSymbol={quoteSymbol}
+                quoteAddress={(rwaQuote.address as string) || ''}
+                preview={!bundleLive}
+              />
+            ) : null}
           </div>
         ) : null}
 
@@ -793,7 +920,7 @@ export function ArcCreateForm({
 
             <div>
               <div className="mb-2 text-xs text-t3">Creator rewards (optional)</div>
-              {payToHandle ? (
+              {payToHandle && !bundleOn ? (
                 <div className="mb-3 grid grid-cols-2 gap-1 p-1 rounded-2xl bg-s1 border border-hair">
                   {(
                     [
@@ -900,6 +1027,64 @@ export function ArcCreateForm({
               <p className="text-xs text-coral flex items-start gap-1.5">
                 <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {error}
               </p>
+            )}
+
+            {pendingBasket && (
+              <div className="rounded-[14px] border border-amber-500/40 bg-amber-500/10 px-4 py-3.5">
+                <p className="flex items-start gap-1.5 text-[13px] font-medium text-amber-200">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  Token launched. The holder basket still needs setBasket from this wallet.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      void (async () => {
+                        if (!pendingBasket) return
+                        try {
+                          setError(null)
+                          setStep('basket')
+                          const basketCall = buildSetBasket({
+                            sink: pendingBasket.sink,
+                            rows: basketRows,
+                            quote: pendingBasket.quote,
+                            mode: bundleMode,
+                          })
+                          const basketHash = await writeContractAsync({
+                            address: basketCall.address,
+                            abi: basketCall.abi as never,
+                            functionName: basketCall.functionName as never,
+                            args: basketCall.args as never,
+                            chainId: basketCall.chainId,
+                            gas: 1_200_000n,
+                          })
+                          await waitArcTxConfirmed(basketHash)
+                          const tok = pendingBasket.token
+                          setPendingBasket(null)
+                          setStep('done')
+                          router.push(`/token/${tok}`)
+                        } catch (e: unknown) {
+                          const ax = e as { shortMessage?: string; message?: string }
+                          setError(ax?.shortMessage || ax?.message || 'setBasket failed')
+                          setStep('idle')
+                        }
+                      })()
+                    }}
+                    className="h-9 px-4 rounded-full bg-amber-500 text-black text-[13px] font-semibold disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {step === 'basket' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    Retry basket
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/token/${pendingBasket.token}`)}
+                    className="h-9 px-4 rounded-full border border-hair text-[13px] font-medium text-t2 hover:text-white"
+                  >
+                    Skip, view token
+                  </button>
+                </div>
+              </div>
             )}
 
             {pendingRegister && (
@@ -1098,6 +1283,8 @@ function stepLabel(step: Step): string {
       return 'Confirm in wallet…'
     case 'confirming':
       return 'Waiting for confirmation…'
+    case 'basket':
+      return 'Setting holder basket…'
     case 'registering':
       return 'Saving details…'
     default:
