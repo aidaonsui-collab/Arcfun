@@ -3,7 +3,7 @@ pragma solidity ^0.8.26;
 
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
-import {PoolIdLibrary} from "v4-core/types/PoolId.sol";
+import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {ModifyLiquidityParams} from "v4-core/types/PoolOperation.sol";
@@ -28,6 +28,12 @@ library InstantAutoLp {
     using PoolIdLibrary for PoolKey;
     using SafeCast for int256;
 
+    uint256 private constant BPS_DENOM = 10_000;
+    /// @notice Max spot deviation from `EveFeeHook`'s anchor before a mint is deferred
+    ///         instead of executed. Same anchor `flushQuoteBurn` trusts, same reasoning:
+    ///         a permissionless mint at a caller-timed spot price is a manipulation target.
+    uint256 private constant MAX_ANCHOR_DEVIATION_BPS = 300; // 3%
+
     function mintClaimed(
         IPoolManager manager,
         EveFeeHook hook,
@@ -45,7 +51,14 @@ library InstantAutoLp {
         uint256 keep0 = bal0 - a0;
         uint256 keep1 = bal1 - a1;
 
-        (uint160 sqrtP,,,) = manager.getSlot0(key.toId());
+        PoolId id = key.toId();
+        (uint160 sqrtP,,,) = manager.getSlot0(id);
+        (uint160 anchorSqrtP, bool ready) = hook.anchorSqrtPriceX96(id);
+        if (!ready || _deviatesTooMuch(sqrtP, anchorSqrtP)) {
+            _restow(hook, key, a0, a1);
+            return 0;
+        }
+
         uint160 sqrtA = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtB = TickMath.getSqrtPriceAtTick(tickUpper);
         liquidity = LiquidityAmounts.getLiquidityForAmounts(sqrtP, sqrtA, sqrtB, a0, a1);
@@ -108,6 +121,13 @@ library InstantAutoLp {
         if (d1 < 0) key.currency1.settle(manager, address(this), (-d1).toUint256(), false);
         if (d0 > 0) key.currency0.take(manager, recipient, d0.toUint256(), false);
         if (d1 > 0) key.currency1.take(manager, recipient, d1.toUint256(), false);
+    }
+
+    function _deviatesTooMuch(uint160 sqrtPriceX96, uint160 anchorSqrtPriceX96) private pure returns (bool) {
+        uint256 diff = sqrtPriceX96 > anchorSqrtPriceX96
+            ? uint256(sqrtPriceX96) - anchorSqrtPriceX96
+            : uint256(anchorSqrtPriceX96) - sqrtPriceX96;
+        return diff * BPS_DENOM > uint256(anchorSqrtPriceX96) * MAX_ANCHOR_DEVIATION_BPS;
     }
 
     function _restow(EveFeeHook hook, PoolKey memory key, uint256 a0, uint256 a1) private {

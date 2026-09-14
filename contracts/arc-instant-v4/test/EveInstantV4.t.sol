@@ -154,6 +154,17 @@ contract EveInstantV4Test is Test {
         );
     }
 
+    /// @notice `flushQuoteBurn` and `flushAutoLp` price themselves off `EveFeeHook`'s
+    ///         anchor, which only trusts a snapshot once it is `ANCHOR_MIN_AGE` old. A dust
+    ///         swap resyncs the anchor to the current price, then time passes so it ages —
+    ///         same as real usage, where the anchor is however-many-minutes-old, not the
+    ///         same-block price a flush caller could have just manipulated.
+    function _matureAnchor(PoolKey memory key, bool tokenIsCurrency0) internal {
+        vm.warp(block.timestamp + hook.ANCHOR_MIN_AGE() + 1); // let any existing anchor go stale
+        _buy(key, tokenIsCurrency0, 1e6); // forces a fresh resync to the current price
+        vm.warp(block.timestamp + hook.ANCHOR_MIN_AGE() + 1); // let that fresh anchor age
+    }
+
     // ── launch ─────────────────────────────────────────────────────────────────────────────
     function test_launch_mintsFullSupplySingleSided() public {
         (address token,,) = _launch();
@@ -549,6 +560,7 @@ contract EveInstantV4Test is Test {
         PoolKey memory key = _key(token, tokenIsCurrency0);
         _buy(key, tokenIsCurrency0, 10_000e6);
         _sellHalf(token, key, tokenIsCurrency0);
+        _matureAnchor(key, tokenIsCurrency0);
 
         Currency tokenCurrency = Currency.wrap(token);
         Currency quoteCurrency = Currency.wrap(address(quote));
@@ -578,6 +590,8 @@ contract EveInstantV4Test is Test {
         _buy(_key(tokenB, zB), zB, 5_000e6);
         _sellHalf(tokenA, _key(tokenA, zA), zA);
         _sellHalf(tokenB, _key(tokenB, zB), zB);
+        _matureAnchor(_key(tokenA, zA), zA);
+        _matureAnchor(_key(tokenB, zB), zB);
 
         Currency q = Currency.wrap(address(quote));
         uint256 pendingA = hook.pendingAutoLp(idA, q);
@@ -585,7 +599,8 @@ contract EveInstantV4Test is Test {
         assertGt(pendingA, 0);
         assertGt(pendingB, 0);
 
-        factory.flushAutoLp(tokenA);
+        uint128 added = factory.flushAutoLp(tokenA);
+        assertGt(added, 0, "pool A flush should actually mint, not silently no-op");
         assertEq(hook.pendingAutoLp(idB, q), pendingB, "pool B quote auto-LP must not mix into A");
         assertTrue(pendingA > 0);
     }
@@ -594,9 +609,12 @@ contract EveInstantV4Test is Test {
         (address token, PoolId id, bool tokenIsCurrency0) = _launch();
         PoolKey memory key = _key(token, tokenIsCurrency0);
         _buy(key, tokenIsCurrency0, 10_000e6);
-        uint256 deadBefore = IERC20Like(token).balanceOf(hook.DEAD());
         _sellHalf(token, key, tokenIsCurrency0);
+        _matureAnchor(key, tokenIsCurrency0);
 
+        // Snapshot after _matureAnchor's own dust buy (which burns its own launch-token
+        // slice synchronously) so `deadBefore + burned` isolates the flush's contribution.
+        uint256 deadBefore = IERC20Like(token).balanceOf(hook.DEAD());
         Currency quoteCurrency = Currency.wrap(address(quote));
         uint256 pending = hook.pendingBurn(id, quoteCurrency);
         assertGt(pending, 0);
@@ -616,6 +634,7 @@ contract EveInstantV4Test is Test {
         PoolKey memory key = _key(token, tokenIsCurrency0);
         _buy(key, tokenIsCurrency0, 10_000e6);
         _sellHalf(token, key, tokenIsCurrency0);
+        _matureAnchor(key, tokenIsCurrency0);
 
         Currency quoteCurrency = Currency.wrap(address(quote));
         uint256 pending = hook.pendingBurn(id, quoteCurrency);
@@ -631,6 +650,7 @@ contract EveInstantV4Test is Test {
         PoolKey memory key = _key(token, tokenIsCurrency0);
         _buy(key, tokenIsCurrency0, 10_000e6);
         _sellHalf(token, key, tokenIsCurrency0);
+        _matureAnchor(key, tokenIsCurrency0);
 
         Currency quoteCurrency = Currency.wrap(address(quote));
         uint256 pending = hook.pendingBurn(id, quoteCurrency);
@@ -640,6 +660,93 @@ contract EveInstantV4Test is Test {
         assertEq(hook.pendingBurn(id, quoteCurrency), 0);
         assertEq(IERC20Like(token).balanceOf(hook.DEAD()), deadBefore + burned);
         assertTrue(pending != 0);
+    }
+
+    // ── anchor: the actual MEV fixes ──────────────────────────────────────────────────────
+    function test_flushQuoteBurn_defersWhenAnchorNotReady() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+        _sellHalf(token, key, tokenIsCurrency0);
+
+        Currency quoteCurrency = Currency.wrap(address(quote));
+        uint256 pending = hook.pendingBurn(id, quoteCurrency);
+        assertGt(pending, 0);
+
+        // No _matureAnchor: the anchor exists (set by the buy) but is not yet ANCHOR_MIN_AGE
+        // old. A caller with minOut=0 gets nothing rather than an unbounded-price swap.
+        vm.prank(trader);
+        uint256 burned = hook.flushQuoteBurn(key, 0);
+        assertEq(burned, 0, "must not swap against an unaged anchor");
+        assertEq(hook.pendingBurn(id, quoteCurrency), pending, "pendingBurn must be untouched");
+    }
+
+    function test_flushQuoteBurn_defersWhenPriceDeviatesFromAnchor() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+        _sellHalf(token, key, tokenIsCurrency0);
+        _matureAnchor(key, tokenIsCurrency0);
+
+        Currency quoteCurrency = Currency.wrap(address(quote));
+        uint256 pending = hook.pendingBurn(id, quoteCurrency);
+        assertGt(pending, 0);
+
+        // Simulate a manipulator who has just moved price hard, in the same block the aged
+        // anchor was trusted at — no time passes here, so this is the atomic-attack shape:
+        // manipulate, then immediately try to flush at the moved price with minOut=0.
+        _buy(key, tokenIsCurrency0, 50_000e6);
+
+        vm.prank(trader);
+        uint256 burned = hook.flushQuoteBurn(key, 0);
+        assertEq(burned, 0, "must not swap once spot has moved off the anchor");
+        assertEq(hook.pendingBurn(id, quoteCurrency), pending, "pendingBurn must be untouched");
+    }
+
+    function test_flushAutoLp_defersWhenAnchorNotReady() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+        _sellHalf(token, key, tokenIsCurrency0);
+
+        Currency tokenCurrency = Currency.wrap(token);
+        Currency quoteCurrency = Currency.wrap(address(quote));
+        uint256 pendingTok = hook.pendingAutoLp(id, tokenCurrency);
+        uint256 pendingQuote = hook.pendingAutoLp(id, quoteCurrency);
+        assertGt(pendingTok, 0);
+        assertGt(pendingQuote, 0);
+
+        uint128 liqBefore = _positionLiq(token, id);
+        uint128 added = factory.flushAutoLp(token);
+        assertEq(added, 0, "must not mint against an unaged anchor");
+        assertEq(_positionLiq(token, id), liqBefore, "position must be untouched");
+        // Claimed inventory is restowed on the hook, not lost.
+        assertEq(hook.pendingAutoLp(id, tokenCurrency), pendingTok);
+        assertEq(hook.pendingAutoLp(id, quoteCurrency), pendingQuote);
+    }
+
+    function test_flushAutoLp_defersOnPriceDeviation() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+        _sellHalf(token, key, tokenIsCurrency0);
+        _matureAnchor(key, tokenIsCurrency0);
+
+        Currency tokenCurrency = Currency.wrap(token);
+        Currency quoteCurrency = Currency.wrap(address(quote));
+        uint256 pendingTok = hook.pendingAutoLp(id, tokenCurrency);
+        uint256 pendingQuote = hook.pendingAutoLp(id, quoteCurrency);
+
+        _buy(key, tokenIsCurrency0, 50_000e6);
+
+        uint128 liqBefore = _positionLiq(token, id);
+        uint128 added = factory.flushAutoLp(token);
+        assertEq(added, 0, "must not mint once spot has moved off the anchor");
+        assertEq(_positionLiq(token, id), liqBefore);
+        // The manipulating buy's own fee accrues token-side (it receives the launch token),
+        // and gets claimed-then-restowed unchanged; quote-side is untouched by a pure buy.
+        assertGt(hook.pendingAutoLp(id, tokenCurrency), pendingTok, "claimed but restowed, not lost");
+        assertEq(hook.pendingAutoLp(id, quoteCurrency), pendingQuote);
     }
 
     function test_unlock_stamps365DayPlatformBeneficiary() public {
