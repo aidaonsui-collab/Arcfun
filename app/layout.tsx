@@ -13,7 +13,7 @@ const SITE_URL = (
 ).replace('arcfun.vercel.app', 'www.eve.fun')
 const TITLE = 'eve.fun — Instant token launches on Arc'
 const DESCRIPTION =
-  'Launch a token on Arc mainnet in one transaction. Full supply straight onto Uniswap V3, LP locked.'
+  'Launch a token on Arc mainnet in one transaction. Full supply straight onto Uniswap, LP locked at launch.'
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

@@ -30,8 +30,10 @@ export default function DocsPage() {
           How eve.fun works
         </h1>
         <p className="mt-3 mb-0 max-w-2xl text-[16px] text-t2 leading-relaxed">
-          Instant token launches on Arc. Full supply onto Uniswap V3 from block one, always quoted
-          in USDC, LP locked. Two live launch types — Meme and Reflection.
+          Instant token launches on Arc. Full supply onto Uniswap from block one, always quoted
+          in USDC, LP locked at launch. Two live launch types — Meme and Reflection. See{' '}
+          <a href="#fees" className="text-white underline underline-offset-2">LP fee structure</a>{' '}
+          for how long, and by whom.
         </p>
 
         <nav
@@ -162,6 +164,14 @@ export default function DocsPage() {
             across creator, launch-token burn, holders, auto-LP, and eve.fun. Crucible ($EVE
             cook) is legacy: it still runs for tokens already on V3 Instant, not for new
             launches. The table below is the V3 Instant split still collected by the keeper.
+          </p>
+          <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
+            <strong className="text-white font-semibold">LP lock, v4 launches:</strong> the full
+            supply, plus everything auto-LP mints back into the position from trading fees, is
+            locked in the pool for 365 days from create. After that, eve.fun&apos;s platform
+            wallet — not the creator — can pull the entire position, both sides, at any time.
+            Tokens already on V3 Instant are unaffected: that LP stays locked permanently, with
+            no reclaim path for anyone.
           </p>
 
           <div className="border border-hair rounded-[24px] bg-s1 overflow-hidden">
