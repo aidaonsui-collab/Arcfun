@@ -263,11 +263,23 @@ contract RwaInstantV4Test is Test {
         );
     }
 
+    /// @notice `flushQuoteBurn` and `flushAutoLp` price themselves off `EveFeeHook`'s
+    ///         anchor, which only trusts a snapshot once it is `ANCHOR_MIN_AGE` old. A dust
+    ///         swap resyncs the anchor to the current price, then time passes so it ages —
+    ///         same as real usage, where the anchor is however-many-minutes-old, not the
+    ///         same-block price a flush caller could have just manipulated.
+    function _matureAnchor(PoolKey memory key, bool tokenIsCurrency0) internal {
+        vm.warp(block.timestamp + hook.ANCHOR_MIN_AGE() + 1); // let any existing anchor go stale
+        _buy(key, tokenIsCurrency0, 1e6); // forces a fresh resync to the current price
+        vm.warp(block.timestamp + hook.ANCHOR_MIN_AGE() + 1); // let that fresh anchor age
+    }
+
     function test_flushAutoLp_mintsAfterBuyAndSell() public {
         (address token, PoolId id, bool tokenIsCurrency0) = _launch();
         PoolKey memory key = _key(token, tokenIsCurrency0);
         _buy(key, tokenIsCurrency0, 10_000e6);
         _sellHalf(token, key, tokenIsCurrency0);
+        _matureAnchor(key, tokenIsCurrency0);
 
         (uint128 liqBefore,,) = StateLibrary.getPositionInfo(
             IPoolManager(address(manager)),
@@ -295,9 +307,12 @@ contract RwaInstantV4Test is Test {
         (address token, PoolId id, bool tokenIsCurrency0) = _launch();
         PoolKey memory key = _key(token, tokenIsCurrency0);
         _buy(key, tokenIsCurrency0, 10_000e6);
-        uint256 deadBefore = IERC20Like(token).balanceOf(hook.DEAD());
         _sellHalf(token, key, tokenIsCurrency0);
+        _matureAnchor(key, tokenIsCurrency0);
 
+        // Snapshot after _matureAnchor's own dust buy (which burns its own launch-token
+        // slice synchronously) so `deadBefore + burned` isolates the flush's contribution.
+        uint256 deadBefore = IERC20Like(token).balanceOf(hook.DEAD());
         uint256 pending = hook.pendingBurn(id, Currency.wrap(address(quote)));
         assertGt(pending, 0);
         uint256 burned = hook.flushQuoteBurn(key, 0);

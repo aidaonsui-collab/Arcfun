@@ -12,6 +12,7 @@ import {BeforeSwapDelta} from "v4-core/types/BeforeSwapDelta.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {TickMath} from "v4-core/libraries/TickMath.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CurrencySettler} from "./libraries/CurrencySettler.sol";
 
@@ -30,12 +31,25 @@ contract EveFeeHook is IHooks, IUnlockCallback {
     using CurrencySettler for Currency;
     using SafeCast for uint256;
     using SafeCast for int256;
+    using StateLibrary for IPoolManager;
 
     uint16 public constant BPS_DENOM = 10_000;
     uint16 public constant MIN_FEE_BPS = 30; // 0.3%
     uint16 public constant MAX_FEE_BPS = 300; // 3%
     uint16 public constant MIN_PLATFORM_BPS = 1_000; // 10%
     address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
+
+    /// @notice A pool's spot price snapshot only refreshes once it is this old, and is only
+    ///         trusted (by `flushQuoteBurn` and `InstantAutoLp.mintClaimed`) once it is this
+    ///         old again *after* that refresh. A manipulate-then-flush in one transaction
+    ///         always reads a snapshot that predates the manipulation: either the anchor was
+    ///         already fresh (so the manipulation swap did not touch it) or it was stale and
+    ///         the manipulation swap just refreshed it (so it fails the age check until real
+    ///         time — and real arbitrage exposure for the manipulator — has passed).
+    uint32 public constant ANCHOR_MIN_AGE = 300; // 5 minutes
+    /// @notice Max the pool's spot price may have moved from the anchor before a
+    ///         permissionless flush/mint defers instead of pricing itself off it.
+    uint16 public constant MAX_ANCHOR_DEVIATION_BPS = 300; // 3%
 
     struct Split {
         uint16 feeBps;
@@ -108,6 +122,14 @@ contract EveFeeHook is IHooks, IUnlockCallback {
     mapping(PoolId => mapping(Currency => uint256)) public pendingBurn;
     /// @notice Auto-LP slice per pool (not mixed into factory `owed`, which is global per currency).
     mapping(PoolId => mapping(Currency => uint256)) public pendingAutoLp;
+
+    struct PriceAnchor {
+        uint160 sqrtPriceX96;
+        uint32 timestamp;
+    }
+
+    /// @notice Periodic spot-price snapshot per pool. See `ANCHOR_MIN_AGE`.
+    mapping(PoolId => PriceAnchor) public priceAnchor;
 
     struct QuoteBurnCall {
         PoolKey key;
@@ -248,17 +270,66 @@ contract EveFeeHook is IHooks, IUnlockCallback {
         if (!c.registered) revert NotRegistered();
         amount = pendingBurn[id][currency];
         if (amount == 0) return 0;
-        pendingBurn[id][currency] = 0;
+
         if (Currency.unwrap(currency) == c.launch) {
+            pendingBurn[id][currency] = 0;
             _payOrAccrue(currency, DEAD, amount);
             emit Burned(id, currency, amount);
             return amount;
         }
-        bytes memory result = poolManager.unlock(
-            abi.encode(QuoteBurnCall({key: key, quote: currency, amount: amount, minOut: minOut}))
-        );
+
+        // Quote-side: this flush swaps through the pool at whatever price it finds, so a
+        // caller-supplied `minOut` alone is not a safe guard — the call is permissionless,
+        // and a caller who wants fewer tokens burned just passes 0. What actually needs
+        // checking is not the swap's output (that legitimately reflects the pool's own
+        // size-dependent slippage, which a fixed floor cannot predict for an arbitrary
+        // pendingBurn size) but whether the *starting* price was just set by this same
+        // transaction. Require it to match a snapshot old enough that it could not have
+        // been: once that holds, the swap's execution price is the pool's honest price for
+        // its own size, with nothing left to game by omitting minOut. If the anchor is not
+        // ready or the pool has moved off it, defer (nothing lost — pendingBurn is
+        // untouched, anyone can retry).
+        (uint160 anchorSqrtPriceX96_, bool ready) = _anchor(id);
+        if (!ready) return 0;
+        (uint160 currentSqrtPriceX96,,,) = poolManager.getSlot0(id);
+        if (_deviatesTooMuch(currentSqrtPriceX96, anchorSqrtPriceX96_)) return 0;
+
+        pendingBurn[id][currency] = 0;
+        bytes memory result =
+            poolManager.unlock(abi.encode(QuoteBurnCall({key: key, quote: currency, amount: amount, minOut: minOut})));
         amount = abi.decode(result, (uint256));
         emit Burned(id, Currency.wrap(c.launch), amount);
+    }
+
+    /// @notice Refresh the snapshot once it is stale. A no-op otherwise, so a burst of swaps
+    ///         in one block cannot move the anchor more than once.
+    function _syncAnchor(PoolId id) internal {
+        PriceAnchor storage a = priceAnchor[id];
+        if (a.timestamp != 0 && block.timestamp < uint256(a.timestamp) + ANCHOR_MIN_AGE) return;
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(id);
+        a.sqrtPriceX96 = sqrtPriceX96;
+        a.timestamp = uint32(block.timestamp);
+    }
+
+    function _anchor(PoolId id) internal view returns (uint160 sqrtPriceX96, bool ready) {
+        PriceAnchor memory a = priceAnchor[id];
+        sqrtPriceX96 = a.sqrtPriceX96;
+        ready = a.timestamp != 0 && block.timestamp >= uint256(a.timestamp) + ANCHOR_MIN_AGE;
+    }
+
+    /// @notice Public so `InstantAutoLp.mintClaimed` can bound its mint price against the
+    ///         same anchor this hook uses for burns.
+    function anchorSqrtPriceX96(PoolId id) external view returns (uint160 sqrtPriceX96, bool ready) {
+        return _anchor(id);
+    }
+
+    /// @notice True if `sqrtPriceX96` has moved more than `MAX_ANCHOR_DEVIATION_BPS` from
+    ///         the anchor. Same check `InstantAutoLp.mintClaimed` applies before minting.
+    function _deviatesTooMuch(uint160 sqrtPriceX96, uint160 anchorSqrtPriceX96_) internal pure returns (bool) {
+        uint256 diff = sqrtPriceX96 > anchorSqrtPriceX96_
+            ? uint256(sqrtPriceX96) - anchorSqrtPriceX96_
+            : uint256(anchorSqrtPriceX96_) - sqrtPriceX96;
+        return diff * BPS_DENOM > uint256(anchorSqrtPriceX96_) * MAX_ANCHOR_DEVIATION_BPS;
     }
 
     /// @notice Pull this pool's auto-LP inventory to the registered auto-LP (the factory).
@@ -334,6 +405,7 @@ contract EveFeeHook is IHooks, IUnlockCallback {
         PoolId id = key.toId();
         PoolConfig memory c = configs[id];
         if (!c.registered) revert NotRegistered();
+        _syncAnchor(id);
 
         bool specifiedIsCurrency0 = params.zeroForOne == (params.amountSpecified < 0);
         bool unspecifiedIsCurrency0 = !specifiedIsCurrency0;
