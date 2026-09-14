@@ -3,6 +3,7 @@ pragma solidity ^0.8.26;
 
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {Currency} from "v4-core/types/Currency.sol";
@@ -10,7 +11,9 @@ import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {BeforeSwapDelta} from "v4-core/types/BeforeSwapDelta.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
+import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {CurrencySettler} from "./libraries/CurrencySettler.sol";
 
 /// @title EveFeeHook
 /// @notice Shared v4 afterSwap hook for eve.fun Instant (meme, reflect, RWA).
@@ -19,10 +22,12 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 ///
 ///         Fee is levied on the unspecified currency (what the swapper receives).
 ///         Burn: if that currency is the launch token, send to dead in this tx; if it is
-///         quote, accrue to pendingBurn for a later permissionless flush (cannot swap
-///         inside afterSwap). Auto-LP and holders accrue pull-based like creator.
-contract EveFeeHook is IHooks {
+///         quote, accrue to pendingBurn. `flushQuoteBurn` swaps quote -> launch outside
+///         afterSwap and sends the launch token to dead. Auto-LP accrues per-pool
+///         (`pendingAutoLp`); the factory mints it back into the locked position.
+contract EveFeeHook is IHooks, IUnlockCallback {
     using PoolIdLibrary for PoolKey;
+    using CurrencySettler for Currency;
     using SafeCast for uint256;
     using SafeCast for int256;
 
@@ -67,6 +72,9 @@ contract EveFeeHook is IHooks {
     error BadFeeBps();
     error HoldersRequired();
     error HookNotImplemented();
+    error NotAutoLp();
+    error Slippage();
+    error ZeroOut();
 
     event PoolRegistered(PoolId indexed id, address indexed creator, address launch, Split split);
     event SplitPaidOrAccrued(
@@ -84,6 +92,8 @@ contract EveFeeHook is IHooks {
     event FactorySet(address indexed factory);
     event FactoryAllowed(address indexed factory, bool allowed);
     event OwnerTransferred(address indexed previous, address indexed next);
+    event AutoLpClaimed(PoolId indexed id, address indexed to, uint256 amount0, uint256 amount1);
+    event AutoLpCredited(PoolId indexed id, Currency indexed currency, uint256 amount);
 
     IPoolManager public immutable poolManager;
     address public owner;
@@ -94,8 +104,17 @@ contract EveFeeHook is IHooks {
 
     mapping(PoolId => PoolConfig) public configs;
     mapping(address => mapping(Currency => uint256)) public owed;
-    /// @notice Quote-denominated burn slice waiting for flush (cannot swap in afterSwap).
+    /// @notice Quote-denominated burn slice waiting for `flushQuoteBurn`.
     mapping(PoolId => mapping(Currency => uint256)) public pendingBurn;
+    /// @notice Auto-LP slice per pool (not mixed into factory `owed`, which is global per currency).
+    mapping(PoolId => mapping(Currency => uint256)) public pendingAutoLp;
+
+    struct QuoteBurnCall {
+        PoolKey key;
+        Currency quote;
+        uint256 amount;
+        uint256 minOut;
+    }
 
     modifier onlyFactory() {
         if (!isFactory[msg.sender]) revert NotFactory();
@@ -206,9 +225,24 @@ contract EveFeeHook is IHooks {
         emit Withdrawn(msg.sender, currency, amount);
     }
 
-    /// @notice Send accrued launch-token burn to dead. Quote-denominated pendingBurn is
-    ///         left for a later flush that can swap (not in afterSwap).
+    /// @notice Send accrued launch-token burn to dead. Quote-side pendingBurn is swapped
+    ///         to the launch token via `flushQuoteBurn` (cannot swap inside afterSwap).
     function flushBurn(PoolKey calldata key, Currency currency) external returns (uint256 amount) {
+        return _flushBurn(key, currency, 0);
+    }
+
+    /// @notice Swap quote-side pendingBurn into the launch token and send it to dead.
+    ///         Permissionless, not automated. v4 skips `afterSwap` when the hook itself is
+    ///         the swapper, so this flush is not re-taxed. `minOut` is launch tokens received.
+    function flushQuoteBurn(PoolKey calldata key, uint256 minOut) external returns (uint256 burned) {
+        PoolId id = key.toId();
+        PoolConfig memory c = configs[id];
+        if (!c.registered) revert NotRegistered();
+        Currency quote = Currency.unwrap(key.currency0) == c.launch ? key.currency1 : key.currency0;
+        return _flushBurn(key, quote, minOut);
+    }
+
+    function _flushBurn(PoolKey calldata key, Currency currency, uint256 minOut) internal returns (uint256 amount) {
         PoolId id = key.toId();
         PoolConfig memory c = configs[id];
         if (!c.registered) revert NotRegistered();
@@ -218,11 +252,78 @@ contract EveFeeHook is IHooks {
         if (Currency.unwrap(currency) == c.launch) {
             _payOrAccrue(currency, DEAD, amount);
             emit Burned(id, currency, amount);
-        } else {
-            // Quote side: park on this hook until a swapper flush exists. Keep pull-based
-            // so this call never reverts the original collect. Anyone may retry.
-            pendingBurn[id][currency] = amount;
+            return amount;
         }
+        bytes memory result = poolManager.unlock(
+            abi.encode(QuoteBurnCall({key: key, quote: currency, amount: amount, minOut: minOut}))
+        );
+        amount = abi.decode(result, (uint256));
+        emit Burned(id, Currency.wrap(c.launch), amount);
+    }
+
+    /// @notice Pull this pool's auto-LP inventory to the registered auto-LP (the factory).
+    function claimAutoLp(PoolKey calldata key) external returns (uint256 amount0, uint256 amount1) {
+        PoolId id = key.toId();
+        PoolConfig memory c = configs[id];
+        if (!c.registered) revert NotRegistered();
+        if (msg.sender != c.autoLp) revert NotAutoLp();
+        amount0 = pendingAutoLp[id][key.currency0];
+        amount1 = pendingAutoLp[id][key.currency1];
+        if (amount0 > 0) {
+            pendingAutoLp[id][key.currency0] = 0;
+            key.currency0.transfer(msg.sender, amount0);
+        }
+        if (amount1 > 0) {
+            pendingAutoLp[id][key.currency1] = 0;
+            key.currency1.transfer(msg.sender, amount1);
+        }
+        emit AutoLpClaimed(id, msg.sender, amount0, amount1);
+    }
+
+    /// @notice Restow unused auto-LP tokens after a mint. Caller must already have transferred.
+    function creditAutoLp(PoolKey calldata key, Currency currency, uint256 amount) external {
+        PoolId id = key.toId();
+        PoolConfig memory c = configs[id];
+        if (!c.registered) revert NotRegistered();
+        if (msg.sender != c.autoLp) revert NotAutoLp();
+        if (amount == 0) return;
+        pendingAutoLp[id][currency] += amount;
+        emit AutoLpCredited(id, currency, amount);
+    }
+
+    function unlockCallback(bytes calldata data) external returns (bytes memory) {
+        if (msg.sender != address(poolManager)) revert NotManager();
+        QuoteBurnCall memory call = abi.decode(data, (QuoteBurnCall));
+        bool zeroForOne = call.quote == call.key.currency0;
+        BalanceDelta d = poolManager.swap(
+            call.key,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(call.amount),
+                sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+            }),
+            ""
+        );
+        int256 a0 = int256(d.amount0());
+        int256 a1 = int256(d.amount1());
+        if (a0 < 0) call.key.currency0.settle(poolManager, address(this), uint256(-a0), false);
+        if (a1 < 0) call.key.currency1.settle(poolManager, address(this), uint256(-a1), false);
+        uint256 amountOut;
+        Currency outCur;
+        if (a0 > 0) {
+            amountOut = uint256(a0);
+            outCur = call.key.currency0;
+            call.key.currency0.take(poolManager, address(this), amountOut, false);
+        }
+        if (a1 > 0) {
+            amountOut = uint256(a1);
+            outCur = call.key.currency1;
+            call.key.currency1.take(poolManager, address(this), amountOut, false);
+        }
+        if (amountOut == 0) revert ZeroOut();
+        if (amountOut < call.minOut) revert Slippage();
+        _payOrAccrue(outCur, DEAD, amountOut);
+        return abi.encode(amountOut);
     }
 
     function afterSwap(address, PoolKey calldata key, SwapParams calldata params, BalanceDelta delta, bytes calldata)
@@ -256,8 +357,7 @@ contract EveFeeHook is IHooks {
         owed[c.platformWallet][feeCurrency] += platformAmt;
         if (holdersAmt > 0 && c.holders != address(0)) owed[c.holders][feeCurrency] += holdersAmt;
         if (autoLpAmt > 0) {
-            address lpTo = c.autoLp == address(0) ? address(this) : c.autoLp;
-            owed[lpTo][feeCurrency] += autoLpAmt;
+            pendingAutoLp[id][feeCurrency] += autoLpAmt;
         }
         if (burnAmt > 0) {
             if (Currency.unwrap(feeCurrency) == c.launch) {

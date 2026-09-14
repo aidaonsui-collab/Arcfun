@@ -9,11 +9,16 @@ Two factories share one hook:
 - **`EveFeeHook.sol`** — `AFTER_SWAP` + `AFTER_SWAP_RETURNS_DELTA`. One swap fee (0.3–3%), same
   on buy and sell. 100% of that fee is allocated creator / burn / holders / auto-LP / platform,
   with a 10% platform floor. Burn of the launch token happens in-swap to `0xdead`; quote-side
-  burn accrues to `pendingBurn` (cannot `swap()` the same pool in `afterSwap`). Auto-LP and
-  holders accrue pull-based like creator. Multiple factories can be allowed on the same hook.
+  burn accrues to `pendingBurn` (cannot `swap()` the same pool in `afterSwap`); `flushQuoteBurn`
+  (permissionless, not automated) swaps that quote to the launch token in a later `unlock` and
+  sends it to `0xdead`. Auto-LP accrues per-pool in `pendingAutoLp` (not factory `owed`, which is
+  global per currency). `flushAutoLp` on the factory mints it into the locked position; leftover
+  at the current tick is restowed. Holders still accrue pull-based like creator. Multiple
+  factories can be allowed on the same hook.
 - **`EveInstantV4Factory.sol`** — USDC (or any ERC-20 quote) Instant for meme + reflect. Per-create
-  split, virtual quote, same-tx first buy. No Crucible leg. Auto-LP slice accrues to the factory
-  until donate/flush lands. Holders slice accrues to the address passed at create.
+  split, virtual quote, same-tx first buy. No Crucible leg. Auto-LP slice is per-pool on the hook;
+  `flushAutoLp` mints it into the factory-owned position (`donate` is wrong: these pools have LP
+  fee 0). Holders slice accrues to the address passed at create.
 - **`RwaFeeHook.sol`** — the earlier 50/40/10 sketch this replaced. `RwaInstantV4Factory` now
   points at `EveFeeHook` instead (see below); this file is dead code, kept only because deleting
   it isn't this consolidation's job. Do not grow a second split model.
@@ -36,11 +41,12 @@ so the CREATE2 factory is not locked as owner.
 | Contract | Address |
 | --- | --- |
 | Uniswap `PoolManager` | `0x8366a39CC670B4001A1121B8F6A443A643e40951` |
-| `EveFeeHook` | `0x9fbA9571A43e5624a09F741911D4e51B0016C044` |
-| `EveInstantV4Factory` | `0x9066C6Cc7eB666c43d1B07430E56fBB64255430a` |
+| `EveFeeHook` | `0xd8F5790094711747ae4083651dDDfcE73699C044` |
+| `EveInstantV4Factory` | `0x32a0AF0B4c423f3485E6eaABE8DA64e631d411E2` |
+| `InstantAutoLpHelper` | `0x2ADAF1983fBF74c2492DE57A397E9d23B04fc1E4` |
 | `EveV4Router` | `0x494715a3923392Dd0fD312B0CC40055679Feaad2` |
-| `BundleSinkDeployer` | `0x987BD34E847AFAEbfa28aC86F64A97AD427e2E57` |
-| `RwaInstantV4Factory` | `0x7739C8938Dfe76d1121af1Fb58fe0F34F633ddA7` |
+| `BundleSinkDeployer` | `0x123f07b4bc34708B4cfa7663BFd50Cf34C61F0ce` |
+| `RwaInstantV4Factory` | `0x66Ca5b85C31AEBD2082eF12D7f61af37bD4892fc` |
 
 PoolManager is Uniswap's official Arc address (`Uniswap/contracts` `deployments/json/5042.json`).
 Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
@@ -49,6 +55,11 @@ Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
 `RwaInstantV4Factory` joined the same hook via `setFactoryAllowed` (USDC factory stays
 allowed). BundleSink creation code lives on `BundleSinkDeployer` so the factory stays under
 EIP-170.
+
+CREATE2-redeployed 2026-09-14 so auto-LP mint (`flushAutoLp`) and quote-burn swap
+(`flushQuoteBurn`) are on this hook. The previous hook `0x9fbA…` / factories `0x9066…` and
+`0x7739…` had no `TokenLaunched` events, so the catalog retargeted rather than keeping them.
+Router `0x4947…` was reused. Flush is permissionless, not automated.
 
 Quote is per-create. Issuer token addresses (USYC / BUIDL / CRCL) are still unset on
 mainnet, so those create cards stay Soon until `NEXT_PUBLIC_ARC_RWA_<ID>` is set.
@@ -130,8 +141,18 @@ retired `RwaFeeHook`, with its own off-chain keeper computing holder balances an
   hook taxes that swap like any other. 0 skips the swap. The original 4-arg `createToken` is
   launch-only.
 - **The burn leg only sends the launch token to `0xdead` in-swap; a quote-side burn just
-  accrues** (`pendingBurn`) waiting for a later flush that can actually swap — `afterSwap` cannot
-  call `swap()` on the same pool it's executing inside of. Not automated yet.
+  accrues** (`pendingBurn`). `afterSwap` cannot `swap()` the same pool. `flushQuoteBurn(key,
+  minOut)` (or `flushBurn(key, quote)` with `minOut = 0`) is permissionless and not automated:
+  it unlocks, swaps quote → launch, and sends the launch token to dead. v4 skips `afterSwap`
+  when the hook itself is the swapper, so this flush is not re-taxed. Callers who care about
+  sandwiching pass a real `minOut`.
+- **Auto-LP is `modifyLiquidity+` into the factory-owned position, not `donate`.** `pendingAutoLp`
+  is keyed `(poolId, currency)` so two pools that share USDC cannot mix. `flushAutoLp(token)`
+  is permissionless and not automated. In-range mint needs both sides (buy + sell inventory);
+  a single-sided flush restows. Tick range is stored in `tickLowerOf` / `tickUpperOf` (`poolOf`
+  stays 5 fields). The USDC factory `delegatecall`s `InstantAutoLpHelper` for the mint so its
+  runtime stays under EIP-170; the RWA factory inlines the same library (more headroom after
+  the BundleSink split).
 
 ## What's actually proven vs. what's still assumed
 
@@ -143,7 +164,7 @@ against a mock RWA quote (plain and bundle-enabled), and swaps both directions:
 forge test -vv
 ```
 
-48/48 passing across the package (12 for the plain RWA launch path, 24 for the Eve meme/reflect
+59/59 passing across the package (14 for the plain RWA launch path, 33 for the Eve meme/reflect
 factory, 12 for `BundleSink`) — including a 256-run fuzz test that the Eve-factory split holds
 *exactly* to its bps constants across trade sizes, a directional test proving the fee correctly
 lands in the token on a buy and the quote on a sell (v4's specified/unspecified-currency

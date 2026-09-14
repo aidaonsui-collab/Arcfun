@@ -40,6 +40,13 @@ export const EVE_INSTANT_V4_FACTORY_ABI = [
   },
   {
     type: 'function',
+    name: 'hook',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }],
+  },
+  {
+    type: 'function',
     name: 'poolOf',
     stateMutability: 'view',
     inputs: [{ name: 'token', type: 'address' }],
