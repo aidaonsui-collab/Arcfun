@@ -46,6 +46,17 @@ export async function readEveV4Pool(
       const launched = row[0]
       const quote = row[1]
       if (!launched || launched === ZERO || !quote || quote === ZERO) continue
+      let hooks = ARC.INSTANT_V4_HOOK
+      try {
+        const factoryHook = (await client.readContract({
+          address: factory,
+          abi: EVE_INSTANT_V4_FACTORY_ABI,
+          functionName: 'hook',
+        } as never)) as Address
+        if (factoryHook && factoryHook !== ZERO) hooks = factoryHook
+      } catch {
+        /* older factory ABI without hook(); PoolKey uses the env hook */
+      }
       const tokenIsCurrency0 = launched.toLowerCase() < quote.toLowerCase()
       const currency0 = tokenIsCurrency0 ? launched : quote
       const currency1 = tokenIsCurrency0 ? quote : launched
@@ -61,7 +72,7 @@ export async function readEveV4Pool(
           currency1,
           fee: 0,
           tickSpacing: EVE_V4_TICK_SPACING,
-          hooks: ARC.INSTANT_V4_HOOK,
+          hooks,
         },
       }
     } catch {

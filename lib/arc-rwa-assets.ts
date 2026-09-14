@@ -25,7 +25,7 @@ const ARC_CHAIN_ID = Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID) || 5042
 const ARC_IS_TESTNET = ARC_CHAIN_ID === 5042002
 
 /** Shared RwaInstantV4Factory. Quote is per-create; one factory serves USYC/BUIDL/CRCL. */
-const V4_RWA_FACTORY_DEFAULT = '0x7739C8938Dfe76d1121af1Fb58fe0F34F633ddA7'
+const V4_RWA_FACTORY_DEFAULT = '0x66Ca5b85C31AEBD2082eF12D7f61af37bD4892fc'
 
 /** Official Circle USYC on Arc Testnet (docs.arc.io / developers.circle.com). */
 const USYC_TESTNET = {

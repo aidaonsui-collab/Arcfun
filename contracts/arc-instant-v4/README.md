@@ -41,11 +41,12 @@ so the CREATE2 factory is not locked as owner.
 | Contract | Address |
 | --- | --- |
 | Uniswap `PoolManager` | `0x8366a39CC670B4001A1121B8F6A443A643e40951` |
-| `EveFeeHook` | `0x9fbA9571A43e5624a09F741911D4e51B0016C044` |
-| `EveInstantV4Factory` | `0x9066C6Cc7eB666c43d1B07430E56fBB64255430a` |
+| `EveFeeHook` | `0xd8F5790094711747ae4083651dDDfcE73699C044` |
+| `EveInstantV4Factory` | `0x32a0AF0B4c423f3485E6eaABE8DA64e631d411E2` |
+| `InstantAutoLpHelper` | `0x2ADAF1983fBF74c2492DE57A397E9d23B04fc1E4` |
 | `EveV4Router` | `0x494715a3923392Dd0fD312B0CC40055679Feaad2` |
-| `BundleSinkDeployer` | `0x987BD34E847AFAEbfa28aC86F64A97AD427e2E57` |
-| `RwaInstantV4Factory` | `0x7739C8938Dfe76d1121af1Fb58fe0F34F633ddA7` |
+| `BundleSinkDeployer` | `0x123f07b4bc34708B4cfa7663BFd50Cf34C61F0ce` |
+| `RwaInstantV4Factory` | `0x66Ca5b85C31AEBD2082eF12D7f61af37bD4892fc` |
 
 PoolManager is Uniswap's official Arc address (`Uniswap/contracts` `deployments/json/5042.json`).
 Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
@@ -55,10 +56,10 @@ Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
 allowed). BundleSink creation code lives on `BundleSinkDeployer` so the factory stays under
 EIP-170.
 
-The live hook/factories above are the pre-flush bytecode. Auto-LP mint (`flushAutoLp`) and
-quote-burn swap (`flushQuoteBurn`) change hook + factory code. PoolKey binds the hook address,
-so a new CREATE2 hook (same flags) and new factories are required; the router can stay.
-Do not treat the table as "flush is already on 5042" until those addresses are retargeted.
+CREATE2-redeployed 2026-09-14 so auto-LP mint (`flushAutoLp`) and quote-burn swap
+(`flushQuoteBurn`) are on this hook. The previous hook `0x9fbA…` / factories `0x9066…` and
+`0x7739…` had no `TokenLaunched` events, so the catalog retargeted rather than keeping them.
+Router `0x4947…` was reused. Flush is permissionless, not automated.
 
 Quote is per-create. Issuer token addresses (USYC / BUIDL / CRCL) are still unset on
 mainnet, so those create cards stay Soon until `NEXT_PUBLIC_ARC_RWA_<ID>` is set.

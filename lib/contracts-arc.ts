@@ -436,11 +436,11 @@ export const ARC = {
   /** Uniswap v4 Instant (DeployEveInstantV4 on 5042). */
   INSTANT_V4_FACTORY: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY,
-    '0x9066C6Cc7eB666c43d1B07430E56fBB64255430a',
+    '0x32a0AF0B4c423f3485E6eaABE8DA64e631d411E2',
   ),
   INSTANT_V4_HOOK: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_HOOK,
-    '0x9fbA9571A43e5624a09F741911D4e51B0016C044',
+    '0xd8F5790094711747ae4083651dDDfcE73699C044',
   ),
   INSTANT_V4_ROUTER: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_ROUTER,
@@ -449,7 +449,7 @@ export const ARC = {
   /** RWA Instant v4 (DeployRwaInstantV4 on 5042). Quote is per-create. */
   INSTANT_V4_RWA_FACTORY: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_RWA_FACTORY,
-    '0x7739C8938Dfe76d1121af1Fb58fe0F34F633ddA7',
+    '0x66Ca5b85C31AEBD2082eF12D7f61af37bD4892fc',
   ),
   POOL_MANAGER: envAddr(
     process.env.NEXT_PUBLIC_ARC_POOL_MANAGER,
