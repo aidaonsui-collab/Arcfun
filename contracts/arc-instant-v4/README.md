@@ -22,8 +22,28 @@ Two factories share one hook:
   landing in random wallets is a real compliance problem) — `createTokenWithBundle` is the one
   sanctioned exception, see `BundleSink.sol` below.
 
-Create UI: `/create` shows the fee chooser unless `NEXT_PUBLIC_ARC_INSTANT_V4=0`. The live create
-transaction still hits V3 Instant until `NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY` is set.
+Create UI: `/create` shows the fee chooser unless `NEXT_PUBLIC_ARC_INSTANT_V4=0`. New USDC meme
+and reflect creates hit `EveInstantV4Factory`. The V3 Instant factory stays for tokens already
+on that path.
+
+## Live on Arc 5042 (2026-09-14)
+
+Deployed with `script/DeployEveInstantV4.s.sol` through Arachnid's CREATE2 deployer
+(`0x4e59b44847b379578588920cA78FbF26c0B4956C`) so the hook address carries
+`AFTER_SWAP | AFTER_SWAP_RETURNS_DELTA` (flags 68). Owner is passed into the hook constructor
+so the CREATE2 factory is not locked as owner.
+
+| Contract | Address |
+| --- | --- |
+| Uniswap `PoolManager` | `0x8366a39CC670B4001A1121B8F6A443A643e40951` |
+| `EveFeeHook` | `0x9fbA9571A43e5624a09F741911D4e51B0016C044` |
+| `EveInstantV4Factory` | `0x9066C6Cc7eB666c43d1B07430E56fBB64255430a` |
+| `EveV4Router` | `0x494715a3923392Dd0fD312B0CC40055679Feaad2` |
+
+PoolManager is Uniswap's official Arc address (`Uniswap/contracts` `deployments/json/5042.json`).
+Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
+`0x26bD491560b5175ee8bD1DA4998Fe260FfC413c9`. `RwaInstantV4Factory` is not on mainnet yet;
+`hook.setFactoryAllowed` is how a later RWA factory joins this same hook.
 
 HolderSink + EveV4Router live in this package. `HolderSink.distribute()` / `claim()` is the
 Eve-factory reflect path (a fixed launch/quote pair). `BundleSink.sol` is the RWA-factory
@@ -124,23 +144,12 @@ work — a test with two genuinely different holders (one who traded, one who on
 transfer) claiming real, proportionally-different amounts of a real basket asset with no keeper or
 owner action anywhere in the path.
 
-**Not proven / explicitly unverified:**
-- **Arc's real v4 `PoolManager` address.** There's an address that's *plausibly* it
-  (`0x8366a39cc670b4001a1121b8f6a443a643e40951` — inferred from watching it hold the LP for a
-  couple of independently-launched tokens on Arc mainnet, in the session this shipped from) but
-  nobody has confirmed it against Uniswap's own deployment records. `script/` deploys its own
-  fresh `PoolManager` by default rather than hardcode that guess — pass `POOL_MANAGER=0x...` once
-  it's actually verified.
+**Still unverified / not on mainnet:**
 - **Any live RWA quote token.** USYC has a real Arc *testnet* address in
   `lib/arc-rwa-assets.ts`; nothing is live on mainnet yet. Tests use `MockRwaToken`, a 6dp stand-in.
-- **Frontend integration.** No create-flow UI wired to `createTokenWithBundle` or a basket
-  configuration screen; no trading UI wired to a v4 router. `PoolSwapTest` in tests is Uniswap's
-  own test scaffolding, not something to point real traffic at.
+  `RwaInstantV4Factory` itself is also not deployed on 5042.
 - **A security review.** These hooks move real value on every swap, and `BundleSink` additionally
   moves real value through live AMM swaps on `convert()`. Get the specified/unspecified math, the
   `take()`/settle accounting, or the accrual bookkeeping wrong and it either bricks trading,
   misroutes fees, or lets a holder over-claim. The test suite proves the happy paths; it is not a
-  substitute for an audit before any real quote asset or basket touches this.
-
-Not deployed anywhere. Ship testnet once a real RWA quote token exists there, watch it, then
-revisit the mainnet `PoolManager` address before going further.
+  substitute for an audit.

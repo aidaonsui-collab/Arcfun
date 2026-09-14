@@ -421,7 +421,8 @@ export const ARC = {
   CURVE_FOR_SALE: 800_000_000n * 10n ** 18n,
 
   // ── ArcFun Instant (LaunchToken18 · 5042) ───────────────────────────────────
-  // New creates: Instant factory → InstantLockerAdapter → CrucibleLock (Meme 50/25/10/10/5).
+  // New USDC meme/reflect creates: EveInstantV4Factory + EveFeeHook (DeployEveInstantV4).
+  // Live V3 Instant 0x05BF → InstantLockerAdapter → CrucibleLock stays for PARC/$EVE/old memes.
   // Eve + the 22 tokens on 0xd51E stay on MonLock 0x84F4 (70/30). Collect by factory.
   // INSTANT_LOCKER is CrucibleLock (collectFees ABI), not the adapter Instant stamps as lpLocker.
   INSTANT_FACTORY: envAddr(
@@ -432,11 +433,23 @@ export const ARC = {
     process.env.NEXT_PUBLIC_ARC_INSTANT_LOCKER,
     '0xE522907807CdDF006b433a103356d2c30ac39209',
   ),
-  /** Uniswap v4 Instant factory. ZERO until deployed — create tx stays on INSTANT_FACTORY. */
-  INSTANT_V4_FACTORY: envAddr(process.env.NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY, ZERO),
-  INSTANT_V4_HOOK: envAddr(process.env.NEXT_PUBLIC_ARC_INSTANT_V4_HOOK, ZERO),
-  INSTANT_V4_ROUTER: envAddr(process.env.NEXT_PUBLIC_ARC_INSTANT_V4_ROUTER, ZERO),
-  POOL_MANAGER: envAddr(process.env.NEXT_PUBLIC_ARC_POOL_MANAGER, ZERO),
+  /** Uniswap v4 Instant (DeployEveInstantV4 on 5042). */
+  INSTANT_V4_FACTORY: envAddr(
+    process.env.NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY,
+    '0x9066C6Cc7eB666c43d1B07430E56fBB64255430a',
+  ),
+  INSTANT_V4_HOOK: envAddr(
+    process.env.NEXT_PUBLIC_ARC_INSTANT_V4_HOOK,
+    '0x9fbA9571A43e5624a09F741911D4e51B0016C044',
+  ),
+  INSTANT_V4_ROUTER: envAddr(
+    process.env.NEXT_PUBLIC_ARC_INSTANT_V4_ROUTER,
+    '0x494715a3923392Dd0fD312B0CC40055679Feaad2',
+  ),
+  POOL_MANAGER: envAddr(
+    process.env.NEXT_PUBLIC_ARC_POOL_MANAGER,
+    '0x8366a39CC670B4001A1121B8F6A443A643e40951',
+  ),
   BPS_SOURCE: envAddr(
     process.env.NEXT_PUBLIC_ARC_BPS_SOURCE,
     '0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE',
@@ -606,8 +619,8 @@ export function arcLaunchesEnabled(): boolean {
 
 /**
  * Create-form fee split chooser (v4 Instant). Default on.
- * Set NEXT_PUBLIC_ARC_INSTANT_V4=0 to hide it. The live create tx stays on V3 Instant
- * until NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY is set.
+ * Set NEXT_PUBLIC_ARC_INSTANT_V4=0 to hide it. New USDC meme/reflect creates hit
+ * INSTANT_V4_FACTORY when `arcInstantV4Enabled()` is true.
  */
 export function arcInstantV4UiEnabled(): boolean {
   return process.env.NEXT_PUBLIC_ARC_INSTANT_V4 !== '0'

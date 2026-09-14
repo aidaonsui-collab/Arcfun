@@ -13,8 +13,9 @@ import {HookMiner} from "../test/utils/HookMiner.sol";
  * @title DeployEveInstantV4Testnet
  * @notice Arc testnet (5042002) throwaway deploy of the shared EveFeeHook + USDC Instant factory.
  *
- * Does not replace the live V3 Instant factory. Do not hardcode a mainnet PoolManager until it is
- * checked against Uniswap's Arc deployment list. Pass POOL_MANAGER=0x... once that is done.
+ * Does not replace the live V3 Instant factory. Testnet deploys a fresh PoolManager unless
+ * POOL_MANAGER is set. Arc mainnet Instant uses Uniswap's official PoolManager
+ * `0x8366a39CC670B4001A1121B8F6A443A643e40951` via DeployEveInstantV4.s.sol.
  *
  * Env:
  *   PRIVATE_KEY (required)
@@ -23,6 +24,7 @@ import {HookMiner} from "../test/utils/HookMiner.sol";
  */
 contract DeployEveInstantV4Testnet is Script {
     uint256 internal constant CHAIN_ARC_TESTNET = 5_042_002;
+    address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
     uint160 internal constant REQUIRED_HOOK_FLAGS =
         uint160(Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG);
 
@@ -49,10 +51,14 @@ contract DeployEveInstantV4Testnet is Script {
             console2.log("PoolManager (fresh)   ", address(manager));
         }
 
-        (address predicted, bytes32 salt) =
-            HookMiner.find(deployer, REQUIRED_HOOK_FLAGS, type(EveFeeHook).creationCode, abi.encode(address(manager)));
+        (address predicted, bytes32 salt) = HookMiner.find(
+            CREATE2_DEPLOYER,
+            REQUIRED_HOOK_FLAGS,
+            type(EveFeeHook).creationCode,
+            abi.encode(address(manager), deployer)
+        );
 
-        EveFeeHook hook = new EveFeeHook{salt: salt}(manager);
+        EveFeeHook hook = new EveFeeHook{salt: salt}(manager, deployer);
         require(address(hook) == predicted, "hook address mismatch - salt mining and deploy sender disagree");
 
         EveInstantV4Factory factory = new EveInstantV4Factory(manager, hook, platformWallet);

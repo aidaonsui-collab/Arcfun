@@ -49,9 +49,9 @@ contract EveInstantV4Test is Test {
         swapRouter = new PoolSwapTest(IPoolManager(address(manager)));
 
         (address hookAddr, bytes32 salt) = HookMiner.find(
-            address(this), REQUIRED_FLAGS, type(EveFeeHook).creationCode, abi.encode(address(manager))
+            address(this), REQUIRED_FLAGS, type(EveFeeHook).creationCode, abi.encode(address(manager), address(this))
         );
-        hook = new EveFeeHook{salt: salt}(IPoolManager(address(manager)));
+        hook = new EveFeeHook{salt: salt}(IPoolManager(address(manager)), address(this));
         require(address(hook) == hookAddr, "hook address mismatch");
 
         factory = new EveInstantV4Factory(IPoolManager(address(manager)), hook, platform);
