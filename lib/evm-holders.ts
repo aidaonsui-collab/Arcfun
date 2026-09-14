@@ -28,6 +28,14 @@ import { withRateLimitRetry } from './rpc-retry'
 import { DEFAULT_TOKEN_DECIMALS } from './token-format'
 import { getToken, listIndexedTokens } from './arc-indexer/store'
 import { summarizeRpcError } from './rpc-error'
+import {
+  HGETALL_SAFE_FIELDS,
+  HSCAN_COUNT,
+  KV_HASH_FIELD_CHUNK,
+  chunkArray,
+  ingestLedgerRecord,
+  ingestLedgerScanItems,
+} from './arc-kv-bounded'
 
 const TRANSFER = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)')
 type TransferLog = Log<bigint, number, false, typeof TRANSFER, true> & {
@@ -128,11 +136,33 @@ function isExcludedHolder(addr: string, factory: Address): boolean {
   return a === factory.toLowerCase() || a === DEAD.toLowerCase() || a === ZERO.toLowerCase()
 }
 
+async function hmgetLedger(key: string, fields: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  for (const chunk of chunkArray(fields, KV_HASH_FIELD_CHUNK)) {
+    try {
+      const part = await kv.hmget<Record<string, string>>(key, ...chunk)
+      if (part) Object.assign(out, part)
+    } catch (e) {
+      console.warn('[evm-holders] hmget', summarizeRpcError(e))
+    }
+  }
+  return out
+}
+
+async function hsetLedger(key: string, updates: Record<string, string>): Promise<void> {
+  const entries = Object.entries(updates)
+  if (!entries.length) return
+  for (const chunk of chunkArray(entries, KV_HASH_FIELD_CHUNK)) {
+    await kv.hset(key, Object.fromEntries(chunk))
+  }
+}
+
 /**
  * Scans [fromBlock, head] for Transfer logs, applying each one's delta to the ledger hash as it
- * goes: read the current balance of every address touched in a chunk (one hmget), apply that
- * chunk's deltas in event order, write back only what changed (one hset) — never a full-hash
- * read or write, so cost scales with activity in the scanned range, not with total holder count.
+ * goes: read the current balance of every address touched in a chunk (hmget in field
+ * batches), apply that chunk's deltas in event order, write back only what changed
+ * (hset in field batches) — never a full-hash read or write, so cost scales with activity
+ * in the scanned range, not with total holder count.
  * Bounded by budgetMs the same way the rest of this indexer bounds chunked scans; returns
  * however far it actually got so the caller can persist a resumable cursor.
  */
@@ -180,18 +210,15 @@ async function applyTransferDeltas(
       }
       touchedAddrs.delete(ZERO.toLowerCase()) // mint/burn counterpart — never a real balance to track
       const addrList = [...touchedAddrs]
-      let current: Record<string, string> | null = null
-      if (addrList.length) {
-        try {
-          current = await kv.hmget<Record<string, string>>(ledgerKey, ...addrList)
-        } catch (e) {
-          console.warn('[evm-holders] hmget', token, summarizeRpcError(e))
-        }
-      }
+      const current = addrList.length ? await hmgetLedger(ledgerKey, addrList) : {}
       const balances = new Map<string, bigint>()
       for (const a of addrList) {
-        const raw = current?.[a]
-        balances.set(a, raw ? BigInt(raw) : 0n)
+        const raw = current[a]
+        try {
+          balances.set(a, raw ? BigInt(raw) : 0n)
+        } catch {
+          balances.set(a, 0n)
+        }
       }
       for (const l of logs) {
         const value = l.args.value ?? 0n
@@ -211,7 +238,7 @@ async function applyTransferDeltas(
         const updates: Record<string, string> = {}
         for (const [addr, bal] of balances) updates[addr] = bal.toString()
         try {
-          await kv.hset(ledgerKey, updates)
+          await hsetLedger(ledgerKey, updates)
           await kv.expire(ledgerKey, HOLDER_KV_TTL_S)
           touched += Object.keys(updates).length
         } catch (e) {
@@ -324,19 +351,41 @@ export async function updateHolderLedger(
 
 /** Full ledger for one token as address -> balance. Zero-balance entries are skipped: a token
  *  with any real transfer history accumulates plenty of them (every address that ever fully
- *  sold out stays a hash field at "0"), and no caller of this function wants those. */
+ *  sold out stays a hash field at "0"), and no caller of this function wants those.
+ *
+ *  Never HGETALL a huge hash — Upstash PAYG rejects >10MB responses ($EVE's ever-seen
+ *  address set is the live case). Small hashes stay on one HGETALL; anything over
+ *  HGETALL_SAFE_FIELDS (or a rejected HGETALL) is HSCAN'd in COUNT-sized pages. */
 async function readHolderLedger(token: Address): Promise<Map<string, bigint>> {
   const out = new Map<string, bigint>()
+  const key = HOLDER_LEDGER_KEY(token)
   try {
-    const raw = await kv.hgetall<Record<string, string>>(HOLDER_LEDGER_KEY(token))
-    if (raw) {
-      for (const [addr, bal] of Object.entries(raw)) {
-        const b = BigInt(bal || '0')
-        if (b > 0n) out.set(addr, b)
+    let fieldCount = -1
+    try {
+      fieldCount = Number(await kv.hlen(key)) || 0
+    } catch {
+      fieldCount = -1
+    }
+    if (fieldCount === 0) return out
+    if (fieldCount > 0 && fieldCount <= HGETALL_SAFE_FIELDS) {
+      try {
+        const raw = await kv.hgetall<Record<string, string>>(key)
+        if (raw) ingestLedgerRecord(raw, out)
+        return out
+      } catch (e) {
+        console.warn('[evm-holders] hgetall', token, summarizeRpcError(e))
+      }
+    }
+    const pending: Array<string | number> = []
+    for await (const item of kv.hscanIterator(key, { count: HSCAN_COUNT })) {
+      pending.push(item)
+      if (pending.length >= 2) {
+        ingestLedgerScanItems(pending, out)
+        pending.length = 0
       }
     }
   } catch (e) {
-    console.warn('[evm-holders] hgetall', token, summarizeRpcError(e))
+    console.warn('[evm-holders] ledger read', token, summarizeRpcError(e))
   }
   return out
 }
@@ -472,7 +521,7 @@ export async function fetchEvmHolders(
     }
     if (Object.keys(persist).length) {
       try {
-        await kv.hset(HOLDER_LEDGER_KEY(token), persist)
+        await hsetLedger(HOLDER_LEDGER_KEY(token), persist)
         await kv.expire(HOLDER_LEDGER_KEY(token), HOLDER_KV_TTL_S)
       } catch {
         /* best-effort — still served from the in-memory ledger this request either way */

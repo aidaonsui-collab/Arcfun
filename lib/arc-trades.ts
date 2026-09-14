@@ -34,6 +34,7 @@ import { summarizeRpcError } from './rpc-error'
 import { staleTapeRewindFrom, shouldPersistScanCursor, tapeIsStaleTs } from './arc-trades-cursor'
 import { quoteDecimalsForToken, quoteTokenForFactory } from './arc-rwa-assets'
 import { recordTrades1m } from './arc-candle-store'
+import { KV_LIST_CHUNK, cappedNewest, chunkArray, tradeTapePageRange } from './arc-kv-bounded'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 
@@ -465,6 +466,11 @@ export async function fetchOnChain24hSwaps(token: Address): Promise<EvmTrade[] |
  * lib/arc-token-meta.ts and lib/arc-creator-meta.ts already rely on for kv.set/kv.get. Stringifying
  * here too would double-encode: reads would come back pre-parsed objects, a second JSON.parse on
  * those throws, and every persisted trade would silently vanish on the next request.
+ *
+ * Upstash PAYG rejects commands over 10MB. A cold/rewind catch-up can yield thousands of swaps;
+ * RPUSH of that whole `fresh` array (then LTRIM) was the reject. The tape only keeps TRADES_CAP,
+ * so only the newest cap ever need to land — chunked so a single command stays small. Candle
+ * history still gets every new trade (separate store, never trimmed).
  */
 async function persistTrades(key: string, ascendingNew: EvmTrade[], newCursor: bigint): Promise<void> {
   try {
@@ -479,8 +485,12 @@ async function persistTrades(key: string, ascendingNew: EvmTrade[], newCursor: b
       }
     }
     if (fresh.length > 0) {
-      await kv.rpush(tradesKvKey(key), ...fresh)
-      await kv.ltrim(tradesKvKey(key), -TRADES_CAP, -1)
+      const listKey = tradesKvKey(key)
+      const tape = cappedNewest(fresh, TRADES_CAP)
+      for (const chunk of chunkArray(tape, KV_LIST_CHUNK)) {
+        await kv.rpush(listKey, ...chunk)
+      }
+      await kv.ltrim(listKey, -TRADES_CAP, -1)
       // Durable candle history — separate store, never trimmed. See lib/arc-candle-store.ts;
       // no-ops quietly if SUPABASE_* isn't configured, and never throws into this path. Awaited
       // (not fire-and-forget) so it gets a chance to land before a serverless invocation's
@@ -698,37 +708,27 @@ export async function fetchArcTrades(
       scheduleTradesSync(token)
     }
 
-    // Stored ascending (oldest→newest); newest page (offset 0) is the tail of the list. Redis
-    // LRANGE with negative indices counts from the end, so page N's ascending slice is
-    // [-(offset+limit), -(offset+1)] — clamped to the list start automatically for an
-    // out-of-range negative start (e.g. a deep offset on a short list just returns fewer rows).
-    let stored: EvmTrade[] | null = null
+    // Stored ascending (oldest→newest); newest page (offset 0) is the tail of the list.
+    // Page via llen + a bounded lrange — never LRANGE 0 -1, and never DEL+RPUSH the whole
+    // cleaned tape (that rewrite was a second 10MB reject on a busy token).
+    let stored: EvmTrade[] = []
+    let total = 0
     try {
-      stored = await kv.lrange<EvmTrade>(tradesKvKey(key), 0, -1)
+      const listKey = tradesKvKey(key)
+      total = Number(await kv.llen(listKey)) || 0
+      if (total > TRADES_CAP) {
+        await kv.ltrim(listKey, -TRADES_CAP, -1)
+        total = TRADES_CAP
+      }
+      const range = tradeTapePageRange(total, offset, limit)
+      if (range) {
+        stored = (await kv.lrange<EvmTrade>(listKey, range.start, range.end)) ?? []
+      }
     } catch (e) {
       console.warn('[arc-trades] kv read trades', summarizeRpcError(e))
     }
-    // syncTradesToHead already persisted anything newly scanned; a failure here is this specific
-    // read failing right after that write succeeded, not a sign nothing was found. Empty rather
-    // than wrong — the next call (this freshness window or the next) reads the real list.
-    if (stored === null) stored = []
 
-    const cleaned = dedupeTrades(stored)
-    if (stored.length !== cleaned.length) {
-      try {
-        await kv.del(tradesKvKey(key))
-        if (cleaned.length > 0) {
-          await kv.rpush(tradesKvKey(key), ...cleaned)
-          const ids = cleaned.map(tradeId)
-          if (ids.length) await kv.sadd(seenKvKey(key), ids[0], ...ids.slice(1))
-        }
-      } catch (e) {
-        console.warn('[arc-trades] kv dedupe rewrite', summarizeRpcError(e))
-      }
-    }
-
-    const total = cleaned.length
-    const ascending = cleaned.slice(Math.max(0, cleaned.length - (offset + limit)), Math.max(0, cleaned.length - offset))
+    const ascending = dedupeTrades(stored)
 
     // Newest first, matching the API's existing contract
     const trimmed = [...ascending].reverse()
