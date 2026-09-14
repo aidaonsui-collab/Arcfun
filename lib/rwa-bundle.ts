@@ -208,6 +208,40 @@ export function encodeBasketArgs(rows: BasketRow[], quote: Address, mode: Bundle
   }
 }
 
+export function buildCreateTokenRwaV4(opts: {
+  factory: Address
+  name: string
+  symbol: string
+  quote: Address
+  creator: Address
+  firstBuyQuoteRaw: bigint
+  split: FeeSplit
+  launchVirtualQuote?: bigint
+}) {
+  return {
+    address: opts.factory,
+    abi: RWA_V4_FACTORY_ABI,
+    functionName: 'createToken' as const,
+    args: [
+      opts.name,
+      opts.symbol,
+      opts.quote,
+      opts.creator,
+      opts.launchVirtualQuote ?? DEFAULT_VIRTUAL_QUOTE,
+      opts.firstBuyQuoteRaw,
+      {
+        feeBps: opts.split.feeBps,
+        creatorBps: opts.split.creatorBps,
+        burnBps: opts.split.burnBps,
+        holdersBps: opts.split.holdersBps,
+        autoLpBps: opts.split.autoLpBps,
+        platformBps: opts.split.platformBps,
+      },
+    ] as const,
+    chainId: ARC_CHAIN_ID,
+  }
+}
+
 export function buildCreateTokenWithBundle(opts: {
   factory: Address
   name: string

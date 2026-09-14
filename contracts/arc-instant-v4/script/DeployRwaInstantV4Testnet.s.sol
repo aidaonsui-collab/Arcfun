@@ -7,6 +7,7 @@ import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {EveFeeHook} from "../src/EveFeeHook.sol";
 import {RwaInstantV4Factory} from "../src/RwaInstantV4Factory.sol";
+import {BundleSinkDeployer} from "../src/BundleSinkDeployer.sol";
 import {HookMiner} from "../test/utils/HookMiner.sol";
 
 /**
@@ -62,7 +63,8 @@ contract DeployRwaInstantV4Testnet is Script {
         EveFeeHook hook = new EveFeeHook{salt: salt}(manager, deployer);
         require(address(hook) == predicted, "hook address mismatch - salt mining and deploy sender disagree");
 
-        RwaInstantV4Factory factory = new RwaInstantV4Factory(manager, hook, platformWallet);
+        BundleSinkDeployer sinkDeployer = new BundleSinkDeployer();
+        RwaInstantV4Factory factory = new RwaInstantV4Factory(manager, hook, platformWallet, sinkDeployer);
         hook.setFactory(address(factory));
 
         if (owner != deployer) {

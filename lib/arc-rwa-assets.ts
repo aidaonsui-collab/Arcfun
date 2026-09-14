@@ -24,6 +24,9 @@ const ZERO = '0x0000000000000000000000000000000000000000'
 const ARC_CHAIN_ID = Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID) || 5042
 const ARC_IS_TESTNET = ARC_CHAIN_ID === 5042002
 
+/** Shared RwaInstantV4Factory. Quote is per-create; one factory serves USYC/BUIDL/CRCL. */
+const V4_RWA_FACTORY_DEFAULT = '0x7739C8938Dfe76d1121af1Fb58fe0F34F633ddA7'
+
 /** Official Circle USYC on Arc Testnet (docs.arc.io / developers.circle.com). */
 const USYC_TESTNET = {
   address: '0xe9185F0c5F296Ed1797AaE4238D26CCaBEadb86C',
@@ -105,17 +108,22 @@ function mergeAsset(base: ArcRwaAsset, over?: Partial<ArcRwaAsset>): ArcRwaAsset
   }
 }
 
+function sharedRwaV4Factory(): Address | '' {
+  return envAddr('NEXT_PUBLIC_ARC_INSTANT_V4_RWA_FACTORY') || (V4_RWA_FACTORY_DEFAULT as Address)
+}
+
 function builtinCatalog(): ArcRwaAsset[] {
+  const sharedFactory = sharedRwaV4Factory()
   const usycAddr =
     envAddr('NEXT_PUBLIC_ARC_RWA_USYC') ||
     (ARC_IS_TESTNET ? (USYC_TESTNET.address as Address) : '')
-  const usycFactory = envAddr('NEXT_PUBLIC_ARC_RWA_USYC_FACTORY')
+  const usycFactory = envAddr('NEXT_PUBLIC_ARC_RWA_USYC_FACTORY') || sharedFactory
   const usycEnabled = envFlag('NEXT_PUBLIC_ARC_RWA_USYC_ENABLED')
   const buidlAddr = envAddr('NEXT_PUBLIC_ARC_RWA_BUIDL')
-  const buidlFactory = envAddr('NEXT_PUBLIC_ARC_RWA_BUIDL_FACTORY')
+  const buidlFactory = envAddr('NEXT_PUBLIC_ARC_RWA_BUIDL_FACTORY') || sharedFactory
   const buidlEnabled = envFlag('NEXT_PUBLIC_ARC_RWA_BUIDL_ENABLED')
   const crclAddr = envAddr('NEXT_PUBLIC_ARC_RWA_CRCL')
-  const crclFactory = envAddr('NEXT_PUBLIC_ARC_RWA_CRCL_FACTORY')
+  const crclFactory = envAddr('NEXT_PUBLIC_ARC_RWA_CRCL_FACTORY') || sharedFactory
   const crclEnabled = envFlag('NEXT_PUBLIC_ARC_RWA_CRCL_ENABLED')
 
   return [
@@ -134,7 +142,7 @@ function builtinCatalog(): ArcRwaAsset[] {
         envAddr('NEXT_PUBLIC_ARC_RWA_USYC_ENTITLEMENTS') ||
         (ARC_IS_TESTNET ? USYC_TESTNET.entitlements : ''),
       chainId: ARC_CHAIN_ID,
-      enabled: usycEnabled ?? Boolean(usycFactory),
+      enabled: usycEnabled ?? Boolean(usycAddr && usycFactory),
     },
     {
       id: 'buidl',
@@ -147,7 +155,7 @@ function builtinCatalog(): ArcRwaAsset[] {
       locker: envAddr('NEXT_PUBLIC_ARC_RWA_BUIDL_LOCKER'),
       permissioned: true,
       chainId: ARC_CHAIN_ID,
-      enabled: buidlEnabled ?? Boolean(buidlFactory),
+      enabled: buidlEnabled ?? Boolean(buidlAddr && buidlFactory),
     },
     {
       id: 'crcl',
@@ -163,7 +171,7 @@ function builtinCatalog(): ArcRwaAsset[] {
       locker: envAddr('NEXT_PUBLIC_ARC_RWA_CRCL_LOCKER'),
       permissioned: true,
       chainId: ARC_CHAIN_ID,
-      enabled: crclEnabled ?? Boolean(crclFactory),
+      enabled: crclEnabled ?? Boolean(crclAddr && crclFactory),
     },
   ]
 }

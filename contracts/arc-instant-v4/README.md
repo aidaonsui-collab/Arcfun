@@ -39,11 +39,19 @@ so the CREATE2 factory is not locked as owner.
 | `EveFeeHook` | `0x9fbA9571A43e5624a09F741911D4e51B0016C044` |
 | `EveInstantV4Factory` | `0x9066C6Cc7eB666c43d1B07430E56fBB64255430a` |
 | `EveV4Router` | `0x494715a3923392Dd0fD312B0CC40055679Feaad2` |
+| `BundleSinkDeployer` | `0x987BD34E847AFAEbfa28aC86F64A97AD427e2E57` |
+| `RwaInstantV4Factory` | `0x7739C8938Dfe76d1121af1Fb58fe0F34F633ddA7` |
 
 PoolManager is Uniswap's official Arc address (`Uniswap/contracts` `deployments/json/5042.json`).
 Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
-`0x26bD491560b5175ee8bD1DA4998Fe260FfC413c9`. `RwaInstantV4Factory` is not on mainnet yet;
-`hook.setFactoryAllowed` is how a later RWA factory joins this same hook.
+`0x26bD491560b5175ee8bD1DA4998Fe260FfC413c9`.
+
+`RwaInstantV4Factory` joined the same hook via `setFactoryAllowed` (USDC factory stays
+allowed). BundleSink creation code lives on `BundleSinkDeployer` so the factory stays under
+EIP-170.
+
+Quote is per-create. Issuer token addresses (USYC / BUIDL / CRCL) are still unset on
+mainnet, so those create cards stay Soon until `NEXT_PUBLIC_ARC_RWA_<ID>` is set.
 
 HolderSink + EveV4Router live in this package. `HolderSink.distribute()` / `claim()` is the
 Eve-factory reflect path (a fixed launch/quote pair). `BundleSink.sol` is the RWA-factory
@@ -146,8 +154,9 @@ owner action anywhere in the path.
 
 **Still unverified / not on mainnet:**
 - **Any live RWA quote token.** USYC has a real Arc *testnet* address in
-  `lib/arc-rwa-assets.ts`; nothing is live on mainnet yet. Tests use `MockRwaToken`, a 6dp stand-in.
-  `RwaInstantV4Factory` itself is also not deployed on 5042.
+  `lib/arc-rwa-assets.ts`; nothing is wired as a mainnet Instant quote yet. Tests use
+  `MockRwaToken`, a 6dp stand-in. The RWA factory is live; create cards stay Soon until
+  the issuer token env is set.
 - **A security review.** These hooks move real value on every swap, and `BundleSink` additionally
   moves real value through live AMM swaps on `convert()`. Get the specified/unspecified math, the
   `take()`/settle accounting, or the accrual bookkeeping wrong and it either bricks trading,

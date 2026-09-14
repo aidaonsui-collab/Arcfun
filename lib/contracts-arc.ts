@@ -446,6 +446,11 @@ export const ARC = {
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_ROUTER,
     '0x494715a3923392Dd0fD312B0CC40055679Feaad2',
   ),
+  /** RWA Instant v4 (DeployRwaInstantV4 on 5042). Quote is per-create. */
+  INSTANT_V4_RWA_FACTORY: envAddr(
+    process.env.NEXT_PUBLIC_ARC_INSTANT_V4_RWA_FACTORY,
+    '0x7739C8938Dfe76d1121af1Fb58fe0F34F633ddA7',
+  ),
   POOL_MANAGER: envAddr(
     process.env.NEXT_PUBLIC_ARC_POOL_MANAGER,
     '0x8366a39CC670B4001A1121B8F6A443A643e40951',
@@ -542,9 +547,9 @@ export function instantCatalogFactories(): Address[] {
   ])
 }
 
-/** v4 Instant factories (USDC + later RWA). Not mixed into V3 getPool scans. */
+/** v4 Instant factories (USDC + RWA). Not mixed into V3 getPool scans. */
 export function instantV4CatalogFactories(): Address[] {
-  return uniqAddrs([ARC.INSTANT_V4_FACTORY])
+  return uniqAddrs([ARC.INSTANT_V4_FACTORY, ARC.INSTANT_V4_RWA_FACTORY])
 }
 
 /**
@@ -586,6 +591,7 @@ export function instantProtocolAddresses(): Address[] {
     ARC.REFLECTION_FACTORY,
     ARC.REFLECTION_LOCKER,
     ARC.INSTANT_V4_FACTORY,
+    ARC.INSTANT_V4_RWA_FACTORY,
     ARC.INSTANT_V4_HOOK,
     ARC.INSTANT_V4_ROUTER,
     ARC.POOL_MANAGER,

@@ -32,6 +32,7 @@ import { BundleBasketCard } from '@/components/BundleBasketCard'
 import {
   RWA_V4_FACTORY_ABI,
   basketValid,
+  buildCreateTokenRwaV4,
   buildCreateTokenWithBundle,
   buildSetBasket,
   rwaBundleFactoryReady,
@@ -189,12 +190,21 @@ export function ArcCreateForm({
   const isReflection = launchType === 'reflection'
   const v4Ui = arcInstantV4UiEnabled()
   const v4Live = arcInstantV4Enabled()
-  const bundleLive = Boolean(
-    v4Live &&
-      rwaQuote &&
-      rwaBundleFactoryReady(rwaQuote.factory) &&
-      (rwaQuote.factory as string).toLowerCase() !== ARC.INSTANT_FACTORY.toLowerCase(),
-  )
+  const rwaFactoryAddr = (() => {
+    if (!rwaQuote) return null
+    const f = (rwaQuote.factory || '').toLowerCase()
+    const v3 = ARC.INSTANT_FACTORY.toLowerCase()
+    const eve = ARC.INSTANT_V4_FACTORY.toLowerCase()
+    if (f && rwaBundleFactoryReady(rwaQuote.factory) && f !== v3 && f !== eve) {
+      return rwaQuote.factory as Address
+    }
+    if (ARC.INSTANT_V4_RWA_FACTORY && ARC.INSTANT_V4_RWA_FACTORY !== '0x0000000000000000000000000000000000000000') {
+      return ARC.INSTANT_V4_RWA_FACTORY
+    }
+    return null
+  })()
+  const rwaV4Live = Boolean(v4Live && rwaQuote && rwaFactoryAddr)
+  const bundleLive = rwaV4Live
   const hideHolders = Boolean(rwaQuote) && !bundleOn
   const minHoldersBps = isReflection
     ? MIN_REFLECT_HOLDERS_BPS
@@ -367,8 +377,8 @@ export function ArcCreateForm({
       const firstBuyQuote =
         buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcQuote(firstBuy, quoteDecimals) : 0n
       const factory =
-        bundleOn && bundleLive && rwaQuote?.factory
-          ? (rwaQuote.factory as Address)
+        rwaV4Live && rwaFactoryAddr
+          ? rwaFactoryAddr
           : v4Live
             ? ARC.INSTANT_V4_FACTORY
             : isReflection
@@ -397,7 +407,7 @@ export function ArcCreateForm({
         }
       }
 
-      if (v4Live && bundleOn && bundleLive) {
+      if (rwaV4Live && bundleOn && bundleLive) {
         setStep('creating')
         const creator = address
         const call = buildCreateTokenWithBundle({
@@ -452,6 +462,30 @@ export function ArcCreateForm({
           setPendingBasket({ token, sink, quote: quoteToken })
           throw e
         }
+      } else if (rwaV4Live && rwaFactoryAddr) {
+        setStep('creating')
+        const creator = rewardsAddr || address
+        const call = buildCreateTokenRwaV4({
+          factory: rwaFactoryAddr,
+          name: name.trim(),
+          symbol: symbol.trim(),
+          quote: quoteToken,
+          creator,
+          firstBuyQuoteRaw: firstBuyQuote,
+          split: feeSplit,
+        })
+        hash = await writeContractAsync({
+          address: call.address,
+          abi: call.abi as never,
+          functionName: call.functionName as never,
+          args: call.args as never,
+          chainId: call.chainId,
+          gas: ARC_INSTANT_CREATE_GAS,
+        })
+        setStep('confirming')
+        const created = await waitArcCreateConfirmed(hash)
+        token = created.token
+        pool = created.pool
       } else if (v4Live) {
         setStep('creating')
         const creator = rewardsAddr || address
