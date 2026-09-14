@@ -17,6 +17,7 @@ import {BalanceDeltaLibrary} from "v4-core/types/BalanceDelta.sol";
 
 import {EveFeeHook} from "../src/EveFeeHook.sol";
 import {RwaInstantV4Factory} from "../src/RwaInstantV4Factory.sol";
+import {BundleSinkDeployer} from "../src/BundleSinkDeployer.sol";
 import {VirtualQuote} from "../src/libraries/VirtualQuote.sol";
 import {MockRwaToken} from "./MockRwaToken.sol";
 import {HookMiner} from "./utils/HookMiner.sol";
@@ -50,7 +51,9 @@ contract RwaInstantV4Test is Test {
         hook = new EveFeeHook{salt: salt}(IPoolManager(address(manager)), address(this));
         require(address(hook) == hookAddr, "hook address mismatch");
 
-        factory = new RwaInstantV4Factory(IPoolManager(address(manager)), hook, platform);
+        factory = new RwaInstantV4Factory(
+            IPoolManager(address(manager)), hook, platform, new BundleSinkDeployer()
+        );
         hook.setFactory(address(factory));
 
         quote = new MockRwaToken();

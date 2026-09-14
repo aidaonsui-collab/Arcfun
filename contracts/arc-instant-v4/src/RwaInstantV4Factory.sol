@@ -20,6 +20,7 @@ import {LaunchToken18} from "./LaunchToken18.sol";
 import {LaunchToken18Tracked} from "./LaunchToken18Tracked.sol";
 import {EveFeeHook} from "./EveFeeHook.sol";
 import {BundleSink} from "./BundleSink.sol";
+import {BundleSinkDeployer} from "./BundleSinkDeployer.sol";
 
 /// @title RwaInstantV4Factory
 /// @notice Instant factory quoted against an RWA (USYC, BUIDL, …). Same mint/seed/first-buy
@@ -92,6 +93,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
 
     IPoolManager public immutable poolManager;
     EveFeeHook public immutable hook;
+    BundleSinkDeployer public immutable sinkDeployer;
     address public owner;
     address public platformWallet;
     uint256 public launchVirtualQuote;
@@ -104,10 +106,16 @@ contract RwaInstantV4Factory is IUnlockCallback {
         _;
     }
 
-    constructor(IPoolManager manager_, EveFeeHook hook_, address platformWallet_) {
-        if (platformWallet_ == address(0)) revert ZeroAddress();
+    constructor(
+        IPoolManager manager_,
+        EveFeeHook hook_,
+        address platformWallet_,
+        BundleSinkDeployer sinkDeployer_
+    ) {
+        if (platformWallet_ == address(0) || address(sinkDeployer_) == address(0)) revert ZeroAddress();
         poolManager = manager_;
         hook = hook_;
+        sinkDeployer = sinkDeployer_;
         owner = msg.sender;
         platformWallet = platformWallet_;
     }
@@ -283,7 +291,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
 
         address holders = address(0);
         if (call.useBundle) {
-            BundleSink sink = new BundleSink(hook, poolManager, IERC20(token), call.creator, address(this));
+            BundleSink sink = sinkDeployer.deploy(hook, poolManager, IERC20(token), call.creator, address(this));
             bundleSink = address(sink);
             holders = bundleSink;
             LaunchToken18Tracked(token).setSink(holders);
