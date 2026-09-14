@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
 import {IERC20Minimal} from "v4-core/interfaces/external/IERC20Minimal.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
@@ -16,12 +17,21 @@ import {CurrencySettler} from "./libraries/CurrencySettler.sol";
 import {VirtualQuote} from "./libraries/VirtualQuote.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {LaunchToken18} from "./LaunchToken18.sol";
+import {LaunchToken18Tracked} from "./LaunchToken18Tracked.sol";
 import {EveFeeHook} from "./EveFeeHook.sol";
+import {BundleSink} from "./BundleSink.sol";
 
 /// @title RwaInstantV4Factory
 /// @notice Instant factory quoted against an RWA (USYC, BUIDL, …). Same mint/seed/first-buy
-///         shape as EveInstantV4Factory, registered on the shared EveFeeHook. Holders slice
-///         is not used here (permissioned MMFs should not pay random holders in USYC).
+///         shape as EveInstantV4Factory, registered on the shared EveFeeHook.
+///
+///         The general `holders` slice (an arbitrary caller-supplied address, like
+///         EveInstantV4Factory allows) is NOT available here — a permissioned MMF token landing
+///         directly in random holders' wallets is a real compliance problem. `createTokenWithBundle`
+///         is the one sanctioned exception: it always deploys a fresh `BundleSink` and wires that
+///         in as `holders` instead, and holders never receive the raw quote token — BundleSink
+///         converts it into the creator's chosen basket first and only pays out the converted
+///         asset (see BundleSink's top comment).
 contract RwaInstantV4Factory is IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
@@ -47,11 +57,13 @@ contract RwaInstantV4Factory is IUnlockCallback {
     error FirstBuyZero();
     error FirstBuyTooLarge();
     error HoldersNotOnRwa();
+    error BundleRequiresHoldersSlice();
 
     struct PoolInfo {
         address token;
         address quote;
         address creator;
+        address holders;
         PoolId id;
     }
 
@@ -64,6 +76,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
         uint256 vq;
         uint256 firstBuy;
         EveFeeHook.Split split;
+        bool useBundle;
     }
 
     event TokenLaunched(
@@ -127,7 +140,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
         external
         returns (address token, PoolId id)
     {
-        (token, id,) = _create(name, symbol, quote, creator, 0, 0, defaultSplit());
+        (token, id,,) = _create(name, symbol, quote, creator, 0, 0, defaultSplit(), false);
     }
 
     function createToken(
@@ -138,7 +151,8 @@ contract RwaInstantV4Factory is IUnlockCallback {
         uint256 launchVirtualQuote_,
         uint256 firstBuyQuoteAmount
     ) external returns (address token, PoolId id, uint256 tokensOut) {
-        return _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, defaultSplit());
+        (token, id, tokensOut,) =
+            _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, defaultSplit(), false);
     }
 
     function createToken(
@@ -150,7 +164,24 @@ contract RwaInstantV4Factory is IUnlockCallback {
         uint256 firstBuyQuoteAmount,
         EveFeeHook.Split calldata split
     ) external returns (address token, PoolId id, uint256 tokensOut) {
-        return _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, split);
+        (token, id, tokensOut,) =
+            _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, split, false);
+    }
+
+    /// @notice The one way to get a holders slice on an RWA launch: `split.holdersBps` must be
+    ///         > 0, and this always deploys a fresh `BundleSink` (never a caller-supplied address
+    ///         — see the contract top comment for why). Configure what it pays out via
+    ///         `BundleSink.setBasket` after launch.
+    function createTokenWithBundle(
+        string calldata name,
+        string calldata symbol,
+        address quote,
+        address creator,
+        uint256 launchVirtualQuote_,
+        uint256 firstBuyQuoteAmount,
+        EveFeeHook.Split calldata split
+    ) external returns (address token, PoolId id, uint256 tokensOut, address bundleSink) {
+        return _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, split, true);
     }
 
     function _create(
@@ -160,10 +191,12 @@ contract RwaInstantV4Factory is IUnlockCallback {
         address creator,
         uint256 launchVirtualQuote_,
         uint256 firstBuyQuoteAmount,
-        EveFeeHook.Split memory split
-    ) internal returns (address token, PoolId id, uint256 tokensOut) {
+        EveFeeHook.Split memory split,
+        bool useBundle
+    ) internal returns (address token, PoolId id, uint256 tokensOut, address bundleSink) {
         if (quote == address(0) || creator == address(0)) revert ZeroAddress();
-        if (split.holdersBps != 0) revert HoldersNotOnRwa();
+        if (split.holdersBps != 0 && !useBundle) revert HoldersNotOnRwa();
+        if (useBundle && split.holdersBps == 0) revert BundleRequiresHoldersSlice();
         if (firstBuyQuoteAmount > uint256(type(int256).max)) revert FirstBuyTooLarge();
         uint256 vq = launchVirtualQuote_ == 0 ? launchVirtualQuote : launchVirtualQuote_;
         if (firstBuyQuoteAmount > 0) {
@@ -178,11 +211,12 @@ contract RwaInstantV4Factory is IUnlockCallback {
             payer: msg.sender,
             vq: vq,
             firstBuy: firstBuyQuoteAmount,
-            split: split
+            split: split,
+            useBundle: useBundle
         });
         bytes memory result = poolManager.unlock(abi.encode(uint8(1), call));
         bytes32 idBytes;
-        (token, idBytes, tokensOut) = abi.decode(result, (address, bytes32, uint256));
+        (token, idBytes, tokensOut, bundleSink) = abi.decode(result, (address, bytes32, uint256, address));
         id = PoolId.wrap(idBytes);
         uint256 leftover = IERC20Minimal(quote).balanceOf(address(this));
         if (leftover > 0) {
@@ -195,11 +229,14 @@ contract RwaInstantV4Factory is IUnlockCallback {
         if (msg.sender != address(poolManager)) revert NotSelf();
         (uint8 action, LaunchCall memory call) = abi.decode(data, (uint8, LaunchCall));
         if (action != 1) revert UnknownAction();
-        (address token, PoolId id, uint256 tokensOut) = _createToken(call);
-        return abi.encode(token, PoolId.unwrap(id), tokensOut);
+        (address token, PoolId id, uint256 tokensOut, address bundleSink) = _createToken(call);
+        return abi.encode(token, PoolId.unwrap(id), tokensOut, bundleSink);
     }
 
-    function _createToken(LaunchCall memory call) internal returns (address token, PoolId id, uint256 tokensOut) {
+    function _createToken(LaunchCall memory call)
+        internal
+        returns (address token, PoolId id, uint256 tokensOut, address bundleSink)
+    {
         bytes32 salt = keccak256(
             abi.encode(
                 call.name,
@@ -213,12 +250,18 @@ contract RwaInstantV4Factory is IUnlockCallback {
                 call.split.burnBps,
                 call.split.autoLpBps,
                 call.split.platformBps,
+                call.useBundle,
                 _nonce++,
                 block.chainid
             )
         );
-        LaunchToken18 t = new LaunchToken18{salt: salt}(call.name, call.symbol, address(this));
-        token = address(t);
+        if (call.useBundle) {
+            LaunchToken18Tracked t = new LaunchToken18Tracked{salt: salt}(call.name, call.symbol, address(this));
+            token = address(t);
+        } else {
+            LaunchToken18 t = new LaunchToken18{salt: salt}(call.name, call.symbol, address(this));
+            token = address(t);
+        }
         if (token == call.quote) revert TokenIsQuote();
         if (poolOf[token].token != address(0)) revert AlreadyExists();
 
@@ -238,7 +281,14 @@ contract RwaInstantV4Factory is IUnlockCallback {
         poolManager.initialize(key, startSqrtPriceX96);
         id = key.toId();
 
-        hook.registerPool(key, call.creator, address(0), address(this), platformWallet, token, call.split);
+        address holders = address(0);
+        if (call.useBundle) {
+            BundleSink sink = new BundleSink(hook, poolManager, IERC20(token), call.creator, address(this));
+            bundleSink = address(sink);
+            holders = bundleSink;
+            LaunchToken18Tracked(token).setSink(holders);
+        }
+        hook.registerPool(key, call.creator, holders, address(this), platformWallet, token, call.split);
 
         uint160 sqrtA = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtB = TickMath.getSqrtPriceAtTick(tickUpper);
@@ -267,7 +317,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
             emit TokenFirstBuy(token, call.payer, call.firstBuy, tokensOut);
         }
 
-        poolOf[token] = PoolInfo({token: token, quote: call.quote, creator: call.creator, id: id});
+        poolOf[token] = PoolInfo({token: token, quote: call.quote, creator: call.creator, holders: holders, id: id});
         emit TokenLaunched(token, call.quote, call.creator, id, tokenIsCurrency0, call.split.feeBps);
     }
 
