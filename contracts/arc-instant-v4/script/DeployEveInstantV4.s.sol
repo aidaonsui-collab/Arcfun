@@ -25,6 +25,7 @@ import {HookMiner} from "../test/utils/HookMiner.sol";
  *   PRIVATE_KEY (required)
  *   PLATFORM_WALLET / OWNER (optional; default deployer)
  *   POOL_MANAGER (optional; default official Arc v4 PoolManager)
+ *   ROUTER (optional; reuse an already-deployed EveV4Router instead of deploying another)
  *   LAUNCH_VIRTUAL_QUOTE (optional; default 5500e6)
  */
 contract DeployEveInstantV4 is Script {
@@ -43,6 +44,7 @@ contract DeployEveInstantV4 is Script {
         address platformWallet = vm.envOr("PLATFORM_WALLET", deployer);
         address owner = vm.envOr("OWNER", deployer);
         address poolManagerAddr = vm.envOr("POOL_MANAGER", ARC_POOL_MANAGER);
+        address existingRouter = vm.envOr("ROUTER", address(0));
         uint256 virtualQuote = vm.envOr("LAUNCH_VIRTUAL_QUOTE", DEFAULT_VIRTUAL_QUOTE);
 
         require(poolManagerAddr.code.length > 0, "PoolManager has no code");
@@ -71,7 +73,13 @@ contract DeployEveInstantV4 is Script {
         hook.setFactory(address(factory));
         factory.setLaunchVirtualQuote(virtualQuote);
 
-        EveV4Router router = new EveV4Router(manager);
+        EveV4Router router;
+        if (existingRouter != address(0)) {
+            require(existingRouter.code.length > 0, "ROUTER has no code");
+            router = EveV4Router(existingRouter);
+        } else {
+            router = new EveV4Router(manager);
+        }
 
         if (owner != deployer) {
             hook.transferOwnership(owner);
@@ -82,6 +90,7 @@ contract DeployEveInstantV4 is Script {
 
         console2.log("EveFeeHook            ", address(hook));
         console2.log("EveInstantV4Factory   ", address(factory));
+        console2.log("InstantAutoLpHelper   ", address(factory.autoLpHelper()));
         console2.log("EveV4Router           ", address(router));
         console2.log("PoolManager           ", poolManagerAddr);
     }

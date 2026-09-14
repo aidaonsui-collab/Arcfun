@@ -15,6 +15,7 @@ import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {LiquidityAmounts} from "./libraries/LiquidityAmounts.sol";
 import {CurrencySettler} from "./libraries/CurrencySettler.sol";
 import {VirtualQuote} from "./libraries/VirtualQuote.sol";
+import {InstantAutoLp} from "./libraries/InstantAutoLp.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {LaunchToken18} from "./LaunchToken18.sol";
 import {LaunchToken18Tracked} from "./LaunchToken18Tracked.sol";
@@ -33,6 +34,10 @@ import {BundleSinkDeployer} from "./BundleSinkDeployer.sol";
 ///         in as `holders` instead, and holders never receive the raw quote token — BundleSink
 ///         converts it into the creator's chosen basket first and only pays out the converted
 ///         asset (see BundleSink's top comment).
+///
+///         Auto-LP is the same as the USDC factory: per-pool on the hook, `flushAutoLp` mints
+///         into the factory-owned position. Tick range is stored next to `poolOf` (ABI of
+///         `poolOf` stays 5 fields).
 contract RwaInstantV4Factory is IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
@@ -90,6 +95,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
     );
     event TokenFirstBuy(address indexed token, address indexed buyer, uint256 quoteIn, uint256 tokensOut);
     event LaunchVirtualQuoteSet(uint256 quote);
+    event AutoLpFlushed(PoolId indexed id, uint128 liquidity);
 
     IPoolManager public immutable poolManager;
     EveFeeHook public immutable hook;
@@ -100,6 +106,8 @@ contract RwaInstantV4Factory is IUnlockCallback {
 
     uint256 private _nonce;
     mapping(address => PoolInfo) public poolOf;
+    mapping(address => int24) public tickLowerOf;
+    mapping(address => int24) public tickUpperOf;
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -133,6 +141,29 @@ contract RwaInstantV4Factory is IUnlockCallback {
     function setLaunchVirtualQuote(uint256 q) external onlyOwner {
         launchVirtualQuote = q;
         emit LaunchVirtualQuoteSet(q);
+    }
+
+    /// @notice Permissionless: pull this pool's auto-LP slice from the hook and mint it
+    ///         into the factory-owned position. Leftover (wrong-side at the current tick)
+    ///         is restowed on the hook.
+    function flushAutoLp(address token) external returns (uint128 liquidityAdded) {
+        PoolInfo memory info = poolOf[token];
+        if (info.token == address(0)) revert ZeroAddress();
+        bool tokenIsCurrency0 = token < info.quote;
+        PoolKey memory key = PoolKey({
+            currency0: Currency.wrap(tokenIsCurrency0 ? token : info.quote),
+            currency1: Currency.wrap(tokenIsCurrency0 ? info.quote : token),
+            fee: 0,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+        (uint256 a0, uint256 a1) = hook.claimAutoLp(key);
+        if (a0 == 0 && a1 == 0) return 0;
+        bytes memory result = poolManager.unlock(
+            abi.encode(uint8(2), key, tickLowerOf[token], tickUpperOf[token], a0, a1)
+        );
+        liquidityAdded = abi.decode(result, (uint128));
+        emit AutoLpFlushed(info.id, liquidityAdded);
     }
 
     function defaultSplit() public pure returns (EveFeeHook.Split memory s) {
@@ -235,10 +266,19 @@ contract RwaInstantV4Factory is IUnlockCallback {
 
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(poolManager)) revert NotSelf();
-        (uint8 action, LaunchCall memory call) = abi.decode(data, (uint8, LaunchCall));
-        if (action != 1) revert UnknownAction();
-        (address token, PoolId id, uint256 tokensOut, address bundleSink) = _createToken(call);
-        return abi.encode(token, PoolId.unwrap(id), tokensOut, bundleSink);
+        uint8 action = uint8(uint256(bytes32(data[0:32])));
+        if (action == 1) {
+            (, LaunchCall memory call) = abi.decode(data, (uint8, LaunchCall));
+            (address token, PoolId id, uint256 tokensOut, address bundleSink) = _createToken(call);
+            return abi.encode(token, PoolId.unwrap(id), tokensOut, bundleSink);
+        }
+        if (action == 2) {
+            (, PoolKey memory key, int24 tickLower, int24 tickUpper, uint256 a0, uint256 a1) =
+                abi.decode(data, (uint8, PoolKey, int24, int24, uint256, uint256));
+            uint128 liq = InstantAutoLp.mintClaimed(poolManager, hook, key, tickLower, tickUpper, a0, a1);
+            return abi.encode(liq);
+        }
+        revert UnknownAction();
     }
 
     function _createToken(LaunchCall memory call)
@@ -297,6 +337,8 @@ contract RwaInstantV4Factory is IUnlockCallback {
             LaunchToken18Tracked(token).setSink(holders);
         }
         hook.registerPool(key, call.creator, holders, address(this), platformWallet, token, call.split);
+        tickLowerOf[token] = tickLower;
+        tickUpperOf[token] = tickUpper;
 
         uint160 sqrtA = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtB = TickMath.getSqrtPriceAtTick(tickUpper);

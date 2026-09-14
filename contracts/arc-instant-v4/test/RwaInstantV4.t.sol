@@ -139,14 +139,14 @@ contract RwaInstantV4Test is Test {
     }
 
     function test_buySwap_feeSplitsAndBurnsLaunchToken() public {
-        (address token,, bool tokenIsCurrency0) = _launch();
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
         PoolKey memory key = _key(token, tokenIsCurrency0);
         _buy(key, tokenIsCurrency0, 1_000e6);
 
         Currency tokenCurrency = Currency.wrap(token);
         uint256 creatorTok = hook.owed(creator, tokenCurrency);
         uint256 platformTok = hook.owed(platform, tokenCurrency);
-        uint256 autoLpTok = hook.owed(address(factory), tokenCurrency);
+        uint256 autoLpTok = hook.pendingAutoLp(id, tokenCurrency);
         uint256 burnTok = IERC20Like(token).balanceOf(hook.DEAD());
         uint256 totalFeeTok = creatorTok + platformTok + autoLpTok + burnTok;
         assertGt(totalFeeTok, 0);
@@ -242,6 +242,69 @@ contract RwaInstantV4Test is Test {
         );
         assertTrue(sqrtPrice != edge);
         assertTrue(token != address(0));
+    }
+
+    function _sellHalf(address token, PoolKey memory key, bool tokenIsCurrency0) internal {
+        uint256 tokenBal = IERC20Like(token).balanceOf(trader);
+        assertGt(tokenBal, 0);
+        vm.prank(trader);
+        IERC20Like(token).approve(address(swapRouter), type(uint256).max);
+        bool sellZeroForOne = tokenIsCurrency0;
+        vm.prank(trader);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: sellZeroForOne,
+                amountSpecified: -int256(tokenBal / 2),
+                sqrtPriceLimitX96: sellZeroForOne ? MIN_SQRT : MAX_SQRT
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+    }
+
+    function test_flushAutoLp_mintsAfterBuyAndSell() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+        _sellHalf(token, key, tokenIsCurrency0);
+
+        (uint128 liqBefore,,) = StateLibrary.getPositionInfo(
+            IPoolManager(address(manager)),
+            id,
+            address(factory),
+            factory.tickLowerOf(token),
+            factory.tickUpperOf(token),
+            bytes32(0)
+        );
+        uint128 added = factory.flushAutoLp(token);
+        assertGt(added, 0);
+        (uint128 liqAfter,,) = StateLibrary.getPositionInfo(
+            IPoolManager(address(manager)),
+            id,
+            address(factory),
+            factory.tickLowerOf(token),
+            factory.tickUpperOf(token),
+            bytes32(0)
+        );
+        assertEq(liqAfter, liqBefore + added);
+        assertEq(quote.balanceOf(address(factory)), 0);
+    }
+
+    function test_flushQuoteBurn_swapsQuoteToLaunchDead() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+        uint256 deadBefore = IERC20Like(token).balanceOf(hook.DEAD());
+        _sellHalf(token, key, tokenIsCurrency0);
+
+        uint256 pending = hook.pendingBurn(id, Currency.wrap(address(quote)));
+        assertGt(pending, 0);
+        uint256 burned = hook.flushQuoteBurn(key, 0);
+        assertGt(burned, 0);
+        assertEq(hook.pendingBurn(id, Currency.wrap(address(quote))), 0);
+        assertEq(IERC20Like(token).balanceOf(hook.DEAD()), deadBefore + burned);
+        assertEq(quote.balanceOf(hook.DEAD()), 0);
     }
 }
 

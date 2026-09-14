@@ -13,7 +13,7 @@ import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol
 import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {LiquidityAmounts} from "./libraries/LiquidityAmounts.sol";
 import {CurrencySettler} from "./libraries/CurrencySettler.sol";
-import {VirtualQuote} from "./libraries/VirtualQuote.sol";
+import {InstantAutoLpHelper} from "./InstantAutoLpHelper.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {LaunchToken18} from "./LaunchToken18.sol";
@@ -31,8 +31,8 @@ import {EveFeeHook} from "./EveFeeHook.sol";
 ///         wallet approvals keep working. Native USDC pairing is a later factory.
 ///
 ///         Liquidity is factory-owned inside PoolManager; nothing here can withdraw it.
-///         Auto-LP fee slice accrues to this factory (donate/flush is a follow-up).
-///         Holders slice accrues to the address passed at create (HolderSink later).
+///         Auto-LP fee slice is per-pool on the hook; `flushAutoLp` mints it into that
+///         locked position. Holders slice accrues to the address passed at create.
 contract EveInstantV4Factory is IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
@@ -88,9 +88,11 @@ contract EveInstantV4Factory is IUnlockCallback {
     );
     event TokenFirstBuy(address indexed token, address indexed buyer, uint256 quoteIn, uint256 tokensOut);
     event LaunchVirtualQuoteSet(uint256 quote);
+    event AutoLpFlushed(PoolId indexed id, uint128 liquidity);
 
     IPoolManager public immutable poolManager;
     EveFeeHook public immutable hook;
+    InstantAutoLpHelper public immutable autoLpHelper;
     address public owner;
     address public platformWallet;
     /// @notice Default virtual quote in the quote token's native decimals (5500e6 ≈ $5.5k FDV
@@ -99,6 +101,8 @@ contract EveInstantV4Factory is IUnlockCallback {
 
     uint256 private _nonce;
     mapping(address => PoolInfo) public poolOf;
+    mapping(address => int24) public tickLowerOf;
+    mapping(address => int24) public tickUpperOf;
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -111,6 +115,7 @@ contract EveInstantV4Factory is IUnlockCallback {
         hook = hook_;
         owner = msg.sender;
         platformWallet = platformWallet_;
+        autoLpHelper = new InstantAutoLpHelper();
     }
 
     function transferOwnership(address next) external onlyOwner {
@@ -126,6 +131,29 @@ contract EveInstantV4Factory is IUnlockCallback {
     function setLaunchVirtualQuote(uint256 q) external onlyOwner {
         launchVirtualQuote = q;
         emit LaunchVirtualQuoteSet(q);
+    }
+
+    /// @notice Permissionless: pull this pool's auto-LP slice from the hook and mint it
+    ///         into the factory-owned position. Leftover (wrong-side at the current tick)
+    ///         is restowed on the hook.
+    function flushAutoLp(address token) external returns (uint128 liquidityAdded) {
+        PoolInfo memory info = poolOf[token];
+        if (info.token == address(0)) revert ZeroAddress();
+        bool tokenIsCurrency0 = token < info.quote;
+        PoolKey memory key = PoolKey({
+            currency0: Currency.wrap(tokenIsCurrency0 ? token : info.quote),
+            currency1: Currency.wrap(tokenIsCurrency0 ? info.quote : token),
+            fee: 0,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+        (uint256 a0, uint256 a1) = hook.claimAutoLp(key);
+        if (a0 == 0 && a1 == 0) return 0;
+        bytes memory result = poolManager.unlock(
+            abi.encode(uint8(2), key, tickLowerOf[token], tickUpperOf[token], a0, a1)
+        );
+        liquidityAdded = abi.decode(result, (uint128));
+        emit AutoLpFlushed(info.id, liquidityAdded);
     }
 
     /// @notice Creator preset: 1% pool fee, 70/10/0/10/10 creator/burn/holders/auto-LP/platform.
@@ -212,10 +240,26 @@ contract EveInstantV4Factory is IUnlockCallback {
 
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(poolManager)) revert NotSelf();
-        (uint8 action, LaunchCall memory call) = abi.decode(data, (uint8, LaunchCall));
-        if (action != 1) revert UnknownAction();
-        (address token, PoolId id, uint256 tokensOut) = _createToken(call);
-        return abi.encode(token, PoolId.unwrap(id), tokensOut);
+        uint8 action = uint8(uint256(bytes32(data[0:32])));
+        if (action == 1) {
+            (, LaunchCall memory call) = abi.decode(data, (uint8, LaunchCall));
+            (address token, PoolId id, uint256 tokensOut) = _createToken(call);
+            return abi.encode(token, PoolId.unwrap(id), tokensOut);
+        }
+        if (action == 2) {
+            (, PoolKey memory key, int24 tickLower, int24 tickUpper, uint256 a0, uint256 a1) =
+                abi.decode(data, (uint8, PoolKey, int24, int24, uint256, uint256));
+            (bool ok, bytes memory ret) = address(autoLpHelper).delegatecall(
+                abi.encodeCall(InstantAutoLpHelper.mintClaimed, (poolManager, hook, key, tickLower, tickUpper, a0, a1))
+            );
+            if (!ok) {
+                assembly ("memory-safe") {
+                    revert(add(ret, 32), mload(ret))
+                }
+            }
+            return ret;
+        }
+        revert UnknownAction();
     }
 
     function _createToken(LaunchCall memory call)
@@ -264,7 +308,8 @@ contract EveInstantV4Factory is IUnlockCallback {
             hooks: IHooks(address(hook))
         });
 
-        (int24 tickLower, int24 tickUpper, uint160 startSqrtPriceX96) = _range(tokenIsCurrency0, call.vq);
+        (int24 tickLower, int24 tickUpper, uint160 startSqrtPriceX96) =
+            autoLpHelper.range(tokenIsCurrency0, call.vq, TICK_SPACING);
 
         poolManager.initialize(key, startSqrtPriceX96);
         id = key.toId();
@@ -277,8 +322,9 @@ contract EveInstantV4Factory is IUnlockCallback {
             }
             LaunchToken18Tracked(token).setSink(holders);
         }
-        // Auto-LP slice accrues on the factory until a donate/flush lands.
         hook.registerPool(key, call.creator, holders, address(this), platformWallet, token, call.split);
+        tickLowerOf[token] = tickLower;
+        tickUpperOf[token] = tickUpper;
 
         uint160 sqrtA = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtB = TickMath.getSqrtPriceAtTick(tickUpper);
@@ -317,40 +363,6 @@ contract EveInstantV4Factory is IUnlockCallback {
         emit TokenLaunched(token, call.quote, call.creator, id, tokenIsCurrency0, call.split.feeBps);
     }
 
-    /// @dev V3 Instant tick frame: one-sided range from the virtual-quote tick to the far
-    ///      usable edge, initialized on the inner tick so the mint stays 100% token.
-    function _range(bool tokenIsCurrency0, uint256 vq)
-        internal
-        pure
-        returns (int24 tickLower, int24 tickUpper, uint160 startSqrt)
-    {
-        int24 ts = TICK_SPACING;
-        tickLower = TickMath.minUsableTick(ts);
-        tickUpper = TickMath.maxUsableTick(ts);
-        if (vq == 0) {
-            // Price on the token-only edge so the mint stays 100% launch token.
-            // token as currency1 must sit on tickUpper (not one spacing inside), or the
-            // last tick is in-range and the mint asks for 1 wei of quote.
-            int24 startTick = tokenIsCurrency0 ? tickLower : tickUpper;
-            return (tickLower, tickUpper, TickMath.getSqrtPriceAtTick(startTick));
-        }
-
-        uint160 idealSqrt = VirtualQuote.sqrtPriceX96(tokenIsCurrency0, vq, VirtualQuote.VIRTUAL_TOKEN_INIT);
-        int24 idealTick = TickMath.getTickAtSqrtPrice(idealSqrt);
-        if (idealTick <= tickLower) idealTick = tickLower + ts;
-        if (idealTick >= tickUpper) idealTick = tickUpper - ts;
-
-        if (tokenIsCurrency0) {
-            tickLower = _floorToSpacing(idealTick, ts);
-            if (tickUpper <= tickLower) tickUpper = tickLower + ts;
-            startSqrt = TickMath.getSqrtPriceAtTick(tickLower);
-        } else {
-            tickUpper = _ceilToSpacing(idealTick, ts);
-            if (tickUpper <= tickLower) tickLower = tickUpper - ts;
-            startSqrt = TickMath.getSqrtPriceAtTick(tickUpper);
-        }
-    }
-
     function _firstBuy(
         PoolKey memory key,
         Currency currency0,
@@ -382,16 +394,5 @@ contract EveInstantV4Factory is IUnlockCallback {
             currency1.take(poolManager, buyer, tokensOut, false);
         }
         if (tokensOut == 0) revert FirstBuyZero();
-    }
-
-    function _floorToSpacing(int24 tick, int24 ts) internal pure returns (int24) {
-        int24 compressed = tick / ts;
-        if (tick < 0 && tick % ts != 0) compressed--;
-        return compressed * ts;
-    }
-
-    function _ceilToSpacing(int24 tick, int24 ts) internal pure returns (int24) {
-        int24 floored = _floorToSpacing(tick, ts);
-        return floored == tick ? tick : floored + ts;
     }
 }

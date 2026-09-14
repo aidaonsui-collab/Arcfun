@@ -205,12 +205,13 @@ contract EveInstantV4Test is Test {
 
         uint256 creatorTok = hook.owed(creator, tokenCurrency);
         uint256 platformTok = hook.owed(platform, tokenCurrency);
-        uint256 autoLpTok = hook.owed(address(factory), tokenCurrency);
+        uint256 autoLpTok = hook.pendingAutoLp(id, tokenCurrency);
         uint256 burnTok = IERC20Like(token).balanceOf(hook.DEAD());
         uint256 totalFeeTok = creatorTok + platformTok + autoLpTok + burnTok;
 
         assertGt(totalFeeTok, 0, "fee should have accrued in the token");
         assertEq(hook.owed(creator, quoteCurrency), 0, "no fee should accrue in quote on a buy");
+        assertEq(hook.owed(address(factory), tokenCurrency), 0, "auto-LP is per-pool, not factory owed");
         assertEq(hook.pendingBurn(id, tokenCurrency), 0, "buy-side burn is in-swap to dead");
         assertEq(hook.pendingBurn(id, quoteCurrency), 0);
 
@@ -228,34 +229,32 @@ contract EveInstantV4Test is Test {
         Currency quoteCurrency = Currency.wrap(address(quote));
         assertEq(
             hook.owed(creator, quoteCurrency) + hook.owed(platform, quoteCurrency)
-                + hook.owed(address(factory), quoteCurrency) + hook.pendingBurn(id, quoteCurrency),
+                + hook.pendingAutoLp(id, quoteCurrency) + hook.pendingBurn(id, quoteCurrency),
             0,
             "sanity: no quote fee from the buy leg"
         );
 
         _sellHalf(token, key, tokenIsCurrency0);
 
-        uint256 quoteOwed = hook.owed(creator, quoteCurrency) + hook.owed(platform, quoteCurrency)
-            + hook.owed(address(factory), quoteCurrency);
+        uint256 quoteOwed = hook.owed(creator, quoteCurrency) + hook.owed(platform, quoteCurrency);
+        uint256 autoLpQuote = hook.pendingAutoLp(id, quoteCurrency);
         uint256 pending = hook.pendingBurn(id, quoteCurrency);
         assertGt(quoteOwed, 0, "sell should tax the quote (output) side");
+        assertGt(autoLpQuote, 0, "sell-side auto-LP accrues per-pool");
         assertGt(pending, 0, "sell-side burn cannot swap in afterSwap");
         assertEq(quote.balanceOf(hook.DEAD()), 0, "quote is not sent to dead");
-
-        uint256 still = hook.flushBurn(key, quoteCurrency);
-        assertEq(still, pending);
-        assertEq(hook.pendingBurn(id, quoteCurrency), pending);
+        assertEq(hook.owed(address(factory), quoteCurrency), 0, "auto-LP is not mixed into factory owed");
     }
 
     function test_scorched_buyBurnsSixtyPercentToDead() public {
-        (address token,, bool tokenIsCurrency0) = _launchSplit(_scorchedSplit(), address(0));
+        (address token, PoolId id, bool tokenIsCurrency0) = _launchSplit(_scorchedSplit(), address(0));
         PoolKey memory key = _key(token, tokenIsCurrency0);
         _buy(key, tokenIsCurrency0, 1_000e6);
 
         Currency tokenCurrency = Currency.wrap(token);
         uint256 creatorTok = hook.owed(creator, tokenCurrency);
         uint256 platformTok = hook.owed(platform, tokenCurrency);
-        uint256 autoLpTok = hook.owed(address(factory), tokenCurrency);
+        uint256 autoLpTok = hook.pendingAutoLp(id, tokenCurrency);
         uint256 burnTok = IERC20Like(token).balanceOf(hook.DEAD());
         uint256 total = creatorTok + platformTok + autoLpTok + burnTok;
         assertGt(total, 0);
@@ -305,14 +304,14 @@ contract EveInstantV4Test is Test {
 
     function testFuzz_buySwap_splitProportionsHoldAtAnySize(uint256 payIn) public {
         payIn = bound(payIn, 1e6, 500_000e6);
-        (address token,, bool tokenIsCurrency0) = _launch();
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
         PoolKey memory key = _key(token, tokenIsCurrency0);
         _buy(key, tokenIsCurrency0, payIn);
 
         Currency tokenCurrency = Currency.wrap(token);
         uint256 creatorTok = hook.owed(creator, tokenCurrency);
         uint256 platformTok = hook.owed(platform, tokenCurrency);
-        uint256 autoLpTok = hook.owed(address(factory), tokenCurrency);
+        uint256 autoLpTok = hook.pendingAutoLp(id, tokenCurrency);
         uint256 burnTok = IERC20Like(token).balanceOf(hook.DEAD());
         uint256 total = creatorTok + platformTok + autoLpTok + burnTok;
         if (total == 0) return;
@@ -496,6 +495,151 @@ contract EveInstantV4Test is Test {
                 : TickMath.maxUsableTick(factory.TICK_SPACING()) - factory.TICK_SPACING()
         );
         assertTrue(sqrtPrice != edge);
+    }
+
+    function _positionLiq(address token, PoolId id) internal view returns (uint128 liq) {
+        (liq,,) = StateLibrary.getPositionInfo(
+            IPoolManager(address(manager)),
+            id,
+            address(factory),
+            factory.tickLowerOf(token),
+            factory.tickUpperOf(token),
+            bytes32(0)
+        );
+    }
+
+    function test_flushAutoLp_noopWhenEmpty() public {
+        (address token,,) = _launch();
+        assertEq(factory.flushAutoLp(token), 0);
+    }
+
+    function test_flushAutoLp_unknownTokenReverts() public {
+        vm.expectRevert(EveInstantV4Factory.ZeroAddress.selector);
+        factory.flushAutoLp(address(0xBEEF));
+    }
+
+    function test_claimAutoLp_onlyFactory() public {
+        (address token,, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        vm.prank(trader);
+        vm.expectRevert(EveFeeHook.NotAutoLp.selector);
+        hook.claimAutoLp(key);
+    }
+
+    function test_flushAutoLp_restowsWhenOnlyBuySide() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+
+        Currency tokenCurrency = Currency.wrap(token);
+        uint256 pending = hook.pendingAutoLp(id, tokenCurrency);
+        assertGt(pending, 0);
+        uint256 factoryTokBefore = IERC20Like(token).balanceOf(address(factory));
+        uint128 liqBefore = _positionLiq(token, id);
+
+        uint128 added = factory.flushAutoLp(token);
+        assertEq(added, 0, "in-range single-sided inventory cannot mint");
+        assertEq(hook.pendingAutoLp(id, tokenCurrency), pending, "restowed");
+        assertEq(IERC20Like(token).balanceOf(address(factory)), factoryTokBefore, "factory does not keep the slice");
+        assertEq(_positionLiq(token, id), liqBefore);
+    }
+
+    function test_flushAutoLp_mintsAfterBuyAndSell() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+        _sellHalf(token, key, tokenIsCurrency0);
+
+        Currency tokenCurrency = Currency.wrap(token);
+        Currency quoteCurrency = Currency.wrap(address(quote));
+        uint256 pendingTok = hook.pendingAutoLp(id, tokenCurrency);
+        uint256 pendingQuote = hook.pendingAutoLp(id, quoteCurrency);
+        assertGt(pendingTok, 0);
+        assertGt(pendingQuote, 0);
+
+        uint128 liqBefore = _positionLiq(token, id);
+        uint128 added = factory.flushAutoLp(token);
+        assertGt(added, 0, "both sides in-range should mint");
+        assertEq(_positionLiq(token, id), liqBefore + added);
+
+        uint256 leftTok = hook.pendingAutoLp(id, tokenCurrency);
+        uint256 leftQuote = hook.pendingAutoLp(id, quoteCurrency);
+        assertTrue(leftTok < pendingTok || leftQuote < pendingQuote, "at least the limiting side is spent");
+        assertLt(IERC20Like(token).balanceOf(address(factory)), factory.TOTAL_SUPPLY() / 100_000);
+        assertEq(quote.balanceOf(address(factory)), 0);
+    }
+
+    function test_flushAutoLp_twoPoolsQuoteIsolated() public {
+        (address tokenA, PoolId idA, bool zA) = _launch();
+        (address tokenB, PoolId idB) = factory.createToken("Other", "OTHR", address(quote), creator);
+        bool zB = tokenB < address(quote);
+
+        _buy(_key(tokenA, zA), zA, 5_000e6);
+        _buy(_key(tokenB, zB), zB, 5_000e6);
+        _sellHalf(tokenA, _key(tokenA, zA), zA);
+        _sellHalf(tokenB, _key(tokenB, zB), zB);
+
+        Currency q = Currency.wrap(address(quote));
+        uint256 pendingA = hook.pendingAutoLp(idA, q);
+        uint256 pendingB = hook.pendingAutoLp(idB, q);
+        assertGt(pendingA, 0);
+        assertGt(pendingB, 0);
+
+        factory.flushAutoLp(tokenA);
+        assertEq(hook.pendingAutoLp(idB, q), pendingB, "pool B quote auto-LP must not mix into A");
+        assertTrue(pendingA > 0);
+    }
+
+    function test_flushQuoteBurn_swapsQuoteToLaunchDead() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+        uint256 deadBefore = IERC20Like(token).balanceOf(hook.DEAD());
+        _sellHalf(token, key, tokenIsCurrency0);
+
+        Currency quoteCurrency = Currency.wrap(address(quote));
+        uint256 pending = hook.pendingBurn(id, quoteCurrency);
+        assertGt(pending, 0);
+        uint256 creatorBefore = hook.owed(creator, Currency.wrap(token));
+
+        vm.prank(trader);
+        uint256 burned = hook.flushQuoteBurn(key, 0);
+        assertGt(burned, 0);
+        assertEq(hook.pendingBurn(id, quoteCurrency), 0);
+        assertEq(IERC20Like(token).balanceOf(hook.DEAD()), deadBefore + burned, "flush is not re-taxed");
+        assertEq(quote.balanceOf(hook.DEAD()), 0, "quote never goes to dead");
+        assertEq(hook.owed(creator, Currency.wrap(token)), creatorBefore, "hook self-swap skips afterSwap");
+    }
+
+    function test_flushQuoteBurn_minOutSlippageRestoresPending() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+        _sellHalf(token, key, tokenIsCurrency0);
+
+        Currency quoteCurrency = Currency.wrap(address(quote));
+        uint256 pending = hook.pendingBurn(id, quoteCurrency);
+        assertGt(pending, 0);
+
+        vm.expectRevert(EveFeeHook.Slippage.selector);
+        hook.flushQuoteBurn(key, type(uint256).max);
+        assertEq(hook.pendingBurn(id, quoteCurrency), pending, "revert restores pendingBurn");
+    }
+
+    function test_flushBurn_quotePathMatchesFlushQuoteBurn() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+        _sellHalf(token, key, tokenIsCurrency0);
+
+        Currency quoteCurrency = Currency.wrap(address(quote));
+        uint256 pending = hook.pendingBurn(id, quoteCurrency);
+        uint256 deadBefore = IERC20Like(token).balanceOf(hook.DEAD());
+        uint256 burned = hook.flushBurn(key, quoteCurrency);
+        assertGt(burned, 0);
+        assertEq(hook.pendingBurn(id, quoteCurrency), 0);
+        assertEq(IERC20Like(token).balanceOf(hook.DEAD()), deadBefore + burned);
+        assertTrue(pending != 0);
     }
 }
 

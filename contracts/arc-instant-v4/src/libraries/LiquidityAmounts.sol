@@ -5,9 +5,8 @@ import {FullMath} from "v4-core/libraries/FullMath.sol";
 import {FixedPoint96} from "v4-core/libraries/FixedPoint96.sol";
 
 /// @notice Copied into src/ (not imported from v4-core's own test/ path) from
-///         v4-core's test/utils/LiquidityAmounts.sol, trimmed to the two functions the factory
-///         actually calls — computing the liquidity for a single-sided (100% one side) full-range
-///         mint given a fixed token amount.
+///         v4-core's test/utils/LiquidityAmounts.sol. Single-sided helpers for the create mint;
+///         `getLiquidityForAmounts` for mixed auto-LP inventory at the current sqrtPrice.
 library LiquidityAmounts {
     function toUint128(uint256 x) private pure returns (uint128 y) {
         require((y = uint128(x)) == x, "liquidity overflow");
@@ -32,5 +31,25 @@ library LiquidityAmounts {
     {
         if (sqrtPriceAX96 > sqrtPriceBX96) (sqrtPriceAX96, sqrtPriceBX96) = (sqrtPriceBX96, sqrtPriceAX96);
         return toUint128(FullMath.mulDiv(amount1, FixedPoint96.Q96, sqrtPriceBX96 - sqrtPriceAX96));
+    }
+
+    /// @notice Max liquidity for `amount0`/`amount1` at the current price, same range as the mint.
+    function getLiquidityForAmounts(
+        uint160 sqrtPriceX96,
+        uint160 sqrtPriceAX96,
+        uint160 sqrtPriceBX96,
+        uint256 amount0,
+        uint256 amount1
+    ) internal pure returns (uint128 liquidity) {
+        if (sqrtPriceAX96 > sqrtPriceBX96) (sqrtPriceAX96, sqrtPriceBX96) = (sqrtPriceBX96, sqrtPriceAX96);
+        if (sqrtPriceX96 <= sqrtPriceAX96) {
+            liquidity = getLiquidityForAmount0(sqrtPriceAX96, sqrtPriceBX96, amount0);
+        } else if (sqrtPriceX96 < sqrtPriceBX96) {
+            uint128 liquidity0 = getLiquidityForAmount0(sqrtPriceX96, sqrtPriceBX96, amount0);
+            uint128 liquidity1 = getLiquidityForAmount1(sqrtPriceAX96, sqrtPriceX96, amount1);
+            liquidity = liquidity0 < liquidity1 ? liquidity0 : liquidity1;
+        } else {
+            liquidity = getLiquidityForAmount1(sqrtPriceAX96, sqrtPriceBX96, amount1);
+        }
     }
 }
