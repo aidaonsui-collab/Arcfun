@@ -3,7 +3,7 @@ import { ARC_EXPLORER } from '@/lib/contracts-arc'
 
 export function Footer() {
   return (
-    <footer className="border-t border-hair mt-8">
+    <footer className="relative z-10 border-t border-hair mt-8">
       <div className="max-w-[1120px] mx-auto px-4 sm:px-6 py-10 flex items-center justify-end gap-5 text-[13px] text-t3">
         <div className="flex items-center gap-5 font-medium text-t2">
           <Link href="/docs" className="hover:text-white">

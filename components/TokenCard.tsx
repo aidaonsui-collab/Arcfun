@@ -1,27 +1,35 @@
+'use client'
+
 import Link from 'next/link'
+import { Check, Copy } from 'lucide-react'
+import { useState, type MouseEvent } from 'react'
 import type { PoolToken } from '@/lib/tokens'
-import { isReflectionToken } from '@/lib/tokens'
+import { isReflectionToken, volumeForWindow } from '@/lib/tokens'
 import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import { ageLabel, changeParts, fmtUsd, sparkPathFromValues, tileGradient } from '@/lib/ui-format'
 import { cdnImage } from '@/lib/cdn-image'
 
-function QuoteMark() {
-  return (
-    <svg viewBox="0 0 16 16" className="size-3.5 shrink-0 text-lime-t" aria-hidden>
-      <circle cx="8" cy="8" r="7" fill="currentColor" />
-      <circle cx="8" cy="8" r="5.2" fill="var(--bg)" />
-      <text
-        x="8"
-        y="11"
-        textAnchor="middle"
-        fontSize="7.5"
-        fontWeight="700"
-        fill="currentColor"
-      >
-        $
-      </text>
-    </svg>
-  )
+const EVE = '0x19209e55049bc613c5cc8b66b7df7824096e78cf'
+const MMF = new Set(['usyc', 'buidl', 'crcl'])
+
+const QUOTE_TINT: Record<string, string> = {
+  usdc: '59 142 239',
+  usyc: '125 211 252',
+  buidl: '226 232 240',
+  crcl: '110 231 183',
+}
+
+function quoteMarkSrc(quote: string): string | null {
+  const id = quote.toLowerCase()
+  if (id === 'usdc') return '/marks/usdc.png'
+  if (id === 'usyc') return '/marks/usyc.png'
+  if (id === 'buidl') return '/marks/buidl.png'
+  if (id === 'crcl') return '/marks/crcl.svg'
+  return null
+}
+
+function isPlatformToken(token: PoolToken): boolean {
+  return (token.coinType || '').toLowerCase() === EVE
 }
 
 export function TokenCard({
@@ -40,85 +48,170 @@ export function TokenCard({
   const img = token.imageUrl || token.logoUrl
   const age = ageLabel(token.createdAt)
   const quote = token.instantMeta?.quote || 'USDC'
+  const quoteKey = quote.toLowerCase()
+  const tint = QUOTE_TINT[quoteKey] || '59 142 239'
+  const mark = quoteMarkSrc(quote)
+  const vol = volumeForWindow(token, '24H')
+  const spark = sparkPathFromValues(token.sparkCloses ?? [])
+  const up = (token.priceChange24h ?? 0) >= 0
   const pct = token.priceChange24h ?? 0
   const pctLabel = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
-  const frame =
-    'group relative block overflow-hidden rounded-[20px] bg-s1 p-5 border border-fun-line transition-[border-color,transform] duration-200 ease-out hover:border-fun hover:z-[3]'
+  const [copied, setCopied] = useState(false)
+  const platform = isPlatformToken(token)
+  const reflect = isReflectionToken(token)
+
+  const copy = (e: MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!address || preview) return
+    void navigator.clipboard.writeText(address).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    })
+  }
 
   const body = (
     <>
-      {img ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          key={`${address}-wm`}
-          src={cdnImage(img, 320)}
-          alt=""
-          className="pointer-events-none absolute -right-6 top-1/2 size-44 -translate-y-1/2 rounded-full object-cover opacity-25 mix-blend-lighten tile-media-in"
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-[46%]" aria-hidden>
+        <div
+          className="absolute inset-0"
+          style={{
+            background: `radial-gradient(ellipse 80% 70% at 80% 50%, rgb(${tint} / 0.16), transparent 70%)`,
+          }}
         />
-      ) : (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute -right-4 top-1/2 -translate-y-1/2 text-[7rem] font-bold leading-none opacity-10"
-          style={{ color: mono }}
-        >
-          {initial}
-        </span>
-      )}
-      <span className="relative flex items-start justify-between">
-        <span
-          className="size-11 rounded-full overflow-hidden shrink-0 flex items-center justify-center border border-hair"
-          style={{ background: img ? undefined : tile }}
-        >
-          {img ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={`${address}-av`}
-              src={cdnImage(img, 96)}
-              alt=""
-              className="size-full object-cover tile-media-in"
-            />
-          ) : (
-            <span className="text-sm font-bold" style={{ color: mono }}>
-              {initial}
-            </span>
-          )}
-        </span>
-      </span>
-      <span className="relative mt-8 block">
-        <span className="block text-xs font-medium tracking-wide text-t3 uppercase">
-          ${token.symbol || 'TOKEN'}
-        </span>
-        <span className="mt-1 block text-[1.85rem] leading-none font-semibold tracking-tight tabular-nums">
-          {fmtUsd(token.marketCap)}
-        </span>
-        <span className="mt-3 flex flex-wrap items-center gap-2 text-xs text-t2">
-          <span className="inline-flex items-center gap-1.5">
-            Paired with
-            <QuoteMark />
-            <span className="text-white/80">{quote}</span>
+        {img ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={`${address}-wm`}
+            src={cdnImage(img, 320)}
+            alt=""
+            className="tile-art tile-media-in absolute inset-0 size-full object-cover"
+          />
+        ) : (
+          <span
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-[6.5rem] font-bold leading-none opacity-[0.12]"
+            style={{ color: mono }}
+          >
+            {initial}
           </span>
-          <span className="text-t3">·</span>
-          <span>{age}</span>
-          {isReflectionToken(token) ? (
-            <span className="px-2 py-0.5 rounded-full bg-s2 border border-hair text-lime-t text-[10px] font-semibold uppercase tracking-wide">
+        )}
+      </div>
+
+      <div className="relative flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span
+            className="size-9 shrink-0 overflow-hidden rounded-full shadow-[0_0_0_1px_rgb(255_255_255_/_0.12)] flex items-center justify-center"
+            style={{ background: img ? undefined : tile }}
+          >
+            {img ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={`${address}-av`}
+                src={cdnImage(img, 96)}
+                alt=""
+                className="size-full object-cover object-center tile-media-in"
+              />
+            ) : (
+              <span className="text-xs font-semibold" style={{ color: mono }}>
+                {initial}
+              </span>
+            )}
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-xs font-medium uppercase tracking-wide text-t3">
+              ${token.symbol || 'TOKEN'}
+            </div>
+            <div className="truncate text-[13px] text-t3">{token.name || 'Unnamed'}</div>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {platform ? (
+            <span className="rounded-full bg-lime/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-lime-t shadow-[0_0_0_1px_rgb(59_142_239_/_0.35)]">
+              Platform token
+            </span>
+          ) : reflect ? (
+            <span className="rounded-full bg-[rgb(124_255_58_/_0.1)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fun shadow-[0_0_0_1px_rgb(124_255_58_/_0.25)]">
               Reflect
             </span>
           ) : null}
-          {token.rewardsHandle ? (
-            <span className="px-2 py-0.5 rounded-full bg-s2 border border-hair text-lime-t text-[10px] font-semibold">
-              @{token.rewardsHandle}
-            </span>
-          ) : null}
+          <button
+            type="button"
+            onClick={copy}
+            className="inline-flex h-7 items-center gap-1 rounded-full bg-white/[0.04] px-2 text-[11px] text-t3 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)] hover:text-white"
+            aria-label="Copy contract address"
+          >
+            {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+            CA
+          </button>
+        </div>
+      </div>
+
+      <div className="relative mt-3 max-w-[70%]">
+        <div className="text-[1.45rem] font-semibold leading-none tracking-tight tabular-nums">
+          {fmtUsd(token.marketCap)}
+        </div>
+        <div className="mt-1 text-[11px] text-t3">market cap</div>
+      </div>
+
+      <div className="relative mt-3 flex flex-wrap items-center gap-1.5 text-xs text-t2">
+        <span>Paired with</span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-white/[0.04] py-0.5 pl-1 pr-2 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
+          {mark ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={mark} alt="" className="size-3.5 rounded-full object-cover" />
+          ) : (
+            <QuoteMark />
+          )}
+          <span className="text-white/90">{quote}</span>
+        </span>
+        {MMF.has(quoteKey) ? (
           <span
-            className="ml-auto tabular-nums font-semibold"
+            className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+            style={{
+              background: `rgb(${tint} / 0.14)`,
+              color: `rgb(${tint})`,
+            }}
+          >
+            MMF
+          </span>
+        ) : null}
+        {token.rewardsHandle ? (
+          <span className="rounded-full bg-s2 px-2 py-0.5 text-[10px] font-semibold text-lime-t shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
+            @{token.rewardsHandle}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="relative mt-3 flex items-end justify-between gap-2">
+        <div className="text-[11px] text-t3">
+          Vol 24h <span className="tabular-nums text-t2">{fmtUsd(vol)}</span>
+          <span
+            className="ml-1.5 font-semibold tabular-nums"
             style={{ color: chg.stroke }}
           >
             {pctLabel}
           </span>
-        </span>
-      </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {spark ? (
+            <svg viewBox="0 0 100 30" className="h-5 w-12 opacity-80" aria-hidden>
+              <path
+                d={spark}
+                fill="none"
+                stroke={up ? 'var(--limeT)' : 'var(--coral)'}
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+            </svg>
+          ) : null}
+          <span className="text-[11px] tabular-nums text-t3">{age} ago</span>
+        </div>
+      </div>
     </>
   )
+
+  const frame = 'token-tile group relative block overflow-hidden rounded-[22px] p-4'
 
   if (preview || !address) {
     return <div className={frame}>{body}</div>
@@ -127,6 +220,18 @@ export function TokenCard({
     <Link href={`/token/${address}`} className={frame}>
       {body}
     </Link>
+  )
+}
+
+function QuoteMark() {
+  return (
+    <svg viewBox="0 0 16 16" className="size-3.5 shrink-0 text-lime-t" aria-hidden>
+      <circle cx="8" cy="8" r="7" fill="currentColor" />
+      <circle cx="8" cy="8" r="5.2" fill="var(--bg)" />
+      <text x="8" y="11" textAnchor="middle" fontSize="7.5" fontWeight="700" fill="currentColor">
+        $
+      </text>
+    </svg>
   )
 }
 
@@ -144,7 +249,7 @@ export function TokenRailCard({ token }: { token: PoolToken }) {
   return (
     <Link
       href={`/token/${address}`}
-      className="flex-none w-[300px] flex items-stretch border border-fun-line rounded-[20px] overflow-hidden bg-s1 hover:border-fun transition-colors"
+      className="token-tile flex-none w-[300px] flex items-stretch rounded-[20px] overflow-hidden"
     >
       <span
         className="relative w-24 shrink-0 flex items-center justify-center"
