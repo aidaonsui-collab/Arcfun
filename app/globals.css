@@ -22,7 +22,7 @@
     --hair2: rgba(255, 255, 255, 0.07);
     --t2: rgba(255, 255, 255, 0.74);
     --t3: rgba(255, 255, 255, 0.48);
-    --bg: #0a0f18;
+    --bg: #070b14;
 
     /* Legacy aliases used by trade panel / older class names */
     --cp-card: var(--s1);
@@ -63,10 +63,6 @@
 
   body {
     background: var(--bg);
-    background-image:
-      radial-gradient(ellipse 90% 55% at 50% -15%, rgba(47, 132, 219, 0.16), transparent 55%),
-      radial-gradient(ellipse 50% 40% at 100% 0%, rgba(126, 192, 247, 0.06), transparent 45%);
-    background-attachment: fixed;
     color: #fff;
     font-family:
       -apple-system,
@@ -219,11 +215,19 @@
   .tape-row,
   .crucible-bar,
   .live-dot,
+  .quote-orbit,
+  .quote-orbit-rev,
   .vault-orbit-spin,
   .vault-orbit-core-dot,
   .vault-orbit-core-ring,
   .vault-orbit-sat {
     animation: none;
+  }
+  .token-tile:hover {
+    transform: none;
+  }
+  .token-tile:hover .tile-art {
+    opacity: 0.34;
   }
   .crucible-xfade {
     transition: none;
@@ -236,6 +240,56 @@
 
 .live-dot {
   animation: livePulse 1.8s ease-in-out infinite;
+}
+
+/* Page atmosphere sits in a fixed canvas; this wash gives depth even before JS. */
+.page-wash {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgb(47 132 219 / 0.18), transparent 58%),
+    radial-gradient(ellipse 40% 30% at 92% 8%, rgb(124 255 58 / 0.05), transparent 50%),
+    radial-gradient(ellipse 45% 35% at 8% 80%, rgb(59 142 239 / 0.07), transparent 55%),
+    var(--bg);
+}
+
+.token-tile {
+  background: linear-gradient(165deg, rgb(18 24 34 / 0.92) 0%, rgb(10 14 22 / 0.88) 100%);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    inset 0 1px 0 rgb(255 255 255 / 0.05);
+  transition:
+    box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.token-tile:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 0 0 1px rgb(124 255 58 / 0.38),
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 18px 40px rgb(0 0 0 / 0.35),
+    0 0 48px rgb(59 142 239 / 0.08);
+}
+
+.tile-art {
+  opacity: 0.34;
+  mix-blend-mode: lighten;
+  mask-image: linear-gradient(to left, #000 28%, transparent 92%);
+  -webkit-mask-image: linear-gradient(to left, #000 28%, transparent 92%);
+  transition: opacity 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.token-tile:hover .tile-art {
+  opacity: 0.48;
+}
+
+.quote-orbit {
+  animation: orbit-spin 28s linear infinite;
+}
+.quote-orbit-rev {
+  animation: orbit-spin 36s linear infinite reverse;
+}
+@keyframes orbit-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes crucible-in {

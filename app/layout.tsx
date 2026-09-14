@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { Providers } from './providers'
 import { SiteHeader } from '@/components/SiteHeader'
 import { Footer } from '@/components/Footer'
+import { Atmosphere } from '@/components/Atmosphere'
 import { Analytics } from '@vercel/analytics/next'
 
 const SITE_URL = (
@@ -55,7 +56,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="text-white antialiased">
+      <body className="page-wash text-white antialiased">
+        <Atmosphere />
         <Providers>
           <SiteHeader />
           {children}

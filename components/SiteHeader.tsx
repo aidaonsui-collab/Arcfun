@@ -104,7 +104,7 @@ export function SiteHeader() {
 
   return (
     <>
-      <header className="fixed top-0 inset-x-0 z-40 h-16 bg-[rgba(10,15,24,0.85)] backdrop-blur-[28px] saturate-150">
+      <header className="fixed top-0 inset-x-0 z-40 h-16 bg-[rgba(7,11,20,0.82)] backdrop-blur-[28px] saturate-150">
         <div className="mx-auto flex h-16 max-w-[1120px] items-center gap-3 px-4 sm:px-6">
         <button
           type="button"
