@@ -112,7 +112,11 @@ contract EveFeeHook is IHooks {
         _;
     }
 
-    constructor(IPoolManager manager_) {
+    /// @param manager_ Uniswap v4 PoolManager.
+    /// @param owner_ Explicit owner. A salted CREATE2 deploy would lock the CREATE2
+    ///        factory as owner if this used msg.sender.
+    constructor(IPoolManager manager_, address owner_) {
+        if (owner_ == address(0)) revert ZeroAddress();
         Hooks.validateHookPermissions(
             IHooks(address(this)),
             Hooks.Permissions({
@@ -133,7 +137,7 @@ contract EveFeeHook is IHooks {
             })
         );
         poolManager = manager_;
-        owner = msg.sender;
+        owner = owner_;
     }
 
     function setFactory(address factory_) external onlyOwner {

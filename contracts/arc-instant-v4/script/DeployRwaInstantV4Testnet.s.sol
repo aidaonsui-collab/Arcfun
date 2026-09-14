@@ -13,13 +13,9 @@ import {HookMiner} from "../test/utils/HookMiner.sol";
  * @title DeployRwaInstantV4Testnet
  * @notice Arc testnet (5042002) throwaway deploy.
  *
- * Deploys a FRESH v4 PoolManager rather than pointing at an existing one — same reasoning as
- * contracts/arc-instant's testnet script uses for Uniswap V3: an address on Arc that looks like
- * it could be the canonical PoolManager (0x8366a39cc670b4001a1121b8f6a443a643e40951 — inferred
- * from watching it hold the LP for a couple of independently-launched tokens, see the session
- * this shipped from) is NOT the same as a confirmed one. Do not hardcode it here until someone
- * has actually verified it against Uniswap's own deployment records for Arc. Pass
- * POOL_MANAGER=0x... to point at a real one once that's done; unset, this deploys its own.
+ * Deploys a FRESH v4 PoolManager by default. Arc mainnet Instant uses Uniswap's official
+ * PoolManager `0x8366a39CC670B4001A1121B8F6A443A643e40951`. Pass POOL_MANAGER=0x... to point
+ * at an existing one on testnet.
  *
  * Env:
  *   PRIVATE_KEY (required)
@@ -28,6 +24,7 @@ import {HookMiner} from "../test/utils/HookMiner.sol";
  */
 contract DeployRwaInstantV4Testnet is Script {
     uint256 internal constant CHAIN_ARC_TESTNET = 5_042_002;
+    address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
     uint160 internal constant REQUIRED_HOOK_FLAGS =
         uint160(Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG);
 
@@ -54,13 +51,15 @@ contract DeployRwaInstantV4Testnet is Script {
             console2.log("PoolManager (fresh)   ", address(manager));
         }
 
-        // Salt-mine the hook address BEFORE broadcasting the real deploy — forge script re-runs
-        // this function during simulation, so `deployer`'s nonce at the moment of the real
-        // CREATE2 call is what matters, not any nonce this dry run consumes.
-        (address predicted, bytes32 salt) =
-            HookMiner.find(deployer, REQUIRED_HOOK_FLAGS, type(EveFeeHook).creationCode, abi.encode(address(manager)));
+        // Salt-mine against Arachnid's CREATE2 deployer (Foundry uses it for `new Foo{salt}`).
+        (address predicted, bytes32 salt) = HookMiner.find(
+            CREATE2_DEPLOYER,
+            REQUIRED_HOOK_FLAGS,
+            type(EveFeeHook).creationCode,
+            abi.encode(address(manager), deployer)
+        );
 
-        EveFeeHook hook = new EveFeeHook{salt: salt}(manager);
+        EveFeeHook hook = new EveFeeHook{salt: salt}(manager, deployer);
         require(address(hook) == predicted, "hook address mismatch - salt mining and deploy sender disagree");
 
         RwaInstantV4Factory factory = new RwaInstantV4Factory(manager, hook, platformWallet);
