@@ -641,6 +641,57 @@ contract EveInstantV4Test is Test {
         assertEq(IERC20Like(token).balanceOf(hook.DEAD()), deadBefore + burned);
         assertTrue(pending != 0);
     }
+
+    function test_unlock_stamps365DayPlatformBeneficiary() public {
+        uint64 t0 = uint64(block.timestamp);
+        (address token,,) = _launch();
+        (uint64 unlockAt, address beneficiary) = factory.lpLock(token);
+        assertEq(beneficiary, platform);
+        assertEq(unlockAt, t0 + factory.LOCK_DURATION());
+        assertEq(factory.LOCK_DURATION(), 365 days);
+    }
+
+    function test_unlock_revertsBefore365() public {
+        (address token,,) = _launch();
+        vm.prank(platform);
+        vm.expectRevert(EveInstantV4Factory.StillLocked.selector);
+        factory.unlockLiquidity(token);
+        vm.warp(block.timestamp + factory.LOCK_DURATION() - 1);
+        vm.prank(platform);
+        vm.expectRevert(EveInstantV4Factory.StillLocked.selector);
+        factory.unlockLiquidity(token);
+    }
+
+    function test_unlock_creatorCannot() public {
+        (address token,,) = _launch();
+        vm.warp(block.timestamp + factory.LOCK_DURATION());
+        vm.prank(creator);
+        vm.expectRevert(EveInstantV4Factory.NotBeneficiary.selector);
+        factory.unlockLiquidity(token);
+        vm.prank(trader);
+        vm.expectRevert(EveInstantV4Factory.NotBeneficiary.selector);
+        factory.unlockLiquidity(token);
+    }
+
+    function test_unlock_platformReclaimsAfter365() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+
+        uint128 liqBefore = _positionLiq(token, id);
+        assertGt(liqBefore, 0);
+        uint256 platTokBefore = IERC20Like(token).balanceOf(platform);
+        uint256 platQuoteBefore = quote.balanceOf(platform);
+
+        vm.warp(block.timestamp + factory.LOCK_DURATION());
+        vm.prank(platform);
+        uint128 removed = factory.unlockLiquidity(token);
+        assertEq(removed, liqBefore);
+        assertEq(_positionLiq(token, id), 0);
+        assertGt(IERC20Like(token).balanceOf(platform), platTokBefore);
+        assertGt(quote.balanceOf(platform), platQuoteBefore);
+        assertEq(quote.balanceOf(address(factory)), 0);
+    }
 }
 
 interface IERC20Like {

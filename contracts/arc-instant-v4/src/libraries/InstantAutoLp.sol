@@ -20,8 +20,8 @@ import {EveFeeHook} from "../EveFeeHook.sol";
 ///         is restowed on the hook for the next flush.
 ///
 ///         `donate` is the wrong primitive here: these pools have LP fee 0, so donated
-///         amounts become collectable fees instead of active liquidity, and the factory
-///         must never poke/remove.
+///         amounts become collectable fees instead of active liquidity. The only remove
+///         is `burnPosition`, gated by the factory's 365-day platform reclaim.
 library InstantAutoLp {
     using CurrencySettler for Currency;
     using StateLibrary for IPoolManager;
@@ -76,6 +76,38 @@ library InstantAutoLp {
         uint256 restow0 = left0 > keep0 ? left0 - keep0 : 0;
         uint256 restow1 = left1 > keep1 ? left1 - keep1 : 0;
         if (restow0 > 0 || restow1 > 0) _restow(hook, key, restow0, restow1);
+    }
+
+    /// @notice Pull the factory-owned position (same ticks / salt 0) and take both sides
+    ///         to `recipient`. Must run via factory `delegatecall` so PoolManager attributes
+    ///         the burn to the factory.
+    function burnPosition(
+        IPoolManager manager,
+        PoolKey memory key,
+        int24 tickLower,
+        int24 tickUpper,
+        address recipient
+    ) internal returns (uint128 liquidity) {
+        if (recipient == address(0)) return 0;
+        (liquidity,,) = manager.getPositionInfo(key.toId(), address(this), tickLower, tickUpper, bytes32(0));
+        if (liquidity == 0) return 0;
+
+        (BalanceDelta delta,) = manager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                liquidityDelta: -int256(uint256(liquidity)),
+                salt: bytes32(0)
+            }),
+            ""
+        );
+        int256 d0 = int256(delta.amount0());
+        int256 d1 = int256(delta.amount1());
+        if (d0 < 0) key.currency0.settle(manager, address(this), (-d0).toUint256(), false);
+        if (d1 < 0) key.currency1.settle(manager, address(this), (-d1).toUint256(), false);
+        if (d0 > 0) key.currency0.take(manager, recipient, d0.toUint256(), false);
+        if (d1 > 0) key.currency1.take(manager, recipient, d1.toUint256(), false);
     }
 
     function _restow(EveFeeHook hook, PoolKey memory key, uint256 a0, uint256 a1) private {

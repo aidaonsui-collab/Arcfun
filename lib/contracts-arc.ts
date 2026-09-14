@@ -436,7 +436,7 @@ export const ARC = {
   /** Uniswap v4 Instant (DeployEveInstantV4 on 5042). */
   INSTANT_V4_FACTORY: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY,
-    '0x32a0AF0B4c423f3485E6eaABE8DA64e631d411E2',
+    '0x0421a4c784ADCD0BB51bF0d108FF76E37bdB1297',
   ),
   INSTANT_V4_HOOK: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_HOOK,
@@ -449,7 +449,7 @@ export const ARC = {
   /** RWA Instant v4 (DeployRwaInstantV4 on 5042). Quote is per-create. */
   INSTANT_V4_RWA_FACTORY: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_RWA_FACTORY,
-    '0x66Ca5b85C31AEBD2082eF12D7f61af37bD4892fc',
+    '0x7f4D81281492D3EBc2629826721223451c20a5Ca',
   ),
   POOL_MANAGER: envAddr(
     process.env.NEXT_PUBLIC_ARC_POOL_MANAGER,
@@ -521,6 +521,10 @@ export const ARC_INSTANT_FACTORY_PREV = '0xd51E6217bb3bC7586866713854Ea75B7BefF1
 export const ARC_INSTANT_LOCKER_MONLOCK = '0x84F486d7254aEDc89986bce392771D88bf5828EA' as Address
 /** Instant factory.lpLocker for the Crucible factory. Collect on CrucibleLock, not here. */
 export const ARC_INSTANT_LOCKER_ADAPTER = '0x9deBd8d2CFa7dA789257146D325Af4094B1c1c5f' as Address
+/** v4 Instant USDC factory before 365-day unlock. Permanent LP. Keep in catalog. */
+export const ARC_INSTANT_V4_FACTORY_PREV = '0x32a0AF0B4c423f3485E6eaABE8DA64e631d411E2' as Address
+/** v4 Instant RWA factory before 365-day unlock. Permanent LP. Keep in catalog. */
+export const ARC_INSTANT_V4_RWA_FACTORY_PREV = '0x66Ca5b85C31AEBD2082eF12D7f61af37bD4892fc' as Address
 
 function uniqAddrs(addrs: readonly (Address | string | undefined | null)[]): Address[] {
   const seen = new Set<string>()
@@ -549,7 +553,12 @@ export function instantCatalogFactories(): Address[] {
 
 /** v4 Instant factories (USDC + RWA). Not mixed into V3 getPool scans. */
 export function instantV4CatalogFactories(): Address[] {
-  return uniqAddrs([ARC.INSTANT_V4_FACTORY, ARC.INSTANT_V4_RWA_FACTORY])
+  return uniqAddrs([
+    ARC.INSTANT_V4_FACTORY,
+    ARC.INSTANT_V4_RWA_FACTORY,
+    ARC_INSTANT_V4_FACTORY_PREV,
+    ARC_INSTANT_V4_RWA_FACTORY_PREV,
+  ])
 }
 
 /**
@@ -592,6 +601,8 @@ export function instantProtocolAddresses(): Address[] {
     ARC.REFLECTION_LOCKER,
     ARC.INSTANT_V4_FACTORY,
     ARC.INSTANT_V4_RWA_FACTORY,
+    ARC_INSTANT_V4_FACTORY_PREV,
+    ARC_INSTANT_V4_RWA_FACTORY_PREV,
     ARC.INSTANT_V4_HOOK,
     ARC.INSTANT_V4_ROUTER,
     ARC.POOL_MANAGER,

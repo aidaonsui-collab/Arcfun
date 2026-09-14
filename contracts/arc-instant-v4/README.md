@@ -42,11 +42,11 @@ so the CREATE2 factory is not locked as owner.
 | --- | --- |
 | Uniswap `PoolManager` | `0x8366a39CC670B4001A1121B8F6A443A643e40951` |
 | `EveFeeHook` | `0xd8F5790094711747ae4083651dDDfcE73699C044` |
-| `EveInstantV4Factory` | `0x32a0AF0B4c423f3485E6eaABE8DA64e631d411E2` |
-| `InstantAutoLpHelper` | `0x2ADAF1983fBF74c2492DE57A397E9d23B04fc1E4` |
+| `EveInstantV4Factory` | `0x0421a4c784ADCD0BB51bF0d108FF76E37bdB1297` |
+| `InstantAutoLpHelper` | `0x232097345561A453160B34021a6974293bA0DdD3` |
 | `EveV4Router` | `0x494715a3923392Dd0fD312B0CC40055679Feaad2` |
-| `BundleSinkDeployer` | `0x123f07b4bc34708B4cfa7663BFd50Cf34C61F0ce` |
-| `RwaInstantV4Factory` | `0x66Ca5b85C31AEBD2082eF12D7f61af37bD4892fc` |
+| `BundleSinkDeployer` | `0x90C261A932e29915DB97fb446e402EBd1438C680` |
+| `RwaInstantV4Factory` | `0x7f4D81281492D3EBc2629826721223451c20a5Ca` |
 
 PoolManager is Uniswap's official Arc address (`Uniswap/contracts` `deployments/json/5042.json`).
 Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
@@ -57,9 +57,10 @@ allowed). BundleSink creation code lives on `BundleSinkDeployer` so the factory 
 EIP-170.
 
 CREATE2-redeployed 2026-09-14 so auto-LP mint (`flushAutoLp`) and quote-burn swap
-(`flushQuoteBurn`) are on this hook. The previous hook `0x9fbA…` / factories `0x9066…` and
-`0x7739…` had no `TokenLaunched` events, so the catalog retargeted rather than keeping them.
-Router `0x4947…` was reused. Flush is permissionless, not automated.
+(`flushQuoteBurn`) are on this hook. Factories above are a second deploy onto that hook
+with a 365-day platform LP reclaim (`unlockLiquidity`). Previous factories `0x32a0…` and
+`0x66Ca…` stay in the catalog (permanent LP, no timer). Router `0x4947…` was reused.
+Flush is permissionless, not automated.
 
 Quote is per-create. Issuer token addresses (USYC / BUIDL / CRCL) are still unset on
 mainnet, so those create cards stay Soon until `NEXT_PUBLIC_ARC_RWA_<ID>` is set.
@@ -153,6 +154,11 @@ retired `RwaFeeHook`, with its own off-chain keeper computing holder balances an
   stays 5 fields). The USDC factory `delegatecall`s `InstantAutoLpHelper` for the mint so its
   runtime stays under EIP-170; the RWA factory inlines the same library (more headroom after
   the BundleSink split).
+- **LP unlock is 365 days, platform-only, new launches only.** At create the factory stamps
+  `lpLock[token] = (now + 365 days, platformWallet)`. After that cliff the beneficiary (or
+  factory owner) can `unlockLiquidity` and take both sides of the factory-owned position,
+  including auto-LP flushed during the year. Creator cannot. Same shape as V3 Instant / MonLock.
+  Factories already live without this function cannot grow it: their positions stay permanent.
 
 ## What's actually proven vs. what's still assumed
 
@@ -164,7 +170,7 @@ against a mock RWA quote (plain and bundle-enabled), and swaps both directions:
 forge test -vv
 ```
 
-59/59 passing across the package (14 for the plain RWA launch path, 33 for the Eve meme/reflect
+64/64 passing across the package (15 for the plain RWA launch path, 37 for the Eve meme/reflect
 factory, 12 for `BundleSink`) — including a 256-run fuzz test that the Eve-factory split holds
 *exactly* to its bps constants across trade sizes, a directional test proving the fee correctly
 lands in the token on a buy and the quote on a sell (v4's specified/unspecified-currency

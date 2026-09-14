@@ -30,9 +30,11 @@ import {EveFeeHook} from "./EveFeeHook.sol";
 ///         Quote is per-create (typically Arc ERC-20 USDC 6dp) so HandlePay and existing
 ///         wallet approvals keep working. Native USDC pairing is a later factory.
 ///
-///         Liquidity is factory-owned inside PoolManager; nothing here can withdraw it.
-///         Auto-LP fee slice is per-pool on the hook; `flushAutoLp` mints it into that
-///         locked position. Holders slice accrues to the address passed at create.
+///         Liquidity is factory-owned inside PoolManager. For 365 days after create only
+///         `flushAutoLp` can change the position (mint). After that the stamped platform
+///         beneficiary (or factory owner) can `unlockLiquidity` and take both sides — same
+///         shape as V3 Instant / MonLock, not a creator reclaim. Auto-LP minted into the
+///         position comes out with the seed. Holders slice accrues to the address passed at create.
 contract EveInstantV4Factory is IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
@@ -47,6 +49,7 @@ contract EveInstantV4Factory is IUnlockCallback {
     uint16 public constant DEFAULT_HOLDERS_BPS = 0;
     uint16 public constant DEFAULT_AUTO_LP_BPS = 1_000;
     uint16 public constant DEFAULT_PLATFORM_BPS = 1_000;
+    uint64 public constant LOCK_DURATION = 365 days;
 
     error ZeroAddress();
     error NotOwner();
@@ -57,6 +60,8 @@ contract EveInstantV4Factory is IUnlockCallback {
     error TransferFailed();
     error FirstBuyZero();
     error FirstBuyTooLarge();
+    error StillLocked();
+    error NotBeneficiary();
 
     struct PoolInfo {
         address token;
@@ -78,6 +83,11 @@ contract EveInstantV4Factory is IUnlockCallback {
         address holders;
     }
 
+    struct LpLock {
+        uint64 unlockAt;
+        address beneficiary;
+    }
+
     event TokenLaunched(
         address indexed token,
         address indexed quote,
@@ -89,6 +99,7 @@ contract EveInstantV4Factory is IUnlockCallback {
     event TokenFirstBuy(address indexed token, address indexed buyer, uint256 quoteIn, uint256 tokensOut);
     event LaunchVirtualQuoteSet(uint256 quote);
     event AutoLpFlushed(PoolId indexed id, uint128 liquidity);
+    event LiquidityUnlocked(PoolId indexed id, address indexed to, uint128 liquidity);
 
     IPoolManager public immutable poolManager;
     EveFeeHook public immutable hook;
@@ -103,6 +114,7 @@ contract EveInstantV4Factory is IUnlockCallback {
     mapping(address => PoolInfo) public poolOf;
     mapping(address => int24) public tickLowerOf;
     mapping(address => int24) public tickUpperOf;
+    mapping(address => LpLock) public lpLock;
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -139,14 +151,7 @@ contract EveInstantV4Factory is IUnlockCallback {
     function flushAutoLp(address token) external returns (uint128 liquidityAdded) {
         PoolInfo memory info = poolOf[token];
         if (info.token == address(0)) revert ZeroAddress();
-        bool tokenIsCurrency0 = token < info.quote;
-        PoolKey memory key = PoolKey({
-            currency0: Currency.wrap(tokenIsCurrency0 ? token : info.quote),
-            currency1: Currency.wrap(tokenIsCurrency0 ? info.quote : token),
-            fee: 0,
-            tickSpacing: TICK_SPACING,
-            hooks: IHooks(address(hook))
-        });
+        PoolKey memory key = _poolKey(token, info);
         (uint256 a0, uint256 a1) = hook.claimAutoLp(key);
         if (a0 == 0 && a1 == 0) return 0;
         bytes memory result = poolManager.unlock(
@@ -154,6 +159,22 @@ contract EveInstantV4Factory is IUnlockCallback {
         );
         liquidityAdded = abi.decode(result, (uint128));
         emit AutoLpFlushed(info.id, liquidityAdded);
+    }
+
+    /// @notice After 365 days, the stamped platform beneficiary (or factory owner) burns
+    ///         the factory-owned position and takes both currencies. Creator cannot.
+    function unlockLiquidity(address token) external returns (uint128 liquidityRemoved) {
+        PoolInfo memory info = poolOf[token];
+        if (info.token == address(0)) revert ZeroAddress();
+        LpLock memory lock = lpLock[token];
+        if (msg.sender != lock.beneficiary && msg.sender != owner) revert NotBeneficiary();
+        if (block.timestamp < lock.unlockAt) revert StillLocked();
+        PoolKey memory key = _poolKey(token, info);
+        bytes memory result = poolManager.unlock(
+            abi.encode(uint8(3), key, tickLowerOf[token], tickUpperOf[token], lock.beneficiary)
+        );
+        liquidityRemoved = abi.decode(result, (uint128));
+        emit LiquidityUnlocked(info.id, lock.beneficiary, liquidityRemoved);
     }
 
     /// @notice Creator preset: 1% pool fee, 70/10/0/10/10 creator/burn/holders/auto-LP/platform.
@@ -249,17 +270,28 @@ contract EveInstantV4Factory is IUnlockCallback {
         if (action == 2) {
             (, PoolKey memory key, int24 tickLower, int24 tickUpper, uint256 a0, uint256 a1) =
                 abi.decode(data, (uint8, PoolKey, int24, int24, uint256, uint256));
-            (bool ok, bytes memory ret) = address(autoLpHelper).delegatecall(
+            return _delegateAutoLp(
                 abi.encodeCall(InstantAutoLpHelper.mintClaimed, (poolManager, hook, key, tickLower, tickUpper, a0, a1))
             );
-            if (!ok) {
-                assembly ("memory-safe") {
-                    revert(add(ret, 32), mload(ret))
-                }
-            }
-            return ret;
+        }
+        if (action == 3) {
+            (, PoolKey memory key, int24 tickLower, int24 tickUpper, address recipient) =
+                abi.decode(data, (uint8, PoolKey, int24, int24, address));
+            return _delegateAutoLp(
+                abi.encodeCall(InstantAutoLpHelper.burnPosition, (poolManager, key, tickLower, tickUpper, recipient))
+            );
         }
         revert UnknownAction();
+    }
+
+    function _delegateAutoLp(bytes memory payload) internal returns (bytes memory ret) {
+        bool ok;
+        (ok, ret) = address(autoLpHelper).delegatecall(payload);
+        if (!ok) {
+            assembly ("memory-safe") {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
     }
 
     function _createToken(LaunchCall memory call)
@@ -325,6 +357,7 @@ contract EveInstantV4Factory is IUnlockCallback {
         hook.registerPool(key, call.creator, holders, address(this), platformWallet, token, call.split);
         tickLowerOf[token] = tickLower;
         tickUpperOf[token] = tickUpper;
+        lpLock[token] = LpLock({unlockAt: uint64(block.timestamp + uint256(LOCK_DURATION)), beneficiary: platformWallet});
 
         uint160 sqrtA = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtB = TickMath.getSqrtPriceAtTick(tickUpper);
@@ -394,5 +427,16 @@ contract EveInstantV4Factory is IUnlockCallback {
             currency1.take(poolManager, buyer, tokensOut, false);
         }
         if (tokensOut == 0) revert FirstBuyZero();
+    }
+
+    function _poolKey(address token, PoolInfo memory info) internal view returns (PoolKey memory) {
+        bool tokenIsCurrency0 = token < info.quote;
+        return PoolKey({
+            currency0: Currency.wrap(tokenIsCurrency0 ? token : info.quote),
+            currency1: Currency.wrap(tokenIsCurrency0 ? info.quote : token),
+            fee: 0,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
     }
 }
