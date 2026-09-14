@@ -4,7 +4,6 @@ pragma solidity ^0.8.26;
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
 import {IERC20Minimal} from "v4-core/interfaces/external/IERC20Minimal.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
@@ -16,23 +15,25 @@ import {LiquidityAmounts} from "./libraries/LiquidityAmounts.sol";
 import {CurrencySettler} from "./libraries/CurrencySettler.sol";
 import {VirtualQuote} from "./libraries/VirtualQuote.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {LaunchToken18} from "./LaunchToken18.sol";
 import {LaunchToken18Tracked} from "./LaunchToken18Tracked.sol";
+import {HolderSink} from "./HolderSink.sol";
 import {EveFeeHook} from "./EveFeeHook.sol";
-import {BundleSink} from "./BundleSink.sol";
 
-/// @title RwaInstantV4Factory
-/// @notice Instant factory quoted against an RWA (USYC, BUIDL, …). Same mint/seed/first-buy
-///         shape as EveInstantV4Factory, registered on the shared EveFeeHook.
+/// @title EveInstantV4Factory
+/// @notice USDC Instant factory for eve.fun meme + reflect launches on Uniswap v4.
+///         Same mint/seed/first-buy shape as `RwaInstantV4Factory`, but the fee split is
+///         per-create (creator / burn / holders / auto-LP / platform) on the shared
+///         `EveFeeHook`. There is no Crucible leg and no $EVE cook on these pools.
 ///
-///         The general `holders` slice (an arbitrary caller-supplied address, like
-///         EveInstantV4Factory allows) is NOT available here — a permissioned MMF token landing
-///         directly in random holders' wallets is a real compliance problem. `createTokenWithBundle`
-///         is the one sanctioned exception: it always deploys a fresh `BundleSink` and wires that
-///         in as `holders` instead, and holders never receive the raw quote token — BundleSink
-///         converts it into the creator's chosen basket first and only pays out the converted
-///         asset (see BundleSink's top comment).
-contract RwaInstantV4Factory is IUnlockCallback {
+///         Quote is per-create (typically Arc ERC-20 USDC 6dp) so HandlePay and existing
+///         wallet approvals keep working. Native USDC pairing is a later factory.
+///
+///         Liquidity is factory-owned inside PoolManager; nothing here can withdraw it.
+///         Auto-LP fee slice accrues to this factory (donate/flush is a follow-up).
+///         Holders slice accrues to the address passed at create (HolderSink later).
+contract EveInstantV4Factory is IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using CurrencySettler for Currency;
@@ -56,8 +57,6 @@ contract RwaInstantV4Factory is IUnlockCallback {
     error TransferFailed();
     error FirstBuyZero();
     error FirstBuyTooLarge();
-    error HoldersNotOnRwa();
-    error BundleRequiresHoldersSlice();
 
     struct PoolInfo {
         address token;
@@ -76,7 +75,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
         uint256 vq;
         uint256 firstBuy;
         EveFeeHook.Split split;
-        bool useBundle;
+        address holders;
     }
 
     event TokenLaunched(
@@ -94,6 +93,8 @@ contract RwaInstantV4Factory is IUnlockCallback {
     EveFeeHook public immutable hook;
     address public owner;
     address public platformWallet;
+    /// @notice Default virtual quote in the quote token's native decimals (5500e6 ≈ $5.5k FDV
+    ///         on a 6dp quote, same as Instant V3 USDC). 0 = open at the usable-tick edge.
     uint256 public launchVirtualQuote;
 
     uint256 private _nonce;
@@ -127,6 +128,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
         emit LaunchVirtualQuoteSet(q);
     }
 
+    /// @notice Creator preset: 1% pool fee, 70/10/0/10/10 creator/burn/holders/auto-LP/platform.
     function defaultSplit() public pure returns (EveFeeHook.Split memory s) {
         s.feeBps = DEFAULT_FEE_BPS;
         s.creatorBps = DEFAULT_CREATOR_BPS;
@@ -140,7 +142,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
         external
         returns (address token, PoolId id)
     {
-        (token, id,,) = _create(name, symbol, quote, creator, 0, 0, defaultSplit(), false);
+        (token, id,) = _create(name, symbol, quote, creator, 0, 0, defaultSplit(), address(0));
     }
 
     function createToken(
@@ -151,10 +153,11 @@ contract RwaInstantV4Factory is IUnlockCallback {
         uint256 launchVirtualQuote_,
         uint256 firstBuyQuoteAmount
     ) external returns (address token, PoolId id, uint256 tokensOut) {
-        (token, id, tokensOut,) =
-            _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, defaultSplit(), false);
+        return _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, defaultSplit(), address(0));
     }
 
+    /// @param split Per-pool fee + 100% allocation. Hook enforces 0.3–3% and 10% platform floor.
+    /// @param holders Destination for the holders slice. Required iff `split.holdersBps > 0`.
     function createToken(
         string calldata name,
         string calldata symbol,
@@ -162,26 +165,10 @@ contract RwaInstantV4Factory is IUnlockCallback {
         address creator,
         uint256 launchVirtualQuote_,
         uint256 firstBuyQuoteAmount,
-        EveFeeHook.Split calldata split
+        EveFeeHook.Split calldata split,
+        address holders
     ) external returns (address token, PoolId id, uint256 tokensOut) {
-        (token, id, tokensOut,) =
-            _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, split, false);
-    }
-
-    /// @notice The one way to get a holders slice on an RWA launch: `split.holdersBps` must be
-    ///         > 0, and this always deploys a fresh `BundleSink` (never a caller-supplied address
-    ///         — see the contract top comment for why). Configure what it pays out via
-    ///         `BundleSink.setBasket` after launch.
-    function createTokenWithBundle(
-        string calldata name,
-        string calldata symbol,
-        address quote,
-        address creator,
-        uint256 launchVirtualQuote_,
-        uint256 firstBuyQuoteAmount,
-        EveFeeHook.Split calldata split
-    ) external returns (address token, PoolId id, uint256 tokensOut, address bundleSink) {
-        return _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, split, true);
+        return _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, split, holders);
     }
 
     function _create(
@@ -192,11 +179,9 @@ contract RwaInstantV4Factory is IUnlockCallback {
         uint256 launchVirtualQuote_,
         uint256 firstBuyQuoteAmount,
         EveFeeHook.Split memory split,
-        bool useBundle
-    ) internal returns (address token, PoolId id, uint256 tokensOut, address bundleSink) {
+        address holders
+    ) internal returns (address token, PoolId id, uint256 tokensOut) {
         if (quote == address(0) || creator == address(0)) revert ZeroAddress();
-        if (split.holdersBps != 0 && !useBundle) revert HoldersNotOnRwa();
-        if (useBundle && split.holdersBps == 0) revert BundleRequiresHoldersSlice();
         if (firstBuyQuoteAmount > uint256(type(int256).max)) revert FirstBuyTooLarge();
         uint256 vq = launchVirtualQuote_ == 0 ? launchVirtualQuote : launchVirtualQuote_;
         if (firstBuyQuoteAmount > 0) {
@@ -212,11 +197,11 @@ contract RwaInstantV4Factory is IUnlockCallback {
             vq: vq,
             firstBuy: firstBuyQuoteAmount,
             split: split,
-            useBundle: useBundle
+            holders: holders
         });
         bytes memory result = poolManager.unlock(abi.encode(uint8(1), call));
         bytes32 idBytes;
-        (token, idBytes, tokensOut, bundleSink) = abi.decode(result, (address, bytes32, uint256, address));
+        (token, idBytes, tokensOut) = abi.decode(result, (address, bytes32, uint256));
         id = PoolId.wrap(idBytes);
         uint256 leftover = IERC20Minimal(quote).balanceOf(address(this));
         if (leftover > 0) {
@@ -229,13 +214,13 @@ contract RwaInstantV4Factory is IUnlockCallback {
         if (msg.sender != address(poolManager)) revert NotSelf();
         (uint8 action, LaunchCall memory call) = abi.decode(data, (uint8, LaunchCall));
         if (action != 1) revert UnknownAction();
-        (address token, PoolId id, uint256 tokensOut, address bundleSink) = _createToken(call);
-        return abi.encode(token, PoolId.unwrap(id), tokensOut, bundleSink);
+        (address token, PoolId id, uint256 tokensOut) = _createToken(call);
+        return abi.encode(token, PoolId.unwrap(id), tokensOut);
     }
 
     function _createToken(LaunchCall memory call)
         internal
-        returns (address token, PoolId id, uint256 tokensOut, address bundleSink)
+        returns (address token, PoolId id, uint256 tokensOut)
     {
         bytes32 salt = keccak256(
             abi.encode(
@@ -248,16 +233,18 @@ contract RwaInstantV4Factory is IUnlockCallback {
                 call.split.feeBps,
                 call.split.creatorBps,
                 call.split.burnBps,
+                call.split.holdersBps,
                 call.split.autoLpBps,
                 call.split.platformBps,
-                call.useBundle,
+                call.holders,
                 _nonce++,
                 block.chainid
             )
         );
-        if (call.useBundle) {
-            LaunchToken18Tracked t = new LaunchToken18Tracked{salt: salt}(call.name, call.symbol, address(this));
-            token = address(t);
+        bool reflect = call.split.holdersBps > 0;
+        if (reflect) {
+            LaunchToken18Tracked tracked = new LaunchToken18Tracked{salt: salt}(call.name, call.symbol, address(this));
+            token = address(tracked);
         } else {
             LaunchToken18 t = new LaunchToken18{salt: salt}(call.name, call.symbol, address(this));
             token = address(t);
@@ -278,16 +265,19 @@ contract RwaInstantV4Factory is IUnlockCallback {
         });
 
         (int24 tickLower, int24 tickUpper, uint160 startSqrtPriceX96) = _range(tokenIsCurrency0, call.vq);
+
         poolManager.initialize(key, startSqrtPriceX96);
         id = key.toId();
 
-        address holders = address(0);
-        if (call.useBundle) {
-            BundleSink sink = new BundleSink(hook, poolManager, IERC20(token), call.creator, address(this));
-            bundleSink = address(sink);
-            holders = bundleSink;
+        address holders = call.holders;
+        if (reflect) {
+            if (holders == address(0)) {
+                HolderSink sink = new HolderSink(hook, IERC20(token), call.quote, address(this));
+                holders = address(sink);
+            }
             LaunchToken18Tracked(token).setSink(holders);
         }
+        // Auto-LP slice accrues on the factory until a donate/flush lands.
         hook.registerPool(key, call.creator, holders, address(this), platformWallet, token, call.split);
 
         uint160 sqrtA = TickMath.getSqrtPriceAtTick(tickLower);
@@ -317,10 +307,18 @@ contract RwaInstantV4Factory is IUnlockCallback {
             emit TokenFirstBuy(token, call.payer, call.firstBuy, tokensOut);
         }
 
-        poolOf[token] = PoolInfo({token: token, quote: call.quote, creator: call.creator, holders: holders, id: id});
+        poolOf[token] = PoolInfo({
+            token: token,
+            quote: call.quote,
+            creator: call.creator,
+            holders: holders,
+            id: id
+        });
         emit TokenLaunched(token, call.quote, call.creator, id, tokenIsCurrency0, call.split.feeBps);
     }
 
+    /// @dev V3 Instant tick frame: one-sided range from the virtual-quote tick to the far
+    ///      usable edge, initialized on the inner tick so the mint stays 100% token.
     function _range(bool tokenIsCurrency0, uint256 vq)
         internal
         pure
@@ -330,6 +328,9 @@ contract RwaInstantV4Factory is IUnlockCallback {
         tickLower = TickMath.minUsableTick(ts);
         tickUpper = TickMath.maxUsableTick(ts);
         if (vq == 0) {
+            // Price on the token-only edge so the mint stays 100% launch token.
+            // token as currency1 must sit on tickUpper (not one spacing inside), or the
+            // last tick is in-range and the mint asks for 1 wei of quote.
             int24 startTick = tokenIsCurrency0 ? tickLower : tickUpper;
             return (tickLower, tickUpper, TickMath.getSqrtPriceAtTick(startTick));
         }

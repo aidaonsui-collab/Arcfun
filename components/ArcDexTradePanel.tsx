@@ -8,7 +8,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useAccount, useConnectorClient, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi, formatUnits, type Address } from 'viem'
 import { Loader2, AlertCircle, CheckCircle, ExternalLink, ArrowDownUp } from 'lucide-react'
-import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_MAX_APPROVAL, ARC_SWAP_GAS } from '@/lib/contracts-arc'
+import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_MAX_APPROVAL, ARC_SWAP_GAS, arcPublicClient } from '@/lib/contracts-arc'
+import { buildEveV4Swap, readEveV4Pool, type EveV4PoolInfo } from '@/lib/arc-v4-swap'
 import {
   arcSwapConfigured,
   arcSwapSpender,
@@ -81,12 +82,26 @@ export function ArcDexTradePanel({
   const [statusMsg, setStatusMsg] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>()
+  const [v4Pool, setV4Pool] = useState<EveV4PoolInfo | null>(null)
   const submitLock = useRef(false)
 
   const { isSuccess: mined } = useWaitForTransactionReceipt({ hash: txHash })
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
-  const swapOn = arcSwapConfigured()
-  const spender = arcSwapSpender(mode)
+  const isV4 = Boolean(v4Pool)
+  const swapOn = isV4
+    ? Boolean(ARC.INSTANT_V4_ROUTER && ARC.INSTANT_V4_ROUTER !== '0x0000000000000000000000000000000000000000')
+    : arcSwapConfigured()
+  const spender = isV4 ? ARC.INSTANT_V4_ROUTER : arcSwapSpender(mode)
+
+  useEffect(() => {
+    let cancelled = false
+    void readEveV4Pool(token, arcPublicClient()).then((info) => {
+      if (!cancelled) setV4Pool(info)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [token])
   const refCode = mode === 'buy' ? getIncomingReferralCode() : ''
   const { tile, mono } = tileGradient(token)
   const initial = (symbol || '?').charAt(0).toUpperCase()
@@ -145,6 +160,12 @@ export function ArcDexTradePanel({
       try {
         const ref = mode === 'buy' ? getIncomingReferralCode() : ''
         // Wallet-first, same as RadarDEX / MAX. Server Infura is often quota-dead.
+        if (isV4) {
+          if (cancelled) return
+          setEstOut(1n)
+          setError(null)
+          return
+        }
         if (wallet) {
           const local =
             mode === 'buy'
@@ -195,7 +216,7 @@ export function ArcDexTradePanel({
       cancelled = true
       clearTimeout(t)
     }
-  }, [amount, mode, token, swapOn, wallet, tokDec])
+  }, [amount, mode, token, swapOn, wallet, tokDec, isV4])
 
   const needApprove = (() => {
     if (!amount || Number(amount) <= 0) return false
@@ -222,19 +243,42 @@ export function ArcDexTradePanel({
           gas: ARC_ERC20_APPROVE_GAS,
         })
         void refetchAllowance()
-        if (estOut == null || estOut <= 0n) {
+        if (!isV4 && (estOut == null || estOut <= 0n)) {
           setStatusMsg('Approved. Waiting for a quote…')
           setBusy(false)
           submitLock.current = false
           return
         }
       }
-      if (estOut == null || estOut <= 0n) {
+      if (!isV4 && (estOut == null || estOut <= 0n)) {
         throw new Error('No quote yet. Wait a moment or try a smaller amount.')
       }
-      if (mode === 'buy') {
+      const quoted = estOut && estOut > 0n ? estOut : 1n
+      if (isV4 && v4Pool) {
+        const inAmt = mode === 'buy' ? parseUsdc(amount) : parseToken(amount, tokDec)
+        const minOut = 1n
+        const zeroForOne = mode === 'buy' ? !v4Pool.tokenIsCurrency0 : v4Pool.tokenIsCurrency0
+        setStatusMsg('Confirm in wallet…')
+        const call = buildEveV4Swap({
+          key: v4Pool.key,
+          zeroForOne,
+          amountIn: inAmt,
+          minOut,
+          recipient: address,
+        })
+        const hash = await writeContractAsync({
+          address: call.address,
+          abi: call.abi as never,
+          functionName: call.functionName as never,
+          args: call.args as never,
+          chainId: call.chainId,
+          gas: ARC_SWAP_GAS,
+        })
+        setTxHash(hash)
+        setStatusMsg('Confirming…')
+      } else if (mode === 'buy') {
         const inAmt = parseUsdc(amount)
-        const minOut = minOutFromSlippage(estOut, SLIPPAGE_BPS)
+        const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
         setStatusMsg('Confirm in wallet…')
         // Same tier the quote resolved — cached, so this is not an extra RPC round trip.
         const poolFee = (await findArcPoolFee(token, wallet)) ?? undefined
@@ -252,7 +296,7 @@ export function ArcDexTradePanel({
         setStatusMsg('Confirming…')
       } else {
         const inAmt = parseToken(amount, tokDec)
-        const minOut = minOutFromSlippage(estOut, SLIPPAGE_BPS)
+        const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
         setStatusMsg('Confirm in wallet…')
         const poolFee = (await findArcPoolFee(token, wallet)) ?? undefined
         const call = buildArcSell(token, inAmt, minOut, address, poolFee)

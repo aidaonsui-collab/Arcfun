@@ -17,6 +17,8 @@ import {
   arcInstantEnabled,
   arcReflectionEnabled,
   arcLaunchesEnabled,
+  arcInstantV4UiEnabled,
+  arcInstantV4Enabled,
   arcCreationFeeWeiFor,
   arcPublicClient,
 } from '@/lib/contracts-arc'
@@ -24,7 +26,18 @@ import {
   buildCreateTokenMemeInstantArc,
   parseArcQuote,
 } from '@/lib/arc-instant-launchpad'
+import { buildCreateTokenEveV4 } from '@/lib/eve-instant-v4-launchpad'
 import { liveRwaQuoteAssets, pendingRwaQuoteAssets, rwaAssetById } from '@/lib/arc-rwa-assets'
+import { BundleBasketCard } from '@/components/BundleBasketCard'
+import {
+  RWA_V4_FACTORY_ABI,
+  basketValid,
+  buildCreateTokenWithBundle,
+  buildSetBasket,
+  rwaBundleFactoryReady,
+  type BasketRow,
+  type BundlePayoutMode,
+} from '@/lib/rwa-bundle'
 import {
   buildCreateTokenReflectionArc,
   ARC_REFLECTION_CREATE_GAS,
@@ -43,11 +56,28 @@ import {
 import { uploadImage } from '@/lib/upload-image'
 import { fmtUsd } from '@/lib/ui-format'
 import { TokenCard } from '@/components/TokenCard'
+import { FeeSplitCard } from '@/components/FeeSplitCard'
+import {
+  FEE_SPLIT_PRESETS,
+  MIN_REFLECT_HOLDERS_BPS,
+  foldHoldersIntoCreator,
+  splitValid,
+  type FeeSplit,
+} from '@/lib/eve-fee-split'
 import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 import type { PoolToken } from '@/lib/tokens'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
 
-type Step = 'idle' | 'uploading' | 'vault' | 'approving' | 'creating' | 'confirming' | 'registering' | 'done'
+type Step =
+  | 'idle'
+  | 'uploading'
+  | 'vault'
+  | 'approving'
+  | 'creating'
+  | 'confirming'
+  | 'basket'
+  | 'registering'
+  | 'done'
 type RewardsMode = 'wallet' | 'handle'
 type LaunchType = 'instant' | 'reflection'
 
@@ -65,6 +95,23 @@ const LAUNCH_TYPES: {
     key: 'reflection',
     title: 'Reflect',
     body: 'Holders earn 20% of the quote-fee leg. Crucible is the $EVE holder reward.',
+  },
+]
+
+const LAUNCH_TYPES_V4: {
+  key: LaunchType
+  title: string
+  body: string
+}[] = [
+  {
+    key: 'instant',
+    title: 'Meme',
+    body: 'Tradable from block one. You pick the pool fee and where it goes.',
+  },
+  {
+    key: 'reflection',
+    title: 'Reflect',
+    body: 'Holders take a cut of every swap. At least 20% on the fee card.',
   },
 ]
 
@@ -87,6 +134,11 @@ export function ArcCreateForm({
   const [launchType, setLaunchType] = useState<LaunchType>('instant')
   /** Instant quote asset. `usdc` is the live factory; an RWA id is plug-and-play. */
   const [quoteId, setQuoteId] = useState('usdc')
+  const [feeSplit, setFeeSplit] = useState<FeeSplit>(FEE_SPLIT_PRESETS.creator)
+  const [feeOpen, setFeeOpen] = useState(false)
+  const [bundleOn, setBundleOn] = useState(false)
+  const [bundleMode, setBundleMode] = useState<BundlePayoutMode>('all')
+  const [basketRows, setBasketRows] = useState<BasketRow[]>([])
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
   const [description, setDescription] = useState('')
@@ -115,6 +167,11 @@ export function ArcCreateForm({
     token: Address
     payload: Record<string, unknown>
   } | null>(null)
+  const [pendingBasket, setPendingBasket] = useState<{
+    token: Address
+    sink: Address
+    quote: Address
+  } | null>(null)
   const [registerError, setRegisterError] = useState<string | null>(null)
   const [registering, setRegistering] = useState(false)
 
@@ -130,6 +187,27 @@ export function ArcCreateForm({
   const rwaQuote = quoteId !== 'usdc' ? rwaAssetById(quoteId) : null
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
   const isReflection = launchType === 'reflection'
+  const v4Ui = arcInstantV4UiEnabled()
+  const v4Live = arcInstantV4Enabled()
+  const bundleLive = Boolean(
+    v4Live &&
+      rwaQuote &&
+      rwaBundleFactoryReady(rwaQuote.factory) &&
+      (rwaQuote.factory as string).toLowerCase() !== ARC.INSTANT_FACTORY.toLowerCase(),
+  )
+  const hideHolders = Boolean(rwaQuote) && !bundleOn
+  const minHoldersBps = isReflection
+    ? MIN_REFLECT_HOLDERS_BPS
+    : bundleOn
+      ? 100
+      : 0
+  const feeOk = !v4Ui || splitValid(feeSplit, { hideHolders, minHoldersBps }).ok
+  const basketCheck = bundleOn
+    ? basketValid(basketRows, {
+        quote: ((rwaQuote?.address as Address) || ARC.USDC) as Address,
+        mode: bundleMode,
+      })
+    : { ok: true, reason: null as string | null }
   const handleNorm = normaliseXHandle(rewardsHandle)
   const handleMode = payToHandle && rewardsMode === 'handle'
   const rewardsOk = handleMode
@@ -222,7 +300,7 @@ export function ArcCreateForm({
       setError('Token launches are temporarily paused — check back soon.')
       return
     }
-    if (isReflection && !reflectionLive) {
+    if (isReflection && !v4Live && !reflectionLive) {
       setError('Reflection factory isn’t live on Arc yet — pick Meme Launch to ship today.')
       return
     }
@@ -234,7 +312,7 @@ export function ArcCreateForm({
       setError('Rewards wallet must be a valid 0x address (or leave blank to use your wallet).')
       return
     }
-    if (isReflection && !rewardTokenOk) {
+    if (isReflection && !v4Live && !rewardTokenOk) {
       setError('Reward token must be a valid ERC-20 address (e.g. Arc USDC).')
       return
     }
@@ -260,7 +338,7 @@ export function ArcCreateForm({
           ? (rewardsWallet.trim() as Address)
           : null
 
-      if (handleMode && handleNorm) {
+      if (handleMode && handleNorm && !bundleOn) {
         setStep('vault')
         const existing = await readHandlePayVaultOf(handleNorm)
         if (!existing || /^0x0+$/i.test(existing)) {
@@ -288,11 +366,16 @@ export function ArcCreateForm({
       const quoteDecimals = rwaQuote?.decimals || 6
       const firstBuyQuote =
         buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcQuote(firstBuy, quoteDecimals) : 0n
-      const factory = isReflection
-        ? ARC.REFLECTION_FACTORY
-        : rwaQuote?.factory
+      const factory =
+        bundleOn && bundleLive && rwaQuote?.factory
           ? (rwaQuote.factory as Address)
-          : ARC.INSTANT_FACTORY
+          : v4Live
+            ? ARC.INSTANT_V4_FACTORY
+            : isReflection
+              ? ARC.REFLECTION_FACTORY
+              : rwaQuote?.factory
+                ? (rwaQuote.factory as Address)
+                : ARC.INSTANT_FACTORY
       const quoteToken = (rwaQuote?.address as Address) || ARC.USDC
 
       if (firstBuyQuote > 0n) {
@@ -314,7 +397,85 @@ export function ArcCreateForm({
         }
       }
 
-      if (isReflection) {
+      if (v4Live && bundleOn && bundleLive) {
+        setStep('creating')
+        const creator = address
+        const call = buildCreateTokenWithBundle({
+          factory,
+          name: name.trim(),
+          symbol: symbol.trim(),
+          quote: quoteToken,
+          creator,
+          firstBuyQuoteRaw: firstBuyQuote,
+          split: feeSplit,
+        })
+        hash = await writeContractAsync({
+          address: call.address,
+          abi: call.abi as never,
+          functionName: call.functionName as never,
+          args: call.args as never,
+          chainId: call.chainId,
+          gas: ARC_INSTANT_CREATE_GAS,
+        })
+        setStep('confirming')
+        const created = await waitArcCreateConfirmed(hash)
+        token = created.token
+        pool = created.pool
+        const row = (await arcPublicClient().readContract({
+          address: factory,
+          abi: RWA_V4_FACTORY_ABI,
+          functionName: 'poolOf',
+          args: [token],
+        })) as readonly [Address, Address, Address, Address, `0x${string}`]
+        const sink = row[3]
+        if (!sink || /^0x0+$/i.test(sink)) {
+          throw new Error('Token launched but the bundle sink address was missing.')
+        }
+        setStep('basket')
+        try {
+          const basketCall = buildSetBasket({
+            sink,
+            rows: basketRows,
+            quote: quoteToken,
+            mode: bundleMode,
+          })
+          const basketHash = await writeContractAsync({
+            address: basketCall.address,
+            abi: basketCall.abi as never,
+            functionName: basketCall.functionName as never,
+            args: basketCall.args as never,
+            chainId: basketCall.chainId,
+            gas: 1_200_000n,
+          })
+          await waitArcTxConfirmed(basketHash)
+        } catch (e) {
+          setPendingBasket({ token, sink, quote: quoteToken })
+          throw e
+        }
+      } else if (v4Live) {
+        setStep('creating')
+        const creator = rewardsAddr || address
+        const call = buildCreateTokenEveV4({
+          name: name.trim(),
+          symbol: symbol.trim(),
+          quote: quoteToken,
+          creator,
+          firstBuyQuoteRaw: firstBuyQuote,
+          split: feeSplit,
+        })
+        hash = await writeContractAsync({
+          address: call.address,
+          abi: call.abi as never,
+          functionName: call.functionName as never,
+          args: call.args as never,
+          chainId: call.chainId,
+          gas: ARC_INSTANT_CREATE_GAS,
+        })
+        setStep('confirming')
+        const created = await waitArcCreateConfirmed(hash)
+        token = created.token
+        pool = created.pool
+      } else if (isReflection) {
         setStep('creating')
         const call = buildCreateTokenReflectionArc(
           name.trim(),
@@ -375,7 +536,12 @@ export function ArcCreateForm({
         await fetch('/api/arc/register/identity', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: getAddress(token), pool: pool || '' }),
+          body: JSON.stringify({
+            token: getAddress(token),
+            pool: pool || '',
+            dexVenue: v4Live ? 'v4' : 'v3',
+            feeBps: feeSplit.feeBps,
+          }),
         })
       } catch {
         /* purely a cache warm — every reader already falls back to the same chain reads */
@@ -431,9 +597,14 @@ export function ArcCreateForm({
     // just retrying the metadata save the banner is there for.
     !pendingRegister &&
     rewardsOk &&
-    (isReflection
-      ? reflectionLive && rewardTokenOk
-      : configured)
+    feeOk &&
+    !pendingBasket &&
+    (!bundleOn || (bundleLive && basketCheck.ok)) &&
+    (v4Live
+      ? true
+      : isReflection
+        ? reflectionLive && rewardTokenOk
+        : configured)
 
   if (!configured && !reflectionLive) {
     return (
@@ -449,7 +620,7 @@ export function ArcCreateForm({
     : rewardsWallet.trim() && isAddress(rewardsWallet.trim() as Address)
       ? `${rewardsWallet.trim().slice(0, 6)}…${rewardsWallet.trim().slice(-4)}`
       : 'Your wallet'
-  const feeUsd = Number(arcCreationFeeWeiFor(address)) / 1e18
+  const feeUsd = v4Live ? 0 : Number(arcCreationFeeWeiFor(address)) / 1e18
   const buyUsd = buyAtLaunch ? Number(firstBuy) || 0 : 0
   const payUsd = feeUsd + buyUsd
   const walletUsd =
@@ -519,7 +690,7 @@ export function ArcCreateForm({
     <div className={compact ? 'hidden' : ''}>
       <div className="mb-2 text-xs text-t3">Type</div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {LAUNCH_TYPES.map((lt) => (
+      {(v4Ui ? LAUNCH_TYPES_V4 : LAUNCH_TYPES).map((lt) => (
         <TypeCard
           key={lt.key}
           active={launchType === lt.key && (lt.key !== 'instant' || quoteId === 'usdc')}
@@ -532,6 +703,9 @@ export function ArcCreateForm({
               ? () => {
                   setLaunchType(lt.key)
                   setQuoteId('usdc')
+                  setBundleOn(false)
+                  if (lt.key === 'reflection') setFeeSplit(FEE_SPLIT_PRESETS.reflect)
+                  else if (isReflection) setFeeSplit(FEE_SPLIT_PRESETS.creator)
                 }
               : undefined
           }
@@ -545,11 +719,15 @@ export function ArcCreateForm({
           body={
             a.permissioned
               ? `Instant TOKEN/${a.symbol}. Permissioned — wallet must be allowlisted.`
-              : `Same Instant mint + LP lock, quoted in ${a.symbol}.`
+              : v4Ui
+                ? `Same Instant mint + LP lock, quoted in ${a.symbol}. Optional holder basket.`
+                : `Same Instant mint + LP lock, quoted in ${a.symbol}.`
           }
           onClick={() => {
             setLaunchType('instant')
             setQuoteId(a.id)
+            setBundleOn(false)
+            setFeeSplit(foldHoldersIntoCreator(feeSplit))
           }}
         />
       ))}
@@ -573,6 +751,42 @@ export function ArcCreateForm({
 
         {typePicker}
 
+        {v4Ui && launchesLive ? (
+          <div className="mt-3 space-y-3">
+            <FeeSplitCard
+              split={feeSplit}
+              onChange={setFeeSplit}
+              hideHolders={hideHolders}
+              minHoldersBps={minHoldersBps}
+              preview={!v4Live}
+              open={feeOpen}
+              onOpenChange={setFeeOpen}
+            />
+            {rwaQuote ? (
+              <BundleBasketCard
+                enabled={bundleOn}
+                onEnabled={(on) => {
+                  setBundleOn(on)
+                  if (on) {
+                    setRewardsMode('wallet')
+                    if (feeSplit.holdersBps === 0) setFeeSplit(FEE_SPLIT_PRESETS.reflect)
+                  } else {
+                    setFeeSplit(foldHoldersIntoCreator(feeSplit))
+                  }
+                }}
+                mode={bundleMode}
+                onMode={setBundleMode}
+                rows={basketRows}
+                onRows={setBasketRows}
+                quoteId={rwaQuote.id}
+                quoteSymbol={quoteSymbol}
+                quoteAddress={(rwaQuote.address as string) || ''}
+                preview={!bundleLive}
+              />
+            ) : null}
+          </div>
+        ) : null}
+
         {!launchesLive ? (
           <div className="mt-6 rounded-[22px] border border-hair bg-s1 px-5 py-6 text-center">
             <p className="m-0 text-[15px] font-semibold tracking-tightish text-white">
@@ -585,9 +799,19 @@ export function ArcCreateForm({
           </div>
         ) : (
           <>
-            {isReflection && (
+            {isReflection && !v4Live && (
               <div className="mt-3 p-5 rounded-2xl bg-s1 border border-lime-line space-y-4">
                 <div className="flex flex-col gap-1">
+                  {v4Ui ? (
+                    <>
+                      <span className="text-[15px] font-semibold tracking-tightish">Holder reward token</span>
+                      <span className="text-[13px] text-t2 leading-snug">
+                        Holders slice is set on the fee card. This address is what they earn when
+                        reflect() runs on the live Instant locker.
+                      </span>
+                    </>
+                  ) : (
+                    <>
                   <span className="text-[15px] font-semibold tracking-tightish">LP fee split</span>
                   <span className="text-[13px] text-t2 leading-snug">
                     Quote-side LP fees: <strong className="text-white">20% holders</strong> ·{' '}
@@ -597,6 +821,8 @@ export function ArcCreateForm({
                     <strong className="text-white">10% platform</strong>. Referrals pay 0.05% on
                     eve.fun buys, not from this collect. Launch-token fees burn.
                   </span>
+                    </>
+                  )}
                   {!reflectionLive ? (
                     <span className="text-[12px] text-coral mt-1">
                       Reflection factory not configured — switch to Meme Launch.
@@ -694,7 +920,7 @@ export function ArcCreateForm({
 
             <div>
               <div className="mb-2 text-xs text-t3">Creator rewards (optional)</div>
-              {payToHandle ? (
+              {payToHandle && !bundleOn ? (
                 <div className="mb-3 grid grid-cols-2 gap-1 p-1 rounded-2xl bg-s1 border border-hair">
                   {(
                     [
@@ -751,7 +977,8 @@ export function ArcCreateForm({
                     className={`${FIELD} font-mono`}
                   />
                   <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
-                    Where your share of LP fees is paid (Instant: ~70% of quote-side fees). Defaults to
+                    Where the creator slice of the pool fee is paid
+                    {v4Ui ? '' : ' (Instant: ~70% of quote-side fees)'}. Defaults to
                     the wallet that signs the create tx. Rewards to {rewardsPreview}.
                   </p>
                   {rewardsWallet.trim() && !rewardsOk && (
@@ -800,6 +1027,64 @@ export function ArcCreateForm({
               <p className="text-xs text-coral flex items-start gap-1.5">
                 <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {error}
               </p>
+            )}
+
+            {pendingBasket && (
+              <div className="rounded-[14px] border border-amber-500/40 bg-amber-500/10 px-4 py-3.5">
+                <p className="flex items-start gap-1.5 text-[13px] font-medium text-amber-200">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  Token launched. The holder basket still needs setBasket from this wallet.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      void (async () => {
+                        if (!pendingBasket) return
+                        try {
+                          setError(null)
+                          setStep('basket')
+                          const basketCall = buildSetBasket({
+                            sink: pendingBasket.sink,
+                            rows: basketRows,
+                            quote: pendingBasket.quote,
+                            mode: bundleMode,
+                          })
+                          const basketHash = await writeContractAsync({
+                            address: basketCall.address,
+                            abi: basketCall.abi as never,
+                            functionName: basketCall.functionName as never,
+                            args: basketCall.args as never,
+                            chainId: basketCall.chainId,
+                            gas: 1_200_000n,
+                          })
+                          await waitArcTxConfirmed(basketHash)
+                          const tok = pendingBasket.token
+                          setPendingBasket(null)
+                          setStep('done')
+                          router.push(`/token/${tok}`)
+                        } catch (e: unknown) {
+                          const ax = e as { shortMessage?: string; message?: string }
+                          setError(ax?.shortMessage || ax?.message || 'setBasket failed')
+                          setStep('idle')
+                        }
+                      })()
+                    }}
+                    className="h-9 px-4 rounded-full bg-amber-500 text-black text-[13px] font-semibold disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {step === 'basket' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    Retry basket
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/token/${pendingBasket.token}`)}
+                    className="h-9 px-4 rounded-full border border-hair text-[13px] font-medium text-t2 hover:text-white"
+                  >
+                    Skip, view token
+                  </button>
+                </div>
+              </div>
             )}
 
             {pendingRegister && (
@@ -870,8 +1155,8 @@ export function ArcCreateForm({
       <p className="m-0 text-xs font-medium tracking-[0.16em] text-t3 uppercase">Launch</p>
       <h1 className="mt-2 mb-0 text-3xl font-semibold tracking-tight">One transaction. Full float.</h1>
       <p className="mt-2 max-w-xl text-sm text-t2 text-pretty">
-        1B supply, Uniswap V3, LP locked, pair {quoteSymbol}. ${feeUsd.toFixed(2)} creation fee.
-        Launch-token LP fees auto-burn.
+        1B supply, Uniswap {v4Live ? 'V4' : 'V3'}, LP locked, pair {quoteSymbol}.
+        {v4Live ? ' Pool fee is yours to set.' : ` $${feeUsd.toFixed(2)} creation fee. Launch-token LP fees auto-burn.`}
       </p>
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -998,6 +1283,8 @@ function stepLabel(step: Step): string {
       return 'Confirm in wallet…'
     case 'confirming':
       return 'Waiting for confirmation…'
+    case 'basket':
+      return 'Setting holder basket…'
     case 'registering':
       return 'Saving details…'
     default:

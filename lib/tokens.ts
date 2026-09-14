@@ -70,6 +70,8 @@ export interface PoolToken {
     isMarginBacked?: boolean
     quote?: string
     dexId?: 0 | 1
+    poolId?: string
+    feeBps?: number
   }
   dexVenue?: 'v3' | 'v4'
 }

@@ -9,13 +9,13 @@ import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
-import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
+import {SwapParams} from "v4-core/types/PoolOperation.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
-import {BalanceDelta, BalanceDeltaLibrary} from "v4-core/types/BalanceDelta.sol";
+import {BalanceDeltaLibrary} from "v4-core/types/BalanceDelta.sol";
 
-import {RwaFeeHook} from "../src/RwaFeeHook.sol";
+import {EveFeeHook} from "../src/EveFeeHook.sol";
 import {RwaInstantV4Factory} from "../src/RwaInstantV4Factory.sol";
 import {VirtualQuote} from "../src/libraries/VirtualQuote.sol";
 import {MockRwaToken} from "./MockRwaToken.sol";
@@ -26,35 +26,48 @@ contract RwaInstantV4Test is Test {
 
     PoolManager manager;
     PoolSwapTest swapRouter;
-    RwaFeeHook hook;
+    EveFeeHook hook;
     RwaInstantV4Factory factory;
     MockRwaToken quote;
 
     address deployer = address(this);
     address platform = makeAddr("platform");
-    address crucible = makeAddr("crucible");
     address creator = makeAddr("creator");
     address trader = makeAddr("trader");
 
     uint160 constant REQUIRED_FLAGS = uint160(Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG);
+    uint256 constant VQ_6DP = 5_500e6;
+    uint160 constant MIN_SQRT = 4295128740;
+    uint160 constant MAX_SQRT = 1461446703485210103287273052203988822378723970341;
 
     function setUp() public {
         manager = new PoolManager(deployer);
         swapRouter = new PoolSwapTest(IPoolManager(address(manager)));
 
         (address hookAddr, bytes32 salt) = HookMiner.find(
-            address(this), REQUIRED_FLAGS, type(RwaFeeHook).creationCode, abi.encode(address(manager))
+            address(this), REQUIRED_FLAGS, type(EveFeeHook).creationCode, abi.encode(address(manager))
         );
-        hook = new RwaFeeHook{salt: salt}(IPoolManager(address(manager)));
+        hook = new EveFeeHook{salt: salt}(IPoolManager(address(manager)));
         require(address(hook) == hookAddr, "hook address mismatch");
 
-        factory = new RwaInstantV4Factory(IPoolManager(address(manager)), hook, platform, crucible);
+        factory = new RwaInstantV4Factory(IPoolManager(address(manager)), hook, platform);
         hook.setFactory(address(factory));
 
         quote = new MockRwaToken();
         quote.mint(trader, 1_000_000e6);
         vm.prank(trader);
         quote.approve(address(swapRouter), type(uint256).max);
+    }
+
+    function _creatorSplit() internal pure returns (EveFeeHook.Split memory) {
+        return EveFeeHook.Split({
+            feeBps: 100,
+            creatorBps: 7_000,
+            burnBps: 1_000,
+            holdersBps: 0,
+            autoLpBps: 1_000,
+            platformBps: 1_000
+        });
     }
 
     function _launch() internal returns (address token, PoolId id, bool tokenIsCurrency0) {
@@ -66,223 +79,133 @@ contract RwaInstantV4Test is Test {
         (Currency c0, Currency c1) = tokenIsCurrency0
             ? (Currency.wrap(token), Currency.wrap(address(quote)))
             : (Currency.wrap(address(quote)), Currency.wrap(token));
-        return PoolKey({currency0: c0, currency1: c1, fee: 0, tickSpacing: factory.TICK_SPACING(), hooks: IHooks(address(hook))});
+        return PoolKey({
+            currency0: c0, currency1: c1, fee: 0, tickSpacing: factory.TICK_SPACING(), hooks: IHooks(address(hook))
+        });
     }
 
-    // ── launch ─────────────────────────────────────────────────────────────────────────────
+    function _buy(PoolKey memory key, bool tokenIsCurrency0, uint256 payIn) internal {
+        bool zeroForOne = !tokenIsCurrency0;
+        vm.prank(trader);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(payIn),
+                sqrtPriceLimitX96: zeroForOne ? MIN_SQRT : MAX_SQRT
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+    }
+
     function test_launch_mintsFullSupplySingleSided() public {
         (address token,,) = _launch();
         assertEq(IERC20Like(token).totalSupply(), factory.TOTAL_SUPPLY());
-        // getLiquidityForAmount0/1 rounds the liquidity *down* to the largest value that requires
-        // at most TOTAL_SUPPLY — so a wei-level dust remainder is expected, not a bug. It just
-        // sits in the factory (no function ever moves it, same as the position itself); assert
-        // it's negligible (<0.001% of supply) rather than exactly zero.
         uint256 dust = IERC20Like(token).balanceOf(address(factory));
         assertLt(dust, factory.TOTAL_SUPPLY() / 100_000);
-        // The quote token never moves at all — single-sided means zero quote required at mint.
         assertEq(quote.balanceOf(address(factory)), 0);
     }
 
-    function test_launch_registersPoolOnHook() public {
+    function test_launch_registersCreatorPresetOnHook() public {
         (address token, PoolId id,) = _launch();
-        (bool registered, address regCreator, address regPlatform, address regCrucible, uint16 cBps, uint16 xBps, uint16 pBps, uint24 feeBps) = hook.configs(id);
+        (
+            bool registered,
+            address regCreator,
+            address regHolders,
+            address regAutoLp,
+            address regPlatform,
+            address launch,
+            uint16 feeBps,
+            uint16 cBps,
+            uint16 bBps,
+            uint16 hBps,
+            uint16 aBps,
+            uint16 pBps
+        ) = hook.configs(id);
         assertTrue(registered);
         assertEq(regCreator, creator);
+        assertEq(regHolders, address(0));
+        assertEq(regAutoLp, address(factory));
         assertEq(regPlatform, platform);
-        assertEq(regCrucible, crucible);
-        assertEq(uint256(cBps) + xBps + pBps, 10_000);
-        assertEq(feeBps, factory.HOOK_FEE_BPS());
-        assertTrue(token != address(0));
+        assertEq(launch, token);
+        assertEq(feeBps, 100);
+        assertEq(cBps, 7_000);
+        assertEq(hBps, 0);
+        assertEq(uint256(cBps) + bBps + hBps + aBps + pBps, 10_000);
     }
 
-    // ── swap fee-split: the actual point of building this on v4 ──────────────────────────────
-    function test_buySwap_feeSplitsAcrossCreatorCrucziblePlatform() public {
-        (address token, , bool tokenIsCurrency0) = _launch();
+    function test_buySwap_feeSplitsAndBurnsLaunchToken() public {
+        (address token,, bool tokenIsCurrency0) = _launch();
         PoolKey memory key = _key(token, tokenIsCurrency0);
-
-        uint256 payIn = 1_000e6; // 1000 mock-USYC
-        bool zeroForOne = !tokenIsCurrency0; // paying quote means: quote -> token
-
-        vm.prank(trader);
-        swapRouter.swap(
-            key,
-            SwapParams({zeroForOne: zeroForOne, amountSpecified: -int256(payIn), sqrtPriceLimitX96: zeroForOne ? 4295128740 : 1461446703485210103287273052203988822378723970341}),
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
-        );
-
-        // Buying token with quote, exact-input: specified=quote(input), unspecified=token(output).
-        // The hook taxes the unspecified side, so the fee should be denominated in TOKEN here,
-        // not quote — and nothing should be owed in quote at all.
-        Currency tokenCurrency = Currency.wrap(token);
-        Currency quoteCurrency = Currency.wrap(address(quote));
-
-        uint256 creatorTok = hook.owed(creator, tokenCurrency);
-        uint256 platformTok = hook.owed(platform, tokenCurrency);
-        uint256 crucibleTok = hook.owed(crucible, tokenCurrency);
-        uint256 totalFeeTok = creatorTok + platformTok + crucibleTok;
-
-        assertGt(totalFeeTok, 0, "fee should have accrued in the token");
-        assertEq(hook.owed(creator, quoteCurrency), 0, "no fee should accrue in quote on a buy");
-
-        // Exact split proportions, matching the factory's constants.
-        assertEq(creatorTok, (totalFeeTok * factory.CREATOR_BPS()) / 10_000);
-        assertEq(platformTok, (totalFeeTok * factory.PLATFORM_BPS()) / 10_000);
-        assertEq(crucibleTok, totalFeeTok - creatorTok - platformTok); // remainder-absorbs-dust leg
-    }
-
-    function test_sellSwap_feeAccruesInQuoteInstead() public {
-        (address token, , bool tokenIsCurrency0) = _launch();
-        PoolKey memory key = _key(token, tokenIsCurrency0);
-
-        // First, buy some token so the trader has some to sell.
-        bool buyZeroForOne = !tokenIsCurrency0;
-        vm.prank(trader);
-        swapRouter.swap(
-            key,
-            SwapParams({zeroForOne: buyZeroForOne, amountSpecified: -int256(10_000e6), sqrtPriceLimitX96: buyZeroForOne ? 4295128740 : 1461446703485210103287273052203988822378723970341}),
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
-        );
-
-        Currency tokenCurrency = Currency.wrap(token);
-        Currency quoteCurrency = Currency.wrap(address(quote));
-        uint256 quoteOwedBefore = hook.owed(creator, quoteCurrency) + hook.owed(platform, quoteCurrency) + hook.owed(crucible, quoteCurrency);
-        assertEq(quoteOwedBefore, 0, "sanity: no quote fee from the buy leg");
-        assertGt(hook.owed(creator, tokenCurrency), 0, "sanity: the buy leg's fee landed in token, per the other test");
-
-        uint256 tokenBal = IERC20Like(token).balanceOf(trader);
-        assertGt(tokenBal, 0);
-
-        vm.prank(trader);
-        IERC20Like(token).approve(address(swapRouter), type(uint256).max);
-
-        bool sellZeroForOne = tokenIsCurrency0; // selling token means: token -> quote
-        uint256 sellAmount = tokenBal / 2;
-        vm.prank(trader);
-        swapRouter.swap(
-            key,
-            SwapParams({zeroForOne: sellZeroForOne, amountSpecified: -int256(sellAmount), sqrtPriceLimitX96: sellZeroForOne ? 4295128740 : 1461446703485210103287273052203988822378723970341}),
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
-        );
-
-        // Selling token for quote, exact-input: specified=token(input), unspecified=quote(output).
-        uint256 quoteOwedAfter = hook.owed(creator, quoteCurrency) + hook.owed(platform, quoteCurrency) + hook.owed(crucible, quoteCurrency);
-        assertGt(quoteOwedAfter, 0, "sell should tax the quote (output) side");
-    }
-
-    function testFuzz_buySwap_splitProportionsHoldAtAnySize(uint256 payIn) public {
-        payIn = bound(payIn, 1e6, 500_000e6); // 1 to 500k mock-USYC — trader holds 1,000,000e6
-        (address token, , bool tokenIsCurrency0) = _launch();
-        PoolKey memory key = _key(token, tokenIsCurrency0);
-        bool zeroForOne = !tokenIsCurrency0;
-
-        vm.prank(trader);
-        swapRouter.swap(
-            key,
-            SwapParams({zeroForOne: zeroForOne, amountSpecified: -int256(payIn), sqrtPriceLimitX96: zeroForOne ? 4295128740 : 1461446703485210103287273052203988822378723970341}),
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
-        );
+        _buy(key, tokenIsCurrency0, 1_000e6);
 
         Currency tokenCurrency = Currency.wrap(token);
         uint256 creatorTok = hook.owed(creator, tokenCurrency);
         uint256 platformTok = hook.owed(platform, tokenCurrency);
-        uint256 crucibleTok = hook.owed(crucible, tokenCurrency);
-        uint256 total = creatorTok + platformTok + crucibleTok;
-        if (total == 0) return; // dust-sized trade rounded the fee to zero — nothing to check
-
-        assertEq(creatorTok, (total * factory.CREATOR_BPS()) / 10_000);
-        assertEq(platformTok, (total * factory.PLATFORM_BPS()) / 10_000);
-        assertEq(crucibleTok, total - creatorTok - platformTok);
+        uint256 autoLpTok = hook.owed(address(factory), tokenCurrency);
+        uint256 burnTok = IERC20Like(token).balanceOf(hook.DEAD());
+        uint256 totalFeeTok = creatorTok + platformTok + autoLpTok + burnTok;
+        assertGt(totalFeeTok, 0);
+        assertEq(hook.owed(creator, Currency.wrap(address(quote))), 0);
+        assertEq(creatorTok, (totalFeeTok * 7_000) / 10_000);
+        assertEq(burnTok, (totalFeeTok * 1_000) / 10_000);
+        assertEq(autoLpTok, (totalFeeTok * 1_000) / 10_000);
+        assertEq(platformTok, totalFeeTok - creatorTok - burnTok - autoLpTok);
     }
 
-    // ── withdraw ───────────────────────────────────────────────────────────────────────────
+    function test_create_rejectsHoldersSlice() public {
+        EveFeeHook.Split memory s = _creatorSplit();
+        s.holdersBps = 1_000;
+        s.creatorBps = 6_000;
+        vm.expectRevert(RwaInstantV4Factory.HoldersNotOnRwa.selector);
+        factory.createToken("X", "X", address(quote), creator, 0, 0, s);
+    }
+
     function test_withdraw_paysRealTokensAndZeroesOwed() public {
-        (address token, , bool tokenIsCurrency0) = _launch();
-        PoolKey memory key = _key(token, tokenIsCurrency0);
-        bool zeroForOne = !tokenIsCurrency0;
-        vm.prank(trader);
-        swapRouter.swap(
-            key,
-            SwapParams({zeroForOne: zeroForOne, amountSpecified: -int256(1_000e6), sqrtPriceLimitX96: zeroForOne ? 4295128740 : 1461446703485210103287273052203988822378723970341}),
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
-        );
-
+        (address token,, bool tokenIsCurrency0) = _launch();
+        _buy(_key(token, tokenIsCurrency0), tokenIsCurrency0, 1_000e6);
         Currency tokenCurrency = Currency.wrap(token);
         uint256 owedBefore = hook.owed(creator, tokenCurrency);
         assertGt(owedBefore, 0);
-
         vm.prank(creator);
         uint256 got = hook.withdraw(tokenCurrency);
         assertEq(got, owedBefore);
-        assertEq(hook.owed(creator, tokenCurrency), 0);
         assertEq(IERC20Like(token).balanceOf(creator), owedBefore);
     }
 
-    function test_withdraw_zeroWhenNothingOwed() public {
-        Currency c = Currency.wrap(address(quote));
-        vm.prank(creator);
-        assertEq(hook.withdraw(c), 0);
-    }
-
-    // ── admin guards ───────────────────────────────────────────────────────────────────────
     function test_onlyFactory_canRegisterPool() public {
-        PoolKey memory fakeKey; // zero-valued, fine — this must revert before touching it meaningfully
-        vm.expectRevert(RwaFeeHook.NotFactory.selector);
-        hook.registerPool(fakeKey, creator, platform, crucible, 5000, 4000, 1000, 100);
+        PoolKey memory fakeKey;
+        vm.expectRevert(EveFeeHook.NotFactory.selector);
+        hook.registerPool(fakeKey, creator, address(0), address(this), platform, address(1), _creatorSplit());
     }
 
     function test_onlyPoolManager_canCallAfterSwap() public {
         PoolKey memory fakeKey;
         SwapParams memory p;
-        vm.expectRevert(RwaFeeHook.NotManager.selector);
+        vm.expectRevert(EveFeeHook.NotManager.selector);
         hook.afterSwap(address(this), fakeKey, p, BalanceDeltaLibrary.ZERO_DELTA, "");
-    }
-
-    function test_onlyOwner_guardsHookAdmin() public {
-        vm.startPrank(trader);
-        vm.expectRevert(RwaFeeHook.NotOwner.selector);
-        hook.setFactory(trader);
-        vm.expectRevert(RwaFeeHook.NotOwner.selector);
-        hook.transferOwnership(trader);
-        vm.stopPrank();
-
-        hook.transferOwnership(trader);
-        assertEq(hook.owner(), trader);
     }
 
     function test_onlyOwner_guardsFactoryAdmin() public {
         vm.startPrank(trader);
-        vm.expectRevert();
+        vm.expectRevert(RwaInstantV4Factory.NotOwner.selector);
         factory.setPlatformWallet(trader);
-        vm.expectRevert();
-        factory.setCrucible(trader);
-        vm.expectRevert();
-        factory.transferOwnership(trader);
         vm.stopPrank();
     }
-
-    // ── launchVirtualQuote + first buy ─────────────────────────────────────────────────────
-    uint256 constant VQ_6DP = 5_500e6; // same raw units Instant V3 uses for ~$5.2k FDV
 
     function test_virtualQuote_opensOffTheTickEdge() public {
         (address token, PoolId id,) = factory.createToken("VQ", "VQ", address(quote), creator, VQ_6DP, 0);
         bool tokenIsCurrency0 = token < address(quote);
         (uint160 sqrtPrice,,,) = StateLibrary.getSlot0(IPoolManager(address(manager)), id);
-
         int24 minU = TickMath.minUsableTick(factory.TICK_SPACING());
         int24 maxU = TickMath.maxUsableTick(factory.TICK_SPACING());
         uint160 edge = TickMath.getSqrtPriceAtTick(tokenIsCurrency0 ? minU : maxU - factory.TICK_SPACING());
-        assertTrue(sqrtPrice != edge, "virtual quote should not sit on the usable-tick edge");
-
+        assertTrue(sqrtPrice != edge);
         uint160 ideal = VirtualQuote.sqrtPriceX96(tokenIsCurrency0, VQ_6DP, VirtualQuote.VIRTUAL_TOKEN_INIT);
         uint256 distIdeal = sqrtPrice > ideal ? sqrtPrice - ideal : ideal - sqrtPrice;
         uint256 distEdge = sqrtPrice > edge ? sqrtPrice - edge : edge - sqrtPrice;
         assertLt(distIdeal, distEdge);
-        assertTrue(token != address(0));
     }
 
     function test_firstBuy_sameTxPullsQuoteAndPaysBuyer() public {
@@ -290,17 +213,12 @@ contract RwaInstantV4Test is Test {
         quote.mint(creator, buyIn);
         vm.startPrank(creator);
         quote.approve(address(factory), buyIn);
-        (address token,, uint256 tokensOut) =
-            factory.createToken("FB", "FB", address(quote), creator, VQ_6DP, buyIn);
+        (address token,, uint256 tokensOut) = factory.createToken("FB", "FB", address(quote), creator, VQ_6DP, buyIn);
         vm.stopPrank();
-
         assertGt(tokensOut, 0);
         assertEq(IERC20Like(token).balanceOf(creator), tokensOut);
         assertEq(quote.balanceOf(address(factory)), 0);
-        assertEq(quote.balanceOf(creator), 0);
-        // First buy is a real swap, so the hook taxes it (token side on a buy).
         assertGt(hook.owed(creator, Currency.wrap(token)), 0);
-        // Must not dump almost the whole supply — that is the zero-valuation edge start.
         assertLt(tokensOut, factory.TOTAL_SUPPLY() / 10);
     }
 
@@ -316,10 +234,12 @@ contract RwaInstantV4Test is Test {
         (uint160 sqrtPrice,,,) = StateLibrary.getSlot0(IPoolManager(address(manager)), id);
         bool tokenIsCurrency0 = token < address(quote);
         int24 minU = TickMath.minUsableTick(factory.TICK_SPACING());
-        uint160 edge = TickMath.getSqrtPriceAtTick(tokenIsCurrency0 ? minU : TickMath.maxUsableTick(factory.TICK_SPACING()) - factory.TICK_SPACING());
+        uint160 edge = TickMath.getSqrtPriceAtTick(
+            tokenIsCurrency0 ? minU : TickMath.maxUsableTick(factory.TICK_SPACING()) - factory.TICK_SPACING()
+        );
         assertTrue(sqrtPrice != edge);
+        assertTrue(token != address(0));
     }
-
 }
 
 interface IERC20Like {

@@ -1,8 +1,8 @@
 'use client'
 
 /**
- * Sticky nav — eve.fun brand mark + wordmark, Crucible, Studio, Profile, wallet chip.
- * Mobile: Home, Crucible, ArcStudio, Create collection, Profile, Docs.
+ * Sticky nav — eve.fun brand mark + wordmark, Studio, Profile, wallet chip.
+ * Mobile: Home, ArcStudio, Create collection, Profile, Docs.
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -11,7 +11,6 @@ import { useAccount, useConnect } from 'wagmi'
 import {
   BookOpen,
   CircleUser,
-  Flame,
   Home,
   LayoutGrid,
   Menu,
@@ -128,7 +127,6 @@ export function SiteHeader() {
         <nav className="ml-4 hidden items-center gap-1 md:flex">
           {(
             [
-              ['/crucible', 'Crucible', pathname.startsWith('/crucible')],
               ['/studio', 'Studio', onStudio],
               [profileHref, 'Profile', onProfile],
             ] as const
@@ -210,7 +208,6 @@ export function SiteHeader() {
               </form>
 
               {navRow('/', 'Home', Home)}
-              {navRow('/crucible', 'Crucible', Flame)}
               {navRow('/studio', 'Studio', LayoutGrid)}
               {navRow('/studio/create', 'Create collection', PlusCircle)}
 

@@ -5,15 +5,21 @@
 import { parseEventLogs, type Address, type Hex, type TransactionReceipt } from 'viem'
 import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
 import { INSTANT_REFLECTION_FACTORY_ABI } from './arc-reflection-launchpad'
+import { EVE_INSTANT_V4_FACTORY_ABI, parseV4PoolId } from './eve-instant-v4-launchpad'
 import { arcReceiptClient } from './contracts-arc'
 
 export type ArcCreateReceipt = {
   token: Address
   pool?: Address
+  poolId?: Hex
   receipt: TransactionReceipt
 }
 
-export function parseArcCreateReceipt(receipt: TransactionReceipt): { token?: Address; pool?: Address } {
+export function parseArcCreateReceipt(receipt: TransactionReceipt): {
+  token?: Address
+  pool?: Address
+  poolId?: Hex
+} {
   const [instant] = parseEventLogs({
     abi: INSTANT_QUOTE_FACTORY_ABI,
     eventName: 'InstantQuoteTokenCreated',
@@ -36,6 +42,17 @@ export function parseArcCreateReceipt(receipt: TransactionReceipt): { token?: Ad
       pool: (reflection.args.pool as Address | undefined) || undefined,
     }
   }
+  const [v4] = parseEventLogs({
+    abi: EVE_INSTANT_V4_FACTORY_ABI,
+    eventName: 'TokenLaunched',
+    logs: receipt.logs,
+  })
+  if (v4?.args?.token) {
+    return {
+      token: v4.args.token as Address,
+      poolId: parseV4PoolId(v4.args.id),
+    }
+  }
   return {}
 }
 
@@ -56,7 +73,7 @@ export async function waitArcCreateReceipt(hash: Hex, timeoutMs = 25_000): Promi
   const receipt = await waitArcMinedReceipt(hash, timeoutMs)
   const parsed = parseArcCreateReceipt(receipt)
   if (!parsed.token) {
-    throw new Error('Token created, but InstantQuoteTokenCreated / InstantReflectionCreated was missing')
+    throw new Error('Token created, but InstantQuoteTokenCreated / InstantReflectionCreated / TokenLaunched was missing')
   }
-  return { token: parsed.token, pool: parsed.pool, receipt }
+  return { token: parsed.token, pool: parsed.pool, poolId: parsed.poolId, receipt }
 }

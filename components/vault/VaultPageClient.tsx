@@ -180,11 +180,8 @@ export function VaultPageClient() {
         {tab === 'flow' ? <Flow preview={preview} /> : null}
 
         <p className="mt-8 mb-0 text-[14px] text-t3">
-          Sibling product:{' '}
-          <Link href="/crucible" className="text-t2 hover:text-white font-semibold">
-            The Crucible
-          </Link>{' '}
-          (pad-wide buy/burn of $EVE).
+          Vault is a separate product from Instant. V3 Instant tokens still cook $EVE through
+          the legacy keeper; new v4 launches do not.
         </p>
       </div>
 
@@ -592,7 +589,7 @@ function Flow({ preview }: { preview: boolean }) {
             <KeeperRow k="Allowed buys" v="Curator list only (empty on 5042)" />
             <KeeperRow k="Vault" v="ERC-4626 · eveRWA shares" />
             <KeeperRow k="Unwind" v="Redeem shares to USDC / RWA, no lockup planned" />
-            <KeeperRow k="Sibling" v="Crucible still handles pad-wide $EVE buy/burn" />
+            <KeeperRow k="Legacy Instant" v="V3 CrucibleLock keeper still collects old pools" />
           </dl>
         </section>
       </div>

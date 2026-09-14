@@ -99,6 +99,34 @@
   }
 }
 
+/* Launch-fee range thumbs — used by FeeSplitCard. Keep out of @layer so webkit pseudos apply. */
+.fee-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 99px;
+  background: #242b38;
+  outline: none;
+}
+.fee-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 99px;
+  background: #f4f7fb;
+  box-shadow: 0 0 0 3px rgba(47, 132, 219, 0.35);
+  cursor: pointer;
+}
+.fee-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 99px;
+  background: #f4f7fb;
+  box-shadow: 0 0 0 3px rgba(47, 132, 219, 0.35);
+  cursor: pointer;
+}
+
 @keyframes livePulse {
   0%,
   100% {
