@@ -9,8 +9,8 @@ import {InstantAutoLp} from "./libraries/InstantAutoLp.sol";
 import {VirtualQuote} from "./libraries/VirtualQuote.sol";
 
 /// @notice Bytecode the USDC factory does not have room for under EIP-170.
-///         `mintClaimed` is always `delegatecall`ed (so the position stays factory-owned).
-///         `range` is a pure CALL (no `address(this)`). Do not CALL `mintClaimed`.
+///         `mintClaimed` and `burnPosition` are always `delegatecall`ed (so the position
+///         stays factory-owned). `range` is a pure CALL. Do not CALL the mint/burn entrypoints.
 contract InstantAutoLpHelper {
     function range(bool tokenIsCurrency0, uint256 vq, int24 ts)
         external
@@ -50,6 +50,16 @@ contract InstantAutoLpHelper {
         uint256 claimed1
     ) external returns (uint128 liquidity) {
         return InstantAutoLp.mintClaimed(manager, hook, key, tickLower, tickUpper, claimed0, claimed1);
+    }
+
+    function burnPosition(
+        IPoolManager manager,
+        PoolKey calldata key,
+        int24 tickLower,
+        int24 tickUpper,
+        address recipient
+    ) external returns (uint128 liquidity) {
+        return InstantAutoLp.burnPosition(manager, key, tickLower, tickUpper, recipient);
     }
 
     function _floorToSpacing(int24 tick, int24 ts) internal pure returns (int24) {

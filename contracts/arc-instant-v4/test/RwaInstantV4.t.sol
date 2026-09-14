@@ -306,6 +306,46 @@ contract RwaInstantV4Test is Test {
         assertEq(IERC20Like(token).balanceOf(hook.DEAD()), deadBefore + burned);
         assertEq(quote.balanceOf(hook.DEAD()), 0);
     }
+
+    function test_unlock_platformReclaimsAfter365() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+
+        (uint128 liqBefore,,) = StateLibrary.getPositionInfo(
+            IPoolManager(address(manager)),
+            id,
+            address(factory),
+            factory.tickLowerOf(token),
+            factory.tickUpperOf(token),
+            bytes32(0)
+        );
+        assertGt(liqBefore, 0);
+
+        vm.prank(creator);
+        vm.expectRevert(RwaInstantV4Factory.NotBeneficiary.selector);
+        factory.unlockLiquidity(token);
+
+        vm.prank(platform);
+        vm.expectRevert(RwaInstantV4Factory.StillLocked.selector);
+        factory.unlockLiquidity(token);
+
+        vm.warp(block.timestamp + factory.LOCK_DURATION());
+        vm.prank(platform);
+        uint128 removed = factory.unlockLiquidity(token);
+        assertEq(removed, liqBefore);
+        (uint128 liqAfter,,) = StateLibrary.getPositionInfo(
+            IPoolManager(address(manager)),
+            id,
+            address(factory),
+            factory.tickLowerOf(token),
+            factory.tickUpperOf(token),
+            bytes32(0)
+        );
+        assertEq(liqAfter, 0);
+        assertGt(IERC20Like(token).balanceOf(platform), 0);
+        assertGt(quote.balanceOf(platform), 0);
+    }
 }
 
 interface IERC20Like {
