@@ -11,6 +11,9 @@ export type IndexedToken = {
   /** unix seconds when first indexed / created event */
   createdAt: number
   createdBlock?: number
+  dexVenue?: 'v3' | 'v4'
+  poolId?: Hex
+  quote?: Address
 }
 
 export type IndexedVolume = {

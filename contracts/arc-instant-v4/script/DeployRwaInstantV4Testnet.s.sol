@@ -5,7 +5,7 @@ import {Script, console2} from "forge-std/Script.sol";
 import {PoolManager} from "v4-core/PoolManager.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
-import {RwaFeeHook} from "../src/RwaFeeHook.sol";
+import {EveFeeHook} from "../src/EveFeeHook.sol";
 import {RwaInstantV4Factory} from "../src/RwaInstantV4Factory.sol";
 import {HookMiner} from "../test/utils/HookMiner.sol";
 
@@ -23,7 +23,7 @@ import {HookMiner} from "../test/utils/HookMiner.sol";
  *
  * Env:
  *   PRIVATE_KEY (required)
- *   PLATFORM_WALLET / CRUCIBLE / OWNER (optional; default deployer)
+ *   PLATFORM_WALLET / OWNER (optional; default deployer)
  *   POOL_MANAGER (optional; default deploys a fresh PoolManager)
  */
 contract DeployRwaInstantV4Testnet is Script {
@@ -37,13 +37,11 @@ contract DeployRwaInstantV4Testnet is Script {
         uint256 pk = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(pk);
         address platformWallet = vm.envOr("PLATFORM_WALLET", deployer);
-        address crucible = vm.envOr("CRUCIBLE", deployer);
         address owner = vm.envOr("OWNER", deployer);
         address poolManagerOverride = vm.envOr("POOL_MANAGER", address(0));
 
         console2.log("Deployer      ", deployer);
         console2.log("Platform      ", platformWallet);
-        console2.log("Crucible      ", crucible);
 
         vm.startBroadcast(pk);
 
@@ -60,12 +58,12 @@ contract DeployRwaInstantV4Testnet is Script {
         // this function during simulation, so `deployer`'s nonce at the moment of the real
         // CREATE2 call is what matters, not any nonce this dry run consumes.
         (address predicted, bytes32 salt) =
-            HookMiner.find(deployer, REQUIRED_HOOK_FLAGS, type(RwaFeeHook).creationCode, abi.encode(address(manager)));
+            HookMiner.find(deployer, REQUIRED_HOOK_FLAGS, type(EveFeeHook).creationCode, abi.encode(address(manager)));
 
-        RwaFeeHook hook = new RwaFeeHook{salt: salt}(manager);
+        EveFeeHook hook = new EveFeeHook{salt: salt}(manager);
         require(address(hook) == predicted, "hook address mismatch - salt mining and deploy sender disagree");
 
-        RwaInstantV4Factory factory = new RwaInstantV4Factory(manager, hook, platformWallet, crucible);
+        RwaInstantV4Factory factory = new RwaInstantV4Factory(manager, hook, platformWallet);
         hook.setFactory(address(factory));
 
         if (owner != deployer) {
@@ -75,7 +73,7 @@ contract DeployRwaInstantV4Testnet is Script {
 
         vm.stopBroadcast();
 
-        console2.log("RwaFeeHook           ", address(hook));
+        console2.log("EveFeeHook           ", address(hook));
         console2.log("RwaInstantV4Factory  ", address(factory));
     }
 }

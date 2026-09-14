@@ -17,6 +17,8 @@ import {BalanceDeltaLibrary} from "v4-core/types/BalanceDelta.sol";
 
 import {EveFeeHook} from "../src/EveFeeHook.sol";
 import {EveInstantV4Factory} from "../src/EveInstantV4Factory.sol";
+import {EveV4Router} from "../src/EveV4Router.sol";
+import {HolderSink} from "../src/HolderSink.sol";
 import {VirtualQuote} from "../src/libraries/VirtualQuote.sol";
 import {MockRwaToken} from "./MockRwaToken.sol";
 import {HookMiner} from "./utils/HookMiner.sol";
@@ -28,6 +30,7 @@ contract EveInstantV4Test is Test {
     PoolSwapTest swapRouter;
     EveFeeHook hook;
     EveInstantV4Factory factory;
+    EveV4Router router;
     MockRwaToken quote;
 
     address deployer = address(this);
@@ -53,6 +56,7 @@ contract EveInstantV4Test is Test {
 
         factory = new EveInstantV4Factory(IPoolManager(address(manager)), hook, platform);
         hook.setFactory(address(factory));
+        router = new EveV4Router(IPoolManager(address(manager)));
 
         quote = new MockRwaToken();
         quote.mint(trader, 1_000_000e6);
@@ -259,21 +263,44 @@ contract EveInstantV4Test is Test {
         assertEq(creatorTok, (total * 2_000) / 10_000);
     }
 
-    function test_reflect_holdersAccrueOnBuy() public {
-        (address token,, bool tokenIsCurrency0) = _launchSplit(_reflectSplit(), holders);
+    function test_reflect_deploysSinkDistributeAndClaim() public {
+        (address token, PoolId id, bool tokenIsCurrency0) = _launchSplit(_reflectSplit(), address(0));
+        (,,, address sinkAddr,) = factory.poolOf(token);
+        assertTrue(sinkAddr != address(0));
+        HolderSink sink = HolderSink(sinkAddr);
+
         PoolKey memory key = _key(token, tokenIsCurrency0);
-        _buy(key, tokenIsCurrency0, 1_000e6);
+        _buy(key, tokenIsCurrency0, 10_000e6);
 
         Currency tokenCurrency = Currency.wrap(token);
-        uint256 creatorTok = hook.owed(creator, tokenCurrency);
-        uint256 holdersTok = hook.owed(holders, tokenCurrency);
-        uint256 platformTok = hook.owed(platform, tokenCurrency);
-        uint256 autoLpTok = hook.owed(address(factory), tokenCurrency);
-        uint256 burnTok = IERC20Like(token).balanceOf(hook.DEAD());
-        uint256 total = creatorTok + holdersTok + platformTok + autoLpTok + burnTok;
-        assertGt(total, 0);
-        assertEq(holdersTok, (total * 5_000) / 10_000);
-        assertEq(creatorTok, (total * 2_000) / 10_000);
+        uint256 holdersTok = hook.owed(sinkAddr, tokenCurrency);
+        assertGt(holdersTok, 0);
+
+        sink.distribute();
+        assertEq(hook.owed(sinkAddr, tokenCurrency), 0);
+
+        uint256 traderBal = IERC20Like(token).balanceOf(trader);
+        assertGt(traderBal, 0);
+        (uint256 previewLaunch,) = sink.preview(trader);
+        assertGt(previewLaunch, 0);
+
+        vm.prank(trader);
+        (uint256 claimed,) = sink.claim();
+        assertEq(claimed, previewLaunch);
+        assertGt(IERC20Like(token).balanceOf(trader), traderBal);
+        assertTrue(PoolId.unwrap(id) != bytes32(0));
+    }
+
+    function test_router_swapExactInBuy() public {
+        (address token,, bool tokenIsCurrency0) = _launch();
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        quote.mint(trader, 1_000e6);
+        vm.startPrank(trader);
+        quote.approve(address(router), 1_000e6);
+        uint256 out = router.swapExactIn(key, !tokenIsCurrency0, 1_000e6, 1, trader);
+        vm.stopPrank();
+        assertGt(out, 0);
+        assertEq(IERC20Like(token).balanceOf(trader), out);
     }
 
     function testFuzz_buySwap_splitProportionsHoldAtAnySize(uint256 payIn) public {
@@ -334,9 +361,10 @@ contract EveInstantV4Test is Test {
         factory.createToken("X", "X", address(quote), creator, 0, 0, s, address(0));
     }
 
-    function test_create_rejectsHoldersWithoutSink() public {
-        vm.expectRevert(EveFeeHook.HoldersRequired.selector);
-        factory.createToken("X", "X", address(quote), creator, 0, 0, _reflectSplit(), address(0));
+    function test_create_reflectZeroHoldersDeploysSink() public {
+        (address token,,) = _launchSplit(_reflectSplit(), address(0));
+        (,,, address sinkAddr,) = factory.poolOf(token);
+        assertTrue(sinkAddr != address(0));
     }
 
     function test_create_rejectsSplitNot100() public {

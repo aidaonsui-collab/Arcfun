@@ -435,6 +435,8 @@ export const ARC = {
   /** Uniswap v4 Instant factory. ZERO until deployed — create tx stays on INSTANT_FACTORY. */
   INSTANT_V4_FACTORY: envAddr(process.env.NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY, ZERO),
   INSTANT_V4_HOOK: envAddr(process.env.NEXT_PUBLIC_ARC_INSTANT_V4_HOOK, ZERO),
+  INSTANT_V4_ROUTER: envAddr(process.env.NEXT_PUBLIC_ARC_INSTANT_V4_ROUTER, ZERO),
+  POOL_MANAGER: envAddr(process.env.NEXT_PUBLIC_ARC_POOL_MANAGER, ZERO),
   BPS_SOURCE: envAddr(
     process.env.NEXT_PUBLIC_ARC_BPS_SOURCE,
     '0xFCF6Bf9A66AA167BfE4F6165bb04baEd97B6C2aE',
@@ -527,6 +529,11 @@ export function instantCatalogFactories(): Address[] {
   ])
 }
 
+/** v4 Instant factories (USDC + later RWA). Not mixed into V3 getPool scans. */
+export function instantV4CatalogFactories(): Address[] {
+  return uniqAddrs([ARC.INSTANT_V4_FACTORY])
+}
+
 /**
  * Locker that holds the Uni V3 NFT for a factory. PREV/LEGACY Instant → MonLock.
  * Current Instant → CrucibleLock (`ARC.INSTANT_LOCKER`). Reflection → its locker.
@@ -565,6 +572,10 @@ export function instantProtocolAddresses(): Address[] {
     ARC_INSTANT_LOCKER_ADAPTER,
     ARC.REFLECTION_FACTORY,
     ARC.REFLECTION_LOCKER,
+    ARC.INSTANT_V4_FACTORY,
+    ARC.INSTANT_V4_HOOK,
+    ARC.INSTANT_V4_ROUTER,
+    ARC.POOL_MANAGER,
   ])
 }
 
@@ -594,12 +605,17 @@ export function arcLaunchesEnabled(): boolean {
 }
 
 /**
- * Create-form fee split chooser (v4 Instant). Off until explicitly set.
- * The live create tx stays on V3 Instant until NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY is set
- * in a later PR — this flag only reveals the slider UI.
+ * Create-form fee split chooser (v4 Instant). Default on.
+ * Set NEXT_PUBLIC_ARC_INSTANT_V4=0 to hide it. The live create tx stays on V3 Instant
+ * until NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY is set.
  */
 export function arcInstantV4UiEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_ARC_INSTANT_V4 === '1'
+  return process.env.NEXT_PUBLIC_ARC_INSTANT_V4 !== '0'
+}
+
+/** True when the v4 Instant factory is deployed and wired for new creates. */
+export function arcInstantV4Enabled(): boolean {
+  return arcRpcConfigured() && ARC.INSTANT_V4_FACTORY !== ZERO && ARC.INSTANT_V4_HOOK !== ZERO
 }
 
 /**

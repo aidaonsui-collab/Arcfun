@@ -15,7 +15,10 @@ import {LiquidityAmounts} from "./libraries/LiquidityAmounts.sol";
 import {CurrencySettler} from "./libraries/CurrencySettler.sol";
 import {VirtualQuote} from "./libraries/VirtualQuote.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {LaunchToken18} from "./LaunchToken18.sol";
+import {LaunchToken18Tracked} from "./LaunchToken18Tracked.sol";
+import {HolderSink} from "./HolderSink.sol";
 import {EveFeeHook} from "./EveFeeHook.sol";
 
 /// @title EveInstantV4Factory
@@ -238,8 +241,14 @@ contract EveInstantV4Factory is IUnlockCallback {
                 block.chainid
             )
         );
-        LaunchToken18 t = new LaunchToken18{salt: salt}(call.name, call.symbol, address(this));
-        token = address(t);
+        bool reflect = call.split.holdersBps > 0;
+        if (reflect) {
+            LaunchToken18Tracked tracked = new LaunchToken18Tracked{salt: salt}(call.name, call.symbol, address(this));
+            token = address(tracked);
+        } else {
+            LaunchToken18 t = new LaunchToken18{salt: salt}(call.name, call.symbol, address(this));
+            token = address(t);
+        }
         if (token == call.quote) revert TokenIsQuote();
         if (poolOf[token].token != address(0)) revert AlreadyExists();
 
@@ -260,9 +269,16 @@ contract EveInstantV4Factory is IUnlockCallback {
         poolManager.initialize(key, startSqrtPriceX96);
         id = key.toId();
 
-        // Auto-LP slice accrues on the factory until a donate/flush lands. Holders sink is
-        // whatever the creator passed (zero iff holdersBps == 0 — hook enforces that).
-        hook.registerPool(key, call.creator, call.holders, address(this), platformWallet, token, call.split);
+        address holders = call.holders;
+        if (reflect) {
+            if (holders == address(0)) {
+                HolderSink sink = new HolderSink(hook, IERC20(token), call.quote, address(this));
+                holders = address(sink);
+            }
+            LaunchToken18Tracked(token).setSink(holders);
+        }
+        // Auto-LP slice accrues on the factory until a donate/flush lands.
+        hook.registerPool(key, call.creator, holders, address(this), platformWallet, token, call.split);
 
         uint160 sqrtA = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtB = TickMath.getSqrtPriceAtTick(tickUpper);
@@ -295,7 +311,7 @@ contract EveInstantV4Factory is IUnlockCallback {
             token: token,
             quote: call.quote,
             creator: call.creator,
-            holders: call.holders,
+            holders: holders,
             id: id
         });
         emit TokenLaunched(token, call.quote, call.creator, id, tokenIsCurrency0, call.split.feeBps);
@@ -312,7 +328,10 @@ contract EveInstantV4Factory is IUnlockCallback {
         tickLower = TickMath.minUsableTick(ts);
         tickUpper = TickMath.maxUsableTick(ts);
         if (vq == 0) {
-            int24 startTick = tokenIsCurrency0 ? tickLower : tickUpper - ts;
+            // Price on the token-only edge so the mint stays 100% launch token.
+            // token as currency1 must sit on tickUpper (not one spacing inside), or the
+            // last tick is in-range and the mint asks for 1 wei of quote.
+            int24 startTick = tokenIsCurrency0 ? tickLower : tickUpper;
             return (tickLower, tickUpper, TickMath.getSqrtPriceAtTick(startTick));
         }
 

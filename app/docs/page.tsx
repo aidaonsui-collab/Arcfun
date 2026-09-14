@@ -158,9 +158,10 @@ export default function DocsPage() {
             <span className="text-[15px] font-semibold text-t3 tracking-normal">(coming soon)</span>
           </h2>
           <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
-            The pool charges a <strong className="text-white font-semibold">1% Uniswap V3 swap
-            fee</strong>. When fees are collected from the locked LP NFT, the quote (USDC) side is
-            split as below. The launch-token side is always burned — it never pays out.
+            New Instant launches use a Uniswap v4 pool fee you set at create (0.3–3%), split
+            across creator, launch-token burn, holders, auto-LP, and eve.fun. Crucible ($EVE
+            cook) is legacy: it still runs for tokens already on V3 Instant, not for new
+            launches. The table below is the V3 Instant split still collected by the keeper.
           </p>
 
           <div className="border border-hair rounded-[24px] bg-s1 overflow-hidden">
@@ -228,19 +229,6 @@ export default function DocsPage() {
             Next — {CRUCIBLE_CONTRACTS_NOTE} Reflection&apos;s own locker still pays 50/25/25
             (Holders / Creator / Platform) until that path migrates too. ReferralRouter pays the
             0.05% buy skim once deployed.
-          </p>
-        </section>
-
-        <section id="crucible" className="scroll-mt-24 mt-14">
-          <h2 className="m-0 text-[24px] font-semibold tracking-tightish">Crucible</h2>
-          <p className="mt-2 mb-5 max-w-2xl text-[15px] text-t2 leading-relaxed">
-            Crucible is the buy/burn engine for the protocol token. A slice of quote-side USDC
-            fees buys $EVE and sends it to the dead wallet. Protocol-token holders do not get
-            pad-wide USDC — Crucible is their reward.{' '}
-            <Link href="/crucible" className="text-lime-t font-semibold hover:text-white">
-              Open Crucible
-            </Link>
-            .
           </p>
         </section>
 

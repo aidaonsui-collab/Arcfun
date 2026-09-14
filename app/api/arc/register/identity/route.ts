@@ -37,7 +37,13 @@ export async function POST(req: NextRequest) {
   const limited = await limitOr429(req, 'arc-register-identity', 20)
   if (limited) return limited
 
-  const body = (await req.json().catch(() => ({}))) as { token?: string; pool?: string }
+  const body = (await req.json().catch(() => ({}))) as {
+    token?: string
+    pool?: string
+    poolId?: string
+    dexVenue?: 'v3' | 'v4'
+    feeBps?: number
+  }
   const token = body.token
   if (!token || !isPlausibleEvmAddress(token)) {
     return NextResponse.json({ ok: false, error: 'invalid token' }, { status: 400 })
@@ -67,7 +73,16 @@ export async function POST(req: NextRequest) {
   const pool = body.pool && isPlausibleEvmAddress(body.pool) ? body.pool : undefined
 
   try {
-    await setArcTokenMeta(token, { name, symbol, creator, pool, instantLaunch: true })
+    await setArcTokenMeta(token, {
+      name,
+      symbol,
+      creator,
+      pool,
+      poolId: typeof body.poolId === 'string' && body.poolId.startsWith('0x') ? body.poolId : undefined,
+      dexVenue: body.dexVenue === 'v4' || body.dexVenue === 'v3' ? body.dexVenue : undefined,
+      feeBps: Number.isFinite(body.feeBps) ? Number(body.feeBps) : undefined,
+      instantLaunch: true,
+    })
   } catch {
     return NextResponse.json({ ok: false, error: 'could not save token identity' }, { status: 503 })
   }

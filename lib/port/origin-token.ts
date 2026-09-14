@@ -2,11 +2,14 @@ import { erc20Abi, zeroAddress, type Address } from 'viem'
 import {
   ARC,
   arcInstantEnabled,
+  arcInstantV4Enabled,
   arcPublicClient,
   arcReflectionEnabled,
   instantCatalogFactories,
+  instantV4CatalogFactories,
 } from '@/lib/contracts-arc'
 import { INSTANT_QUOTE_FACTORY_ABI } from '@/lib/instant-quote-launchpad'
+import { EVE_INSTANT_V4_FACTORY_ABI } from '@/lib/eve-instant-v4-launchpad'
 import { getArcTokenMeta } from '@/lib/arc-token-meta'
 import { isPlausibleEvmAddress } from '@/lib/evm-address'
 import { PORT_FACTORY_ABI } from './abi'
@@ -55,6 +58,25 @@ export async function readPadCreator(token: Address): Promise<Address | null> {
         })
         if (p.creator && p.creator !== zeroAddress && p.uniPool && p.uniPool !== zeroAddress) {
           return p.creator
+        }
+      } catch {
+        /* not this factory */
+      }
+    }
+  }
+  if (arcInstantV4Enabled()) {
+    for (const factory of instantV4CatalogFactories()) {
+      try {
+        const row = await client.readContract({
+          address: factory,
+          abi: EVE_INSTANT_V4_FACTORY_ABI,
+          functionName: 'poolOf',
+          args: [token],
+        })
+        const creator = row[2]
+        const launched = row[0]
+        if (launched && launched !== zeroAddress && creator && creator !== zeroAddress) {
+          return creator
         }
       } catch {
         /* not this factory */

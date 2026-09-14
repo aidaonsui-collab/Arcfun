@@ -16,39 +16,29 @@ import {CurrencySettler} from "./libraries/CurrencySettler.sol";
 import {VirtualQuote} from "./libraries/VirtualQuote.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {LaunchToken18} from "./LaunchToken18.sol";
-import {RwaFeeHook} from "./RwaFeeHook.sol";
+import {EveFeeHook} from "./EveFeeHook.sol";
 
 /// @title RwaInstantV4Factory
-/// @notice Launch a fixed-1B-supply token into a v4 pool quoted against an RWA asset (USYC,
-///         BUIDL, tokenized CRCL — see lib/arc-rwa-assets.ts on the app side), with the entire
-///         supply seeded single-sided into a position that is never withdrawn — there is no
-///         function anywhere in this contract that can move that liquidity back out, the same
-///         "no NFT withdraw, owner cannot rug" guarantee CrucibleLock gives its v3 positions,
-///         but structural here rather than a revert-guarded function.
-///
-///         Starting price: `launchVirtualQuote` raw quote units vs VIRTUAL_TOKEN_INIT, same
-///         encoding as Instant V3 (`BondingCurveDexSeed.sqrtPriceX96`). 0 uses the factory
-///         default; if that is also 0 the pool still opens at the usable-tick edge (original
-///         sketch). Per-create override lets USYC-6dp and an 18dp RWA pass different raw values.
-///
-///         Optional first-buy: `firstBuyQuoteAmount` is pulled from the caller before unlock
-///         and swapped quote→token inside the same unlock as the LP mint, so create + seed +
-///         first buy is one transaction. The hook still taxes that swap (1% of unspecified).
+/// @notice Instant factory quoted against an RWA (USYC, BUIDL, …). Same mint/seed/first-buy
+///         shape as EveInstantV4Factory, registered on the shared EveFeeHook. Holders slice
+///         is not used here (permissioned MMFs should not pay random holders in USYC).
 contract RwaInstantV4Factory is IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using CurrencySettler for Currency;
     using SafeCast for int256;
 
-    uint256 public constant TOTAL_SUPPLY = 1_000_000_000 ether; // 1B, 18dp — matches LaunchToken18
-    int24 public constant TICK_SPACING = 200; // wide spacing, matches the pad's 1%-tier v3 pools
-    uint24 public constant HOOK_FEE_BPS = 100; // 1%
-    uint16 public constant CREATOR_BPS = 5_000; // 50%
-    uint16 public constant CRUCIBLE_BPS = 4_000; // 40% — folds v3's separate "project burn" leg in;
-    //                                               see RwaFeeHook's top comment for why.
-    uint16 public constant PLATFORM_BPS = 1_000; // 10%
+    uint256 public constant TOTAL_SUPPLY = 1_000_000_000 ether;
+    int24 public constant TICK_SPACING = 200;
+    uint16 public constant DEFAULT_FEE_BPS = 100;
+    uint16 public constant DEFAULT_CREATOR_BPS = 7_000;
+    uint16 public constant DEFAULT_BURN_BPS = 1_000;
+    uint16 public constant DEFAULT_HOLDERS_BPS = 0;
+    uint16 public constant DEFAULT_AUTO_LP_BPS = 1_000;
+    uint16 public constant DEFAULT_PLATFORM_BPS = 1_000;
 
     error ZeroAddress();
+    error NotOwner();
     error TokenIsQuote();
     error AlreadyExists();
     error NotSelf();
@@ -56,6 +46,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
     error TransferFailed();
     error FirstBuyZero();
     error FirstBuyTooLarge();
+    error HoldersNotOnRwa();
 
     struct PoolInfo {
         address token;
@@ -64,39 +55,48 @@ contract RwaInstantV4Factory is IUnlockCallback {
         PoolId id;
     }
 
+    struct LaunchCall {
+        string name;
+        string symbol;
+        address quote;
+        address creator;
+        address payer;
+        uint256 vq;
+        uint256 firstBuy;
+        EveFeeHook.Split split;
+    }
+
     event TokenLaunched(
-        address indexed token, address indexed quote, address indexed creator, PoolId id, bool tokenIsCurrency0
+        address indexed token,
+        address indexed quote,
+        address indexed creator,
+        PoolId id,
+        bool tokenIsCurrency0,
+        uint16 feeBps
     );
     event TokenFirstBuy(address indexed token, address indexed buyer, uint256 quoteIn, uint256 tokensOut);
     event LaunchVirtualQuoteSet(uint256 quote);
 
     IPoolManager public immutable poolManager;
-    RwaFeeHook public immutable hook;
+    EveFeeHook public immutable hook;
     address public owner;
     address public platformWallet;
-    /// @notice Where the hook's "crucible" leg accrues. A plain address for v1 — bridging its
-    ///         balance into the real EVE burn sink (contracts/eve-burn) once a swap path from a
-    ///         given RWA quote into USDC exists is exactly the follow-up flagged in the hook.
-    address public crucible;
-    /// @notice Default virtual quote in the quote token's native decimals (5500e6 ≈ $5.5k FDV
-    ///         on a 6dp quote, same as Instant V3 USDC). 0 = open at the usable-tick edge.
     uint256 public launchVirtualQuote;
 
     uint256 private _nonce;
     mapping(address => PoolInfo) public poolOf;
 
     modifier onlyOwner() {
-        if (msg.sender != owner) revert ZeroAddress();
+        if (msg.sender != owner) revert NotOwner();
         _;
     }
 
-    constructor(IPoolManager manager_, RwaFeeHook hook_, address platformWallet_, address crucible_) {
-        if (platformWallet_ == address(0) || crucible_ == address(0)) revert ZeroAddress();
+    constructor(IPoolManager manager_, EveFeeHook hook_, address platformWallet_) {
+        if (platformWallet_ == address(0)) revert ZeroAddress();
         poolManager = manager_;
         hook = hook_;
         owner = msg.sender;
         platformWallet = platformWallet_;
-        crucible = crucible_;
     }
 
     function transferOwnership(address next) external onlyOwner {
@@ -109,30 +109,27 @@ contract RwaInstantV4Factory is IUnlockCallback {
         platformWallet = next;
     }
 
-    function setCrucible(address next) external onlyOwner {
-        if (next == address(0)) revert ZeroAddress();
-        crucible = next;
-    }
-
     function setLaunchVirtualQuote(uint256 q) external onlyOwner {
         launchVirtualQuote = q;
         emit LaunchVirtualQuoteSet(q);
     }
 
-    /// @param quote The RWA asset to pair against (e.g. USYC) — an existing ERC-20, not deployed
-    ///        here. See lib/arc-rwa-assets.ts for the app-side catalog of which ones are live.
-    /// @param creator Receives the CREATOR_BPS leg of every swap fee (pulled via
-    ///        hook.withdraw()), and is stamped as the pool's creator for display purposes.
+    function defaultSplit() public pure returns (EveFeeHook.Split memory s) {
+        s.feeBps = DEFAULT_FEE_BPS;
+        s.creatorBps = DEFAULT_CREATOR_BPS;
+        s.burnBps = DEFAULT_BURN_BPS;
+        s.holdersBps = DEFAULT_HOLDERS_BPS;
+        s.autoLpBps = DEFAULT_AUTO_LP_BPS;
+        s.platformBps = DEFAULT_PLATFORM_BPS;
+    }
+
     function createToken(string calldata name, string calldata symbol, address quote, address creator)
         external
         returns (address token, PoolId id)
     {
-        (token, id,) = _create(name, symbol, quote, creator, 0, 0);
+        (token, id,) = _create(name, symbol, quote, creator, 0, 0, defaultSplit());
     }
 
-    /// @param launchVirtualQuote_ Raw quote units for the opening price. 0 = factory default.
-    /// @param firstBuyQuoteAmount Raw quote the caller spends on the new pool in this tx. 0 = launch only.
-    ///        Caller must `approve` this factory. The hook taxes the first buy like any other swap.
     function createToken(
         string calldata name,
         string calldata symbol,
@@ -141,7 +138,19 @@ contract RwaInstantV4Factory is IUnlockCallback {
         uint256 launchVirtualQuote_,
         uint256 firstBuyQuoteAmount
     ) external returns (address token, PoolId id, uint256 tokensOut) {
-        return _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount);
+        return _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, defaultSplit());
+    }
+
+    function createToken(
+        string calldata name,
+        string calldata symbol,
+        address quote,
+        address creator,
+        uint256 launchVirtualQuote_,
+        uint256 firstBuyQuoteAmount,
+        EveFeeHook.Split calldata split
+    ) external returns (address token, PoolId id, uint256 tokensOut) {
+        return _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, split);
     }
 
     function _create(
@@ -150,18 +159,28 @@ contract RwaInstantV4Factory is IUnlockCallback {
         address quote,
         address creator,
         uint256 launchVirtualQuote_,
-        uint256 firstBuyQuoteAmount
+        uint256 firstBuyQuoteAmount,
+        EveFeeHook.Split memory split
     ) internal returns (address token, PoolId id, uint256 tokensOut) {
         if (quote == address(0) || creator == address(0)) revert ZeroAddress();
+        if (split.holdersBps != 0) revert HoldersNotOnRwa();
         if (firstBuyQuoteAmount > uint256(type(int256).max)) revert FirstBuyTooLarge();
         uint256 vq = launchVirtualQuote_ == 0 ? launchVirtualQuote : launchVirtualQuote_;
         if (firstBuyQuoteAmount > 0) {
             bool ok = IERC20Minimal(quote).transferFrom(msg.sender, address(this), firstBuyQuoteAmount);
             if (!ok) revert TransferFailed();
         }
-        bytes memory result = poolManager.unlock(
-            abi.encode(uint8(1), name, symbol, quote, creator, msg.sender, vq, firstBuyQuoteAmount)
-        );
+        LaunchCall memory call = LaunchCall({
+            name: name,
+            symbol: symbol,
+            quote: quote,
+            creator: creator,
+            payer: msg.sender,
+            vq: vq,
+            firstBuy: firstBuyQuoteAmount,
+            split: split
+        });
+        bytes memory result = poolManager.unlock(abi.encode(uint8(1), call));
         bytes32 idBytes;
         (token, idBytes, tokensOut) = abi.decode(result, (address, bytes32, uint256));
         id = PoolId.wrap(idBytes);
@@ -172,61 +191,54 @@ contract RwaInstantV4Factory is IUnlockCallback {
         }
     }
 
-    // ── IUnlockCallback ────────────────────────────────────────────────────────────────────
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(poolManager)) revert NotSelf();
-        uint8 action = abi.decode(data[:32], (uint8));
-        if (action == 1) {
-            (
-                ,
-                string memory name,
-                string memory symbol,
-                address quote,
-                address creator,
-                address payer,
-                uint256 vq,
-                uint256 firstBuy
-            ) = abi.decode(data, (uint8, string, string, address, address, address, uint256, uint256));
-            (address token, PoolId id, uint256 tokensOut) =
-                _createToken(name, symbol, quote, creator, payer, vq, firstBuy);
-            return abi.encode(token, PoolId.unwrap(id), tokensOut);
-        }
-        revert UnknownAction();
+        (uint8 action, LaunchCall memory call) = abi.decode(data, (uint8, LaunchCall));
+        if (action != 1) revert UnknownAction();
+        (address token, PoolId id, uint256 tokensOut) = _createToken(call);
+        return abi.encode(token, PoolId.unwrap(id), tokensOut);
     }
 
-    function _createToken(
-        string memory name,
-        string memory symbol,
-        address quote,
-        address creator,
-        address payer,
-        uint256 vq,
-        uint256 firstBuy
-    ) internal returns (address token, PoolId id, uint256 tokensOut) {
-        bytes32 salt = keccak256(abi.encode(name, symbol, quote, creator, vq, firstBuy, _nonce++, block.chainid));
-        LaunchToken18 t = new LaunchToken18{salt: salt}(name, symbol, address(this));
+    function _createToken(LaunchCall memory call) internal returns (address token, PoolId id, uint256 tokensOut) {
+        bytes32 salt = keccak256(
+            abi.encode(
+                call.name,
+                call.symbol,
+                call.quote,
+                call.creator,
+                call.vq,
+                call.firstBuy,
+                call.split.feeBps,
+                call.split.creatorBps,
+                call.split.burnBps,
+                call.split.autoLpBps,
+                call.split.platformBps,
+                _nonce++,
+                block.chainid
+            )
+        );
+        LaunchToken18 t = new LaunchToken18{salt: salt}(call.name, call.symbol, address(this));
         token = address(t);
-        if (token == quote) revert TokenIsQuote();
+        if (token == call.quote) revert TokenIsQuote();
         if (poolOf[token].token != address(0)) revert AlreadyExists();
 
-        bool tokenIsCurrency0 = token < quote;
-        Currency currency0 = Currency.wrap(tokenIsCurrency0 ? token : quote);
-        Currency currency1 = Currency.wrap(tokenIsCurrency0 ? quote : token);
+        bool tokenIsCurrency0 = token < call.quote;
+        Currency currency0 = Currency.wrap(tokenIsCurrency0 ? token : call.quote);
+        Currency currency1 = Currency.wrap(tokenIsCurrency0 ? call.quote : token);
 
         PoolKey memory key = PoolKey({
             currency0: currency0,
             currency1: currency1,
-            fee: 0, // no standard LP fee — the hook's hook-fee replaces it entirely, see RwaFeeHook
+            fee: 0,
             tickSpacing: TICK_SPACING,
             hooks: IHooks(address(hook))
         });
 
-        (int24 tickLower, int24 tickUpper, uint160 startSqrtPriceX96) = _range(tokenIsCurrency0, vq);
-
+        (int24 tickLower, int24 tickUpper, uint160 startSqrtPriceX96) = _range(tokenIsCurrency0, call.vq);
         poolManager.initialize(key, startSqrtPriceX96);
         id = key.toId();
 
-        hook.registerPool(key, creator, platformWallet, crucible, CREATOR_BPS, CRUCIBLE_BPS, PLATFORM_BPS, HOOK_FEE_BPS);
+        hook.registerPool(key, call.creator, address(0), address(this), platformWallet, token, call.split);
 
         uint160 sqrtA = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtB = TickMath.getSqrtPriceAtTick(tickUpper);
@@ -250,18 +262,15 @@ contract RwaInstantV4Factory is IUnlockCallback {
         if (amt0 < 0) currency0.settle(poolManager, address(this), (-amt0).toUint256(), false);
         if (amt1 < 0) currency1.settle(poolManager, address(this), (-amt1).toUint256(), false);
 
-        if (firstBuy > 0) {
-            tokensOut = _firstBuy(key, currency0, currency1, tokenIsCurrency0, payer, firstBuy);
-            emit TokenFirstBuy(token, payer, firstBuy, tokensOut);
+        if (call.firstBuy > 0) {
+            tokensOut = _firstBuy(key, currency0, currency1, tokenIsCurrency0, call.payer, call.firstBuy);
+            emit TokenFirstBuy(token, call.payer, call.firstBuy, tokensOut);
         }
 
-        poolOf[token] = PoolInfo({token: token, quote: quote, creator: creator, id: id});
-        emit TokenLaunched(token, quote, creator, id, tokenIsCurrency0);
+        poolOf[token] = PoolInfo({token: token, quote: call.quote, creator: call.creator, id: id});
+        emit TokenLaunched(token, call.quote, call.creator, id, tokenIsCurrency0, call.split.feeBps);
     }
 
-    /// @dev V3 Instant tick frame: one-sided range from the virtual-quote tick to the far
-    ///      usable edge, initialized on the inner tick so the mint stays 100% token.
-    ///      vq = 0 keeps the original sketch (open at the usable-tick edge).
     function _range(bool tokenIsCurrency0, uint256 vq)
         internal
         pure
@@ -271,7 +280,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
         tickLower = TickMath.minUsableTick(ts);
         tickUpper = TickMath.maxUsableTick(ts);
         if (vq == 0) {
-            int24 startTick = tokenIsCurrency0 ? tickLower : tickUpper - ts;
+            int24 startTick = tokenIsCurrency0 ? tickLower : tickUpper;
             return (tickLower, tickUpper, TickMath.getSqrtPriceAtTick(startTick));
         }
 
@@ -299,7 +308,7 @@ contract RwaInstantV4Factory is IUnlockCallback {
         address buyer,
         uint256 quoteIn
     ) internal returns (uint256 tokensOut) {
-        bool zeroForOne = !tokenIsCurrency0; // paying quote → receiving token
+        bool zeroForOne = !tokenIsCurrency0;
         BalanceDelta d = poolManager.swap(
             key,
             SwapParams({

@@ -21,6 +21,10 @@ export interface ArcTokenMeta {
   rewardsHandle?: string
   /** Uni V3 pool if known at register time */
   pool?: string
+  /** Uniswap v4 pool id (bytes32 hex) */
+  poolId?: string
+  dexVenue?: 'v3' | 'v4'
+  feeBps?: number
   instantLaunch?: boolean
 }
 

@@ -4,7 +4,7 @@
  * Designed for Vercel Cron (maxDuration 300): incremental cursors, bounded chunks.
  */
 import { parseAbiItem, type Address, type Hex } from 'viem'
-import { ARC, arcPublicClient, arcLogsClient, arcInstantEnabled, arcReflectionEnabled } from '@/lib/contracts-arc'
+import { ARC, arcPublicClient, arcLogsClient, arcInstantEnabled, arcInstantV4Enabled, arcReflectionEnabled, instantV4CatalogFactories } from '@/lib/contracts-arc'
 import { arcMarketCapUsd, healIndexedSpotUsdc, healSparkCloses, instantCatalogFactories } from '@/lib/arc-instant-tokens'
 import { lastSparkClose } from '@/lib/arc-catalog-from-index'
 import { syncTradesToHead } from '@/lib/arc-trades'
@@ -37,6 +37,9 @@ const INSTANT_CREATED = parseAbiItem(
 )
 const REFLECTION_CREATED = parseAbiItem(
   'event InstantReflectionCreated(address indexed token, address indexed creator, address rewardToken, address pool, uint256 positionId, address feeSink)',
+)
+const V4_LAUNCHED = parseAbiItem(
+  'event TokenLaunched(address indexed token, address indexed quote, address indexed creator, bytes32 id, bool tokenIsCurrency0, uint16 feeBps)',
 )
 
 /** Known floors so first run doesn't scan from genesis. */
@@ -195,6 +198,54 @@ async function scanFactoryEvents(
           kind: 'instant',
           createdAt,
           createdBlock,
+        })
+        found++
+      }
+    }
+    state = { ...state, factoryCursor: scannedTo.toString() }
+  }
+
+  if (arcInstantV4Enabled()) {
+    let scannedTo = from
+    for (const factory of instantV4CatalogFactories()) {
+      const scanned = await scanLogsChunked(client, {
+        address: factory,
+        event: V4_LAUNCHED,
+        fromBlock: from,
+        toBlock: head,
+        maxChunks: MAX_FACTORY_CHUNKS,
+      })
+      if (scanned.scannedTo > scannedTo) scannedTo = scanned.scannedTo
+      for (const log of scanned.logs) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const args = (log as any).args as {
+          token?: Address
+          quote?: Address
+          creator?: Address
+          id?: Hex
+        }
+        if (!args?.token) continue
+        const createdBlock = Number(log.blockNumber ?? 0n)
+        let createdAt = 0
+        try {
+          if (log.blockNumber != null) {
+            const block = await client.getBlock({ blockNumber: log.blockNumber })
+            createdAt = Number(block.timestamp)
+          }
+        } catch {
+          /* attachLaunchCreatedAt backfills */
+        }
+        await upsertToken({
+          token: args.token,
+          creator: args.creator || ZERO,
+          pool: ZERO,
+          factory,
+          kind: 'instant',
+          createdAt,
+          createdBlock,
+          dexVenue: 'v4',
+          poolId: args.id,
+          quote: args.quote,
         })
         found++
       }

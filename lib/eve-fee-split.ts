@@ -162,7 +162,7 @@ export function splitValid(
     }
   }
   for (const leg of FEE_LEGS) {
-    const v = s[bpsKey(leg)]
+    const v = s[bpsKey(leg.key)]
     if (v < 0 || v > FEE_BPS_DENOM) return { ok: false, reason: 'Each slice must be 0–100%.' }
   }
   return { ok: true, reason: null }

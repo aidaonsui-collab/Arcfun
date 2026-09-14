@@ -18,6 +18,7 @@ import {
   arcReflectionEnabled,
   arcLaunchesEnabled,
   arcInstantV4UiEnabled,
+  arcInstantV4Enabled,
   arcCreationFeeWeiFor,
   arcPublicClient,
 } from '@/lib/contracts-arc'
@@ -25,6 +26,7 @@ import {
   buildCreateTokenMemeInstantArc,
   parseArcQuote,
 } from '@/lib/arc-instant-launchpad'
+import { buildCreateTokenEveV4 } from '@/lib/eve-instant-v4-launchpad'
 import { liveRwaQuoteAssets, pendingRwaQuoteAssets, rwaAssetById } from '@/lib/arc-rwa-assets'
 import {
   buildCreateTokenReflectionArc,
@@ -159,6 +161,7 @@ export function ArcCreateForm({
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
   const isReflection = launchType === 'reflection'
   const v4Ui = arcInstantV4UiEnabled()
+  const v4Live = arcInstantV4Enabled()
   const hideHolders = Boolean(rwaQuote)
   const minHoldersBps = isReflection ? MIN_REFLECT_HOLDERS_BPS : 0
   const feeOk = !v4Ui || splitValid(feeSplit, { hideHolders, minHoldersBps }).ok
@@ -254,7 +257,7 @@ export function ArcCreateForm({
       setError('Token launches are temporarily paused — check back soon.')
       return
     }
-    if (isReflection && !reflectionLive) {
+    if (isReflection && !v4Live && !reflectionLive) {
       setError('Reflection factory isn’t live on Arc yet — pick Meme Launch to ship today.')
       return
     }
@@ -266,7 +269,7 @@ export function ArcCreateForm({
       setError('Rewards wallet must be a valid 0x address (or leave blank to use your wallet).')
       return
     }
-    if (isReflection && !rewardTokenOk) {
+    if (isReflection && !v4Live && !rewardTokenOk) {
       setError('Reward token must be a valid ERC-20 address (e.g. Arc USDC).')
       return
     }
@@ -320,11 +323,13 @@ export function ArcCreateForm({
       const quoteDecimals = rwaQuote?.decimals || 6
       const firstBuyQuote =
         buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcQuote(firstBuy, quoteDecimals) : 0n
-      const factory = isReflection
-        ? ARC.REFLECTION_FACTORY
-        : rwaQuote?.factory
-          ? (rwaQuote.factory as Address)
-          : ARC.INSTANT_FACTORY
+      const factory = v4Live
+        ? ARC.INSTANT_V4_FACTORY
+        : isReflection
+          ? ARC.REFLECTION_FACTORY
+          : rwaQuote?.factory
+            ? (rwaQuote.factory as Address)
+            : ARC.INSTANT_FACTORY
       const quoteToken = (rwaQuote?.address as Address) || ARC.USDC
 
       if (firstBuyQuote > 0n) {
@@ -346,7 +351,30 @@ export function ArcCreateForm({
         }
       }
 
-      if (isReflection) {
+      if (v4Live) {
+        setStep('creating')
+        const creator = rewardsAddr || address
+        const call = buildCreateTokenEveV4({
+          name: name.trim(),
+          symbol: symbol.trim(),
+          quote: quoteToken,
+          creator,
+          firstBuyQuoteRaw: firstBuyQuote,
+          split: feeSplit,
+        })
+        hash = await writeContractAsync({
+          address: call.address,
+          abi: call.abi as never,
+          functionName: call.functionName as never,
+          args: call.args as never,
+          chainId: call.chainId,
+          gas: ARC_INSTANT_CREATE_GAS,
+        })
+        setStep('confirming')
+        const created = await waitArcCreateConfirmed(hash)
+        token = created.token
+        pool = created.pool
+      } else if (isReflection) {
         setStep('creating')
         const call = buildCreateTokenReflectionArc(
           name.trim(),
@@ -407,7 +435,12 @@ export function ArcCreateForm({
         await fetch('/api/arc/register/identity', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: getAddress(token), pool: pool || '' }),
+          body: JSON.stringify({
+            token: getAddress(token),
+            pool: pool || '',
+            dexVenue: v4Live ? 'v4' : 'v3',
+            feeBps: feeSplit.feeBps,
+          }),
         })
       } catch {
         /* purely a cache warm — every reader already falls back to the same chain reads */
@@ -464,9 +497,11 @@ export function ArcCreateForm({
     !pendingRegister &&
     rewardsOk &&
     feeOk &&
-    (isReflection
-      ? reflectionLive && rewardTokenOk
-      : configured)
+    (v4Live
+      ? true
+      : isReflection
+        ? reflectionLive && rewardTokenOk
+        : configured)
 
   if (!configured && !reflectionLive) {
     return (
@@ -482,7 +517,7 @@ export function ArcCreateForm({
     : rewardsWallet.trim() && isAddress(rewardsWallet.trim() as Address)
       ? `${rewardsWallet.trim().slice(0, 6)}…${rewardsWallet.trim().slice(-4)}`
       : 'Your wallet'
-  const feeUsd = Number(arcCreationFeeWeiFor(address)) / 1e18
+  const feeUsd = v4Live ? 0 : Number(arcCreationFeeWeiFor(address)) / 1e18
   const buyUsd = buyAtLaunch ? Number(firstBuy) || 0 : 0
   const payUsd = feeUsd + buyUsd
   const walletUsd =
@@ -618,7 +653,7 @@ export function ArcCreateForm({
               onChange={setFeeSplit}
               hideHolders={hideHolders}
               minHoldersBps={minHoldersBps}
-              preview={ARC.INSTANT_V4_FACTORY === '0x0000000000000000000000000000000000000000'}
+              preview={!v4Live}
               open={feeOpen}
               onOpenChange={setFeeOpen}
             />
@@ -637,7 +672,7 @@ export function ArcCreateForm({
           </div>
         ) : (
           <>
-            {isReflection && (
+            {isReflection && !v4Live && (
               <div className="mt-3 p-5 rounded-2xl bg-s1 border border-lime-line space-y-4">
                 <div className="flex flex-col gap-1">
                   {v4Ui ? (
@@ -935,8 +970,8 @@ export function ArcCreateForm({
       <p className="m-0 text-xs font-medium tracking-[0.16em] text-t3 uppercase">Launch</p>
       <h1 className="mt-2 mb-0 text-3xl font-semibold tracking-tight">One transaction. Full float.</h1>
       <p className="mt-2 max-w-xl text-sm text-t2 text-pretty">
-        1B supply, Uniswap V3, LP locked, pair {quoteSymbol}. ${feeUsd.toFixed(2)} creation fee.
-        Launch-token LP fees auto-burn.
+        1B supply, Uniswap {v4Live ? 'V4' : 'V3'}, LP locked, pair {quoteSymbol}.
+        {v4Live ? ' Pool fee is yours to set.' : ` $${feeUsd.toFixed(2)} creation fee. Launch-token LP fees auto-burn.`}
       </p>
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">

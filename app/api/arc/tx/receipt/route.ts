@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
       ok: true,
       token: created.token,
       pool: created.pool || '',
+      poolId: created.poolId || '',
       status: created.receipt.status,
     })
   } catch (e) {

@@ -17,8 +17,11 @@ Two factories share one hook:
 - **`RwaFeeHook.sol` / `RwaInstantV4Factory.sol`** — earlier 50/40/10 sketch. RWA creates will
   point at `EveFeeHook` instead; do not grow a second split model.
 
-Create UI: `/create` shows the fee chooser when `NEXT_PUBLIC_ARC_INSTANT_V4=1`. The live create
+Create UI: `/create` shows the fee chooser unless `NEXT_PUBLIC_ARC_INSTANT_V4=0`. The live create
 transaction still hits V3 Instant until `NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY` is set.
+
+HolderSink + EveV4Router live in this package. `HolderSink.distribute()` / `claim()` is the
+reflect path. RWA factory registers on EveFeeHook (holders slice rejected).
 
 The rest of this file is the original RWA sketch (still accurate for `RwaFeeHook`).
 
