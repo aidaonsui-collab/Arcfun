@@ -1176,7 +1176,11 @@ export function ArcCreateForm({
       <div>
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em]">Launch this</h1>
         <p className="mt-2.5 mb-5 text-[15px] text-t2 leading-relaxed">
-          Instant TOKEN/USDC. 1B supply, LP locked. Confirm to mint. We do not send the tx for you.
+          Instant TOKEN/USDC. 1B supply,{' '}
+          {v4Live
+            ? 'LP locked for 365 days, then platform-reclaimable.'
+            : 'LP locked.'}{' '}
+          Confirm to mint. We do not send the tx for you.
         </p>
         <div className="space-y-5">{fields}</div>
         {launchesLive ? <div className="mt-6">{cta}</div> : null}
@@ -1189,7 +1193,8 @@ export function ArcCreateForm({
       <p className="m-0 text-xs font-medium tracking-[0.16em] text-t3 uppercase">Launch</p>
       <h1 className="mt-2 mb-0 text-3xl font-semibold tracking-tight">One transaction. Full float.</h1>
       <p className="mt-2 max-w-xl text-sm text-t2 text-pretty">
-        1B supply, Uniswap {v4Live ? 'V4' : 'V3'}, LP locked, pair {quoteSymbol}.
+        1B supply, Uniswap {v4Live ? 'V4' : 'V3'},{' '}
+        {v4Live ? 'LP locked for 365 days, then platform-reclaimable' : 'LP locked'}, pair {quoteSymbol}.
         {v4Live ? ' Pool fee is yours to set.' : ` $${feeUsd.toFixed(2)} creation fee. Launch-token LP fees auto-burn.`}
       </p>
 
