@@ -1,7 +1,8 @@
 /**
  * Dedicated-indexer lease. A home-Mac loop (Jessica) renews this every cycle.
- * The Vercel 2-minute cron skips while the lease is live, and takes over ~60s
- * after the Air sleeps or the process dies.
+ * The Vercel factory/swap cron (every 2 min) and holders cron (every 3 min)
+ * skip while the lease is live, and take over ~60s after the Air sleeps or
+ * the process dies.
  */
 export const INDEXER_LEASE_KEY = 'arcfun:idx:lease'
 export const INDEXER_LEASE_TTL_SEC = 60
@@ -13,6 +14,9 @@ export type IndexerLease = {
   host: string
   pid: number
   at: number
+  /** Set by Jessica after it started the holders timer. Old daemons omit this,
+   *  so the Vercel holders cron keeps running until that process is restarted. */
+  holders?: boolean
 }
 
 export function indexerWorkerName(): string {
@@ -28,6 +32,14 @@ export function isDedicatedLeaseLive(
   return now - lease.at < INDEXER_LEASE_LIVE_MS
 }
 
+/** Holders cron may skip only when Jessica is alive AND running the holders tick. */
+export function isHoldersLeaseLive(
+  lease: IndexerLease | null | undefined,
+  now = Date.now(),
+): boolean {
+  return isDedicatedLeaseLive(lease, now) && lease?.holders === true
+}
+
 export async function readIndexerLease(): Promise<IndexerLease | null> {
   try {
     const { kv } = await import('@vercel/kv')
@@ -41,7 +53,7 @@ export async function readIndexerLease(): Promise<IndexerLease | null> {
 }
 
 export async function renewIndexerLease(owner: string, host: string, pid: number): Promise<void> {
-  const row: IndexerLease = { owner, host, pid, at: Date.now() }
+  const row: IndexerLease = { owner, host, pid, at: Date.now(), holders: true }
   try {
     const { kv } = await import('@vercel/kv')
     await kv.set(INDEXER_LEASE_KEY, row, { ex: INDEXER_LEASE_TTL_SEC })

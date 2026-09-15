@@ -1,20 +1,16 @@
 /**
- * GET /api/arc/indexer/holders — Vercel Cron. Keeps every known token's holder ledger caught up
- * (see lib/evm-holders.ts's header for why this exists and how the ledger works).
+ * GET /api/arc/indexer/holders — Vercel Cron fallback. Keeps every known token's holder
+ * ledger caught up (see lib/evm-holders.ts). Jessica's dedicated loop now runs the same
+ * cycle on a 3-minute timer; this cron skips while that lease is live, same as
+ * /api/arc/indexer/run. Fallback only: a 200s Fluid tick every 3 minutes was 24/7
+ * provisioned-memory on Pro even when the Air was already doing the work.
  *
- * Deliberately its own cron, not folded into /api/arc/indexer/run alongside factories/swaps —
- * two reasons:
- *   1. One misbehaving phase (a slow token, a bad RPC stretch) shouldn't be able to starve the
- *      others of their share of a shared tick's time budget.
- *   2. This is new, unproven-at-scale work. Jessica's dedicated loop just had its own reliability
- *      gap fixed (the lease was expiring mid-cycle under exactly this kind of RPC-bound work —
- *      see lib/arc-indexer/daemon.ts). Adding a second, larger job to that same loop before it's
- *      run clean for a while would be compounding an unproven change on top of another one.
- * Worth revisiting once both have some runway: this cron and the factory/swap one are both
- * candidates for the same dedicated-loop-plus-lease treatment Jessica already gives the other.
+ * Still its own route, not folded into /api/arc/indexer/run. A slow holders batch
+ * must not starve factory/swap catch-up of its 2-minute tick.
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { runHoldersLedgerCycle } from '@/lib/evm-holders'
+import { isHoldersLeaseLive, readIndexerLease } from '@/lib/arc-indexer/lease'
 
 export const dynamic = 'force-dynamic'
 // batchSize(10) * perTokenBudgetMs(20s) below is a 200s worst case — matches the 300s ceiling
@@ -31,6 +27,15 @@ export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization')
   if (!cronSecret || auth !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+
+  const lease = await readIndexerLease()
+  if (isHoldersLeaseLive(lease)) {
+    return NextResponse.json({
+      ok: true,
+      skipped: 'dedicated-indexer',
+      lease,
+    })
   }
 
   try {

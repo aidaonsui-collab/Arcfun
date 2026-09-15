@@ -686,7 +686,7 @@ export async function fetchArcTrades(
     // scheduleTradesSync, so the viewer isn't the one paying for the scan. This was the actual
     // remaining latency after the coalescing fix — coalescing stopped N concurrent requests from
     // each triggering their own scan, but the one scan that *did* run still blocked the response
-    // it was attached to. The client already polls every 8s (app/token/[address]/page.tsx), well
+    // it was attached to. The client already polls every 20s (TokenPageClient / tv-datafeed), well
     // past SYNC_FRESH_MS (6s), so a page that briefly shows stale/empty data self-heals on its
     // own next poll without any client change.
     let cursorExists = true

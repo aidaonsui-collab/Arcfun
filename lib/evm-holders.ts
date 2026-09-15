@@ -582,9 +582,9 @@ export async function getRawHolderBalances(
 /**
  * Background maintenance: keeps every known token's holder ledger caught up. Round-robins over
  * listIndexedTokens() the same registry catchUpSwapsAndVolume already uses — any token the
- * platform knows about gets a maintained ledger, no separate registry to keep in sync. Meant to
- * be called from its own cron tick (app/api/arc/indexer/holders/route.ts), independent of the
- * factory/swap cycle and of Jessica's existing load — see that route's own comment for why.
+ * platform knows about gets a maintained ledger, no separate registry to keep in sync. Jessica
+ * runs this on a 3-minute timer (lib/arc-indexer/daemon.ts). The Vercel cron
+ * (app/api/arc/indexer/holders/route.ts) is the fallback when that lease is dead.
  */
 export async function runHoldersLedgerCycle(opts?: {
   batchSize?: number

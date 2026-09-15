@@ -1,8 +1,9 @@
 /**
  * Always-on Arc indexer loop for a home Mac (Jessica).
  *
- * Writes the same Vercel KV the site reads. Renews a lease so the 2-minute
- * Vercel cron skips while this process is alive.
+ * Writes the same Vercel KV the site reads. Renews a lease so the Vercel
+ * factory/swap cron (every 2 min) and holders cron (every 3 min) skip while
+ * this process is alive.
  *
  *   npm run indexer
  *   # keep the Air awake:
@@ -14,6 +15,7 @@ import { runOtcIndexerCycle } from './otc-cycle'
 import { indexerWorkerName, renewIndexerLease } from './lease'
 import { runOtcKeeperTick } from '@/lib/arc-otc-keeper'
 import { robinOtcEnabled } from '@/lib/bridge/robin-otc'
+import { runHoldersLedgerCycle } from '@/lib/evm-holders'
 
 const SLEEP_MS = Math.max(1_000, Number(process.env.INDEXER_SLEEP_MS) || 4_000)
 /** OTC book + settle — Jessica only. Do not put these on Vercel minute crons.
@@ -21,6 +23,10 @@ const SLEEP_MS = Math.max(1_000, Number(process.env.INDEXER_SLEEP_MS) || 4_000)
  *  dropping this to 10s is safe even on a cycle that occasionally takes longer than that — the
  *  next scheduled tick just no-ops instead of overlapping. */
 const OTC_MS = Math.max(5_000, Number(process.env.OTC_SLEEP_MS) || 10_000)
+/** Holder-ledger catch-up. Same cadence as the Vercel fallback cron (`*/3`).
+ *  Must not ride the 4s swap loop: a 10-token x 20s budget tick would stall
+ *  factory/swap catch-up for minutes. Inflight skip, same as OTC. */
+const HOLDERS_MS = Math.max(30_000, Number(process.env.HOLDERS_SLEEP_MS) || 180_000)
 
 /**
  * Renewing only once per loop iteration — before runArcIndexerCycle(), not during it — let the
@@ -51,7 +57,7 @@ export async function main(): Promise<void> {
   const owner = indexerWorkerName() === 'vercel-cron' ? `jessica:${host}` : indexerWorkerName()
   process.env.INDEXER_WORKER = owner
   console.log(
-    `[arc-indexer] dedicated loop owner=${owner} sleep=${SLEEP_MS}ms renew=${LEASE_RENEW_MS}ms otc=${OTC_MS}ms`,
+    `[arc-indexer] dedicated loop owner=${owner} sleep=${SLEEP_MS}ms renew=${LEASE_RENEW_MS}ms otc=${OTC_MS}ms holders=${HOLDERS_MS}ms`,
   )
 
   setInterval(() => {
@@ -88,6 +94,28 @@ export async function main(): Promise<void> {
     void tickOtcDesk()
   }, OTC_MS)
   void tickOtcDesk()
+
+  let holdersInflight = false
+  const tickHolders = async () => {
+    if (holdersInflight) return
+    holdersInflight = true
+    try {
+      const res = await runHoldersLedgerCycle({ batchSize: 10, perTokenBudgetMs: 20_000 })
+      console.log(
+        `[arc-indexer] holders ${new Date().toISOString()} ${
+          res.ok ? `ok tokens=${res.tokens} touched=${res.touched}` : 'FAIL'
+        }`,
+      )
+    } catch (e) {
+      console.error('[arc-indexer] holders', e instanceof Error ? e.message : e)
+    } finally {
+      holdersInflight = false
+    }
+  }
+  setInterval(() => {
+    void tickHolders()
+  }, HOLDERS_MS)
+  void tickHolders()
 
   for (;;) {
     const t0 = Date.now()

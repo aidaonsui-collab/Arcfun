@@ -91,6 +91,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
 
   return NextResponse.json(
     { candles, resolution },
-    { headers: { 'Cache-Control': 's-maxage=15, stale-while-revalidate=30' } },
+    { headers: { 'Cache-Control': 'public, s-maxage=20, stale-while-revalidate=60' } },
   )
 }
