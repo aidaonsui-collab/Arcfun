@@ -188,6 +188,8 @@ export function isArcRpcInfraError(err: unknown): boolean {
     raw.includes('rate limiting') ||
     raw.includes('capacity_exhausted') ||
     raw.includes('too many requests') ||
+    raw.includes('does not have access to this network') ||
+    raw.includes('project id does not have access') ||
     raw.includes('bad request') || // dRPC/Warp: getLogs window too large (HTTP 400)
     raw.includes('status: 400') ||
     /\bstatus:\s*400\b/.test(raw)
@@ -809,14 +811,15 @@ export function arcLogsRpcUrls(): string[] {
   const seen = new Set<string>()
   const urls: string[] = []
   const infuraFromCandidates = ARC_SERVER_RPC_CANDIDATES.filter((u) => isKeyedInfuraUrl(u))
+  // Infura Arc project lost network access (2026-09-15); prefer public logs RPCs first.
   for (const u of [
-    infura,
-    ...infuraFromCandidates,
     ARC_DRPC_RPC,
     ARC_WARP_RPC,
     ARC_BARACAT_RPC,
     ARC_SCAN_RPC,
     ARC_CUSP_RPC,
+    infura,
+    ...infuraFromCandidates,
     ...ARC_SERVER_RPC_CANDIDATES,
   ]) {
     if (!u || isBannedArcRpc(u) || isGetLogsDisabledRpc(u) || seen.has(u)) continue
@@ -835,10 +838,10 @@ export function arcLogsClient() {
     transport:
       urls.length > 1
         ? fallback(
-            urls.map((u) => http(u, { retryCount: 0, timeout: 4_000 })),
+            urls.map((u) => http(u, { retryCount: 0, timeout: 12_000 })),
             { shouldThrow: (error) => !isArcRpcInfraError(error) },
           )
-        : http(urls[0] || ARC_SCAN_RPC, { timeout: 4_000 }),
+        : http(urls[0] || ARC_SCAN_RPC, { timeout: 12_000 }),
   })
   return _logsClients[0]
 }
