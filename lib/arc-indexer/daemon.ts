@@ -134,5 +134,14 @@ export async function main(): Promise<void> {
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('daemon.ts')) {
-  void main()
+  process.on('uncaughtException', (e) => {
+    console.error('[arc-indexer] uncaughtException', e)
+  })
+  process.on('unhandledRejection', (e) => {
+    console.error('[arc-indexer] unhandledRejection', e)
+  })
+  void main().catch((e) => {
+    console.error('[arc-indexer] main failed', e)
+    process.exit(1)
+  })
 }
