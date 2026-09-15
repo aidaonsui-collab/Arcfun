@@ -1,6 +1,6 @@
 /**
  * Volume windows from persisted trade tape (arcfun:trades:*).
- * Lifetime volume walks Uni V3 Swap logs in 9k chunks (RPC getLogs cap is 10k).
+ * Lifetime volume walks Uni V3 Swap logs in 50-block chunks (RPC getLogs cap is 10k).
  */
 import { kv } from '@vercel/kv'
 import type { Address } from 'viem'
@@ -56,13 +56,13 @@ export function tapeSaturatedInWindow(
   return oldestTs > nowSec - 24 * HOUR
 }
 const FACTORY_FLOOR = 14_000_000n
-const LOG_CHUNK = 9_000n
+const LOG_CHUNK = 50n
 /** How long a capped token's on-chain window rescan is trusted before it's redone. Shorter than
  *  the 2-min cron so a token still refreshes every cycle, but long enough that an opportunistic
  *  seedLifetimeVolume() call right after a cron tick reuses the result instead of rescanning. */
 const ONCHAIN_RESCAN_TTL_MS = 90_000
 /** Newest-first windows per compute so all-time pulls ahead of 24h on the first pass. */
-const LIFETIME_CHUNKS = 16
+const LIFETIME_CHUNKS = 3000
 
 export async function computeVolumeWindows(token: Address | string): Promise<IndexedVolume> {
   const now = Math.floor(Date.now() / 1000)

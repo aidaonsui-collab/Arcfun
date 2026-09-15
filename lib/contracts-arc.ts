@@ -83,6 +83,11 @@ function serverInfuraRpc(): string {
 const ARC_BARACAT_RPC = 'https://arc-mainnet-rpc.baracat.meme'
 /** Arcscan public RPC — domain moved .io → .org 2026-08-12 (old NS zone emptied). */
 const ARC_SCAN_RPC = 'https://rpc.arc-scan.org'
+/** RadarDEX-style public Arc RPCs (verified 2026-09-15). Good for tip + small eth_getLogs. */
+const ARC_DRPC_RPC = 'https://arc.drpc.org'
+const ARC_WARP_RPC = 'https://warp-arc-production.up.railway.app/rpc'
+/** Flaky last-resort (timeouts/502 observed 2026-09-15). */
+const ARC_CUSP_RPC = 'https://thecusp.io/api/arc-rpc'
 
 /**
  * Tail-only fallback — verified 2026-08-10 as a real, in-sync Arc mainnet node (correct chainId,
@@ -182,7 +187,10 @@ export function isArcRpcInfraError(err: unknown): boolean {
     raw.includes('rate limit') ||
     raw.includes('rate limiting') ||
     raw.includes('capacity_exhausted') ||
-    raw.includes('too many requests')
+    raw.includes('too many requests') ||
+    raw.includes('bad request') || // dRPC/Warp: getLogs window too large (HTTP 400)
+    raw.includes('status: 400') ||
+    /\bstatus:\s*400\b/.test(raw)
   )
 }
 
@@ -224,7 +232,7 @@ export const ARC_RPC_URLS: string[] = (() => {
     .filter(Boolean)
   const defaults = ARC_IS_TESTNET
     ? [ARC_TESTNET_RPC]
-    : [ARC_BARACAT_RPC, ARC_THELEAK_RPC, ARC_SCAN_RPC].filter(Boolean)
+    : [ARC_BARACAT_RPC, ARC_DRPC_RPC, ARC_WARP_RPC, ARC_THELEAK_RPC, ARC_SCAN_RPC, ARC_CUSP_RPC].filter(Boolean)
   const seen = new Set<string>()
   const out: string[] = []
   for (const u of [primary, ...extras, ...defaults]) {
@@ -804,8 +812,11 @@ export function arcLogsRpcUrls(): string[] {
   for (const u of [
     infura,
     ...infuraFromCandidates,
+    ARC_DRPC_RPC,
+    ARC_WARP_RPC,
     ARC_BARACAT_RPC,
     ARC_SCAN_RPC,
+    ARC_CUSP_RPC,
     ...ARC_SERVER_RPC_CANDIDATES,
   ]) {
     if (!u || isBannedArcRpc(u) || isGetLogsDisabledRpc(u) || seen.has(u)) continue

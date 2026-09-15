@@ -45,7 +45,7 @@ const V4_LAUNCHED = parseAbiItem(
 /** Known floors so first run doesn't scan from genesis. */
 const FACTORY_FLOOR = 14_000_000n
 
-const MAX_FACTORY_CHUNKS = 24
+const MAX_FACTORY_CHUNKS = 2000
 /**
  * How many tokens to catch up per cron tick (swap + volume), split two ways.
  *
@@ -467,37 +467,44 @@ export async function runArcIndexerCycle(): Promise<IndexerRunResult> {
     const client = arcLogsClient()
     const head = await client.getBlockNumber()
 
-    try {
-      const f = await scanFactoryEvents(state, head)
-      state = f.state
-      factories = f.found
-    } catch (e) {
-      // A dead getLogs must not skip swap catch-up — that froze EVE's tape while RadarDEX
-      // kept filling (2026-09-01: "failed all 1 log chunks" aborted the whole cycle).
-      console.warn('[arc-indexer] factory scan', summarizeRpcError(e))
+    // When factory getLogs is constrained to tiny windows (dRPC/Warp ~50 blocks), a ~50k
+    // factory lag can burn the whole CYCLE_BUDGET before swaps run — leaving the trade tape
+    // frozen even though swap catch-up would work. Prefer swaps first when badly lagged.
+    const factoryLag = head - BigInt(state.factoryCursor || '0')
+    const swapsFirst = factoryLag > 10_000n
+
+    const runFactory = async () => {
+      try {
+        const f = await scanFactoryEvents(state, head)
+        state = f.state
+        factories = f.found
+      } catch (e) {
+        // A dead getLogs must not skip swap catch-up — that froze EVE's tape while RadarDEX
+        // kept filling (2026-09-01: "failed all 1 log chunks" aborted the whole cycle).
+        console.warn('[arc-indexer] factory scan', summarizeRpcError(e))
+      }
     }
 
-    // OTC is deliberately NOT touched here — /api/arc/indexer/otc owns it end to end and runs
-    // every minute (this cron every two), so everything below was pure duplicate work, and worse:
-    //
-    //  - Both crons advanced the SAME state.otcCursor with an unsynchronised read-modify-write.
-    //    Two overlapping ticks could each load state, scan, and save — the later save clobbering
-    //    the earlier cursor, re-scanning or skipping OfferCreated ranges.
-    //  - the refreshOtcOfferState() this replaced still removed an offer on a single
-    //    remaining === 0n read — the exact bug fixed in the OTC cron in #123. Keeping it meant
-    //    this cron re-deleted live maker offers every two minutes, silently undoing that fix.
-    //  - catchUpOtcDeskStats() likewise raced its own per-chain settledCursor between the two.
-    //
-    // One owner per dataset: this cron does factories + swaps/volume, the OTC cron does OTC.
-    // Skip the phase entirely if the factory scan already ate the budget — still fall through
-    // to saveState so the factory cursor progress isn't lost.
-    if (Date.now() < deadline) {
+    const runSwaps = async () => {
+      if (Date.now() >= deadline) {
+        budgetHit = true
+        return
+      }
       const s = await catchUpSwapsAndVolume(state, deadline)
       state = s.state
       swapsTokens = s.tokens
       budgetHit = s.budgetHit
+    }
+
+    // OTC is deliberately NOT touched here — /api/arc/indexer/otc owns it end to end.
+    if (swapsFirst) {
+      console.log(`[arc-indexer] swaps-first factoryLag=${factoryLag}`)
+      await runSwaps()
+      if (Date.now() < deadline) await runFactory()
+      else budgetHit = true
     } else {
-      budgetHit = true
+      await runFactory()
+      await runSwaps()
     }
 
     const ms = Date.now() - t0

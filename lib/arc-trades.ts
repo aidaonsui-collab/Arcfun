@@ -65,7 +65,7 @@ const V3_SWAP = parseAbiItem(
 )
 type V3SwapLog = Log<bigint, number, false, typeof V3_SWAP, true>
 
-const CHUNK = 9_000n
+const CHUNK = 50n
 /**
  * How far back a token's FIRST-EVER scan reaches — ~3.5 days at ~1s/block, 6x the old live-only
  * scanner's ~14h window. Scanned in full, all the way to `head`, in that one cold-start request
@@ -248,7 +248,7 @@ async function getSwapLogs(pool: Address, fromBlock: bigint, toBlock: bigint): P
   // Root cause of EVE's trade tape freezing for ~2.8h (2026-09-04): this used to be
   // `if (lastEmpty.length === 0 && lastErr) throw lastErr` — throwing lastErr whenever the
   // final tally was empty, with no regard for WHEN that error happened relative to a real
-  // success. The gap's first 9k-block chunk legitimately has zero swaps; baracat was failing
+  // success. The gap's first 50-block chunk legitimately has zero swaps; baracat was failing
   // on nearly every attempt; arc-scan correctly answered "0 logs" for that same chunk — a
   // real, trustworthy empty result — but the stale baracat error from earlier in the SAME
   // loop got thrown instead, discarding it. scanSwapRange treats any throw from here as
