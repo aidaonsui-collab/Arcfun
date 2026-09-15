@@ -16,7 +16,7 @@ const SUPPORTED_RESOLUTIONS = ['1', '5', '15', '60', '240', '1D']
 
 export function createArcDatafeed(token: string, symbol: string) {
   const subscriptions = new Map<string, ReturnType<typeof setInterval>>()
-  const CANDLE_CACHE_TTL_MS = 8_000
+  const CANDLE_CACHE_TTL_MS = 20_000
   const candleCache = new Map<string, { at: number; promise: Promise<TVBar[]> }>()
 
   /** `fromSec`/`toSec` omitted → server default window (recent, bounded — see the ohlcv route).
@@ -131,7 +131,7 @@ export function createArcDatafeed(token: string, symbol: string) {
         } catch {
           /* ignore */
         }
-      }, 8_000)
+      }, 20_000)
       subscriptions.set(listenerGuid, interval)
     },
 

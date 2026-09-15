@@ -208,11 +208,13 @@ export function TokenPageClient({
   }, [holders, loadHolders])
 
   useEffect(() => {
+    // 20s matches /trades and /ohlcv s-maxage so an open tab is a CDN hit, not a
+    // Fluid origin call. 8s was the Sep 14 Pro spike (3 APIs × every 8s per tab).
     const id = setInterval(() => {
       if (document.visibilityState !== 'visible') return
       load()
       void loadTrades()
-    }, 8_000)
+    }, 20_000)
     return () => clearInterval(id)
   }, [load, loadTrades])
 
