@@ -23,7 +23,7 @@ const SLEEP_MS = Math.max(1_000, Number(process.env.INDEXER_SLEEP_MS) || 4_000)
  *  dropping this to 10s is safe even on a cycle that occasionally takes longer than that — the
  *  next scheduled tick just no-ops instead of overlapping. */
 const OTC_MS = Math.max(5_000, Number(process.env.OTC_SLEEP_MS) || 10_000)
-/** Holder-ledger catch-up. Same cadence as the Vercel fallback cron (`*/3`).
+/** Holder-ledger catch-up. Same cadence as the Vercel fallback cron (every 3 min).
  *  Must not ride the 4s swap loop: a 10-token x 20s budget tick would stall
  *  factory/swap catch-up for minutes. Inflight skip, same as OTC. */
 const HOLDERS_MS = Math.max(30_000, Number(process.env.HOLDERS_SLEEP_MS) || 180_000)
@@ -101,11 +101,8 @@ export async function main(): Promise<void> {
     holdersInflight = true
     try {
       const res = await runHoldersLedgerCycle({ batchSize: 10, perTokenBudgetMs: 20_000 })
-      console.log(
-        `[arc-indexer] holders ${new Date().toISOString()} ${
-          res.ok ? `ok tokens=${res.tokens} touched=${res.touched}` : 'FAIL'
-        }`,
-      )
+      const holdersLag = res.ok ? `ok tokens=${res.tokens} touched=${res.touched}` : 'FAIL'
+      console.log(`[arc-indexer] holders ${new Date().toISOString()} ${holdersLag}`)
     } catch (e) {
       console.error('[arc-indexer] holders', e instanceof Error ? e.message : e)
     } finally {
