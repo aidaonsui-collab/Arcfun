@@ -1,9 +1,9 @@
 /**
- * Chunked eth_getLogs with Arc-friendly 9k ranges + retry.
+ * Chunked eth_getLogs with Arc-friendly 50-block ranges (dRPC/Warp reject larger eth_getLogs) + retry.
  */
 import type { Address, Log } from 'viem'
 
-export const LOG_CHUNK = 9_000n
+export const LOG_CHUNK = 50n
 const CONCURRENCY = 4
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {

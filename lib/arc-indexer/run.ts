@@ -45,7 +45,7 @@ const V4_LAUNCHED = parseAbiItem(
 /** Known floors so first run doesn't scan from genesis. */
 const FACTORY_FLOOR = 14_000_000n
 
-const MAX_FACTORY_CHUNKS = 24
+const MAX_FACTORY_CHUNKS = 2000
 /**
  * How many tokens to catch up per cron tick (swap + volume), split two ways.
  *
