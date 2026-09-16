@@ -8,6 +8,7 @@ import { ARC, arcPublicClient, arcLogsClient, arcInstantEnabled, arcInstantV4Ena
 import { arcMarketCapUsd, healIndexedSpotUsdc, healSparkCloses, instantCatalogFactories } from '@/lib/arc-instant-tokens'
 import { lastSparkClose } from '@/lib/arc-catalog-from-index'
 import { syncTradesToHead } from '@/lib/arc-trades'
+import { EVE_TOKEN } from '@/lib/eve'
 import { allInMultiplier, fetchOtcFeeBps } from '@/lib/bridge/robin-otc'
 import { scanLogsChunked } from './logs'
 import {
@@ -326,7 +327,15 @@ async function catchUpSwapsAndVolume(
     const tb = lastAt(b) || now
     return tb - ta
   })
-  const hot = byNeed.slice(0, HOT_BATCH)
+  // Prefer $EVE in every hot trade-sync batch — buy-bot lump alerts fire on its tape;
+  // when factory lag + budgetHit are common it must not wait on round-robin alone.
+  const eveKey = EVE_TOKEN.toLowerCase()
+  const eveTok = all.find((t) => t.token.toLowerCase() === eveKey)
+  const hot = (() => {
+    const base = byNeed.slice(0, HOT_BATCH)
+    if (!eveTok) return base
+    return [eveTok, ...base.filter((t) => t.token.toLowerCase() !== eveKey)].slice(0, HOT_BATCH)
+  })()
 
   // Round-robin over the STABLE listIndexedTokens() order (not byNeed, which reshuffles every
   // cycle as volumes change) — a rotating index into a list that keeps reordering under it would
@@ -359,7 +368,16 @@ async function catchUpSwapsAndVolume(
       // returns immediately and refreshes stale tokens in the background (see fetchArcTrades's
       // own comment) — right for a page view, wrong here, where volume must reflect this cycle's
       // sync, not whatever was cached before it.
-      await syncTradesToHead(t.token as Address)
+      const sync = await syncTradesToHead(t.token as Address, { deadline })
+      if (sync.budgetHit) {
+        // Mid-token yield: cursor already saved; stop the batch so the rest of the
+        // cycle (and next tick) can proceed instead of draining the budget here.
+        budgetHit = true
+        const vol = await computeVolumeWindows(t.token)
+        await setVolume(t.token, vol)
+        n++
+        return false
+      }
       const vol = await computeVolumeWindows(t.token)
       await setVolume(t.token, vol)
       n++

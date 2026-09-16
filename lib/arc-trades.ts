@@ -271,11 +271,19 @@ export async function scanSwapRange(
   fromBlock: bigint,
   toBlock: bigint,
   quoteDecimals = 6,
-): Promise<{ trades: EvmTrade[]; scannedTo: bigint }> {
+  opts?: { deadline?: number },
+): Promise<{ trades: EvmTrade[]; scannedTo: bigint; budgetHit: boolean }> {
   const out: EvmTrade[] = []
   let cursor = fromBlock
   let scannedTo = fromBlock > 0n ? fromBlock - 1n : 0n
+  let budgetHit = false
   while (cursor <= toBlock) {
+    // Indexer cycle budget: yield mid-token with scannedTo already advanced so the
+    // next cycle resumes the cursor instead of burning 10–70 min on one catch-up.
+    if (opts?.deadline != null && Date.now() >= opts.deadline) {
+      budgetHit = true
+      break
+    }
     const chunkEnd = cursor + CHUNK - 1n > toBlock ? toBlock : cursor + CHUNK - 1n
     let logs: V3SwapLog[] = []
     try {
@@ -337,7 +345,7 @@ export async function scanSwapRange(
     scannedTo = chunkEnd
     cursor = chunkEnd + 1n
   }
-  return { trades: out, scannedTo }
+  return { trades: out, scannedTo, budgetHit }
 }
 
 /** USD swapped in [fromBlock, toBlock] (USDC ≈ $1). Used for lifetime pad volume. */
@@ -559,12 +567,33 @@ async function maybeRewindStaleCursor(
   }
 }
 
-export async function syncTradesToHead(token: Address): Promise<void> {
+export type SyncTradesOpts = {
+  /** Wall-clock deadline (Date.now() ms). When hit mid-scan, persist cursor and return. */
+  deadline?: number
+}
+
+export type SyncTradesResult = {
+  reachedHead: boolean
+  budgetHit: boolean
+}
+
+export async function syncTradesToHead(
+  token: Address,
+  opts?: SyncTradesOpts,
+): Promise<SyncTradesResult> {
   const key = token.toLowerCase()
-  const last = lastSyncedAt.get(key)
-  if (last != null && Date.now() - last < SYNC_FRESH_MS) return
+  // Indexer passes a cycle deadline — never skip on SYNC_FRESH_MS or a lagged token
+  // can be deferred forever while other work keeps refreshing the timer.
+  if (opts?.deadline == null) {
+    const last = lastSyncedAt.get(key)
+    if (last != null && Date.now() - last < SYNC_FRESH_MS) {
+      return { reachedHead: true, budgetHit: false }
+    }
+  }
 
   let didWork = false
+  let reachedHead = true
+  let budgetHit = false
   await coalesceAsync(`sync:${key}`, async () => {
     const orient = await resolvePool(token)
     if (!orient) return
@@ -592,6 +621,32 @@ export async function syncTradesToHead(token: Address): Promise<void> {
     }
     const stale = tapeIsStaleTs(newestTs)
 
+    const scanOpts = opts?.deadline != null ? { deadline: opts.deadline } : undefined
+
+    const persistScan = async (
+      from: bigint,
+      found: { trades: EvmTrade[]; scannedTo: bigint; budgetHit: boolean },
+      targetTo: bigint,
+    ) => {
+      if (found.budgetHit) budgetHit = true
+      // Always save mid-token progress when the cycle budget cuts us off — otherwise the
+      // next cycle restarts the same multi-chunk window. For normal completions keep the
+      // stale-tape empty-getLogs guard (shouldPersistScanCursor).
+      const force = found.budgetHit && found.scannedTo >= from
+      if (
+        force ||
+        shouldPersistScanCursor({
+          foundTrades: found.trades.length,
+          scannedTo: found.scannedTo,
+          from,
+          tapeIsStale: stale,
+        })
+      ) {
+        await persistTrades(key, found.trades, found.scannedTo)
+      }
+      if (found.budgetHit || found.scannedTo < targetTo) reachedHead = false
+    }
+
     if (isColdStart) {
       // First time this store has ever seen this token — scan the FULL DEEP_BACKFILL_BLOCKS
       // window in one shot, all the way to `head`, not just a CATCHUP_MAX_BLOCKS-bounded slice of
@@ -601,42 +656,38 @@ export async function syncTradesToHead(token: Address): Promise<void> {
       // (all its history within the last 100k blocks) would show zero trades on its first ever
       // page load, self-healing only on a second visit once the cursor caught up. One-time cost —
       // ~34 chunked eth_getLogs calls worst case — is worth paying once per token to never miss
-      // recent activity on a cold view.
+      // recent activity on a cold view. With LOG_CHUNK=50 that one-shot can be thousands of
+      // RPCs; the indexer passes `deadline` so we yield mid-token instead of burning the cycle.
       const from = head >= DEEP_BACKFILL_BLOCKS ? head - DEEP_BACKFILL_BLOCKS + 1n : 0n
-      const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, head, quoteDecimals)
-      if (
-        shouldPersistScanCursor({
-          foundTrades: found.trades.length,
-          scannedTo: found.scannedTo,
-          from,
-          tapeIsStale: stale,
-        })
-      ) {
-        await persistTrades(key, found.trades, found.scannedTo)
-      }
+      const found = await scanSwapRange(
+        client, pool, tokenIs0, tokenDecimals, from, head, quoteDecimals, scanOpts,
+      )
+      await persistScan(from, found, head)
     } else if (cursor! < head) {
       // Warm — only scan the gap since the last time anyone loaded this token, capped per
       // request so a token idle a long time just catches up over however many page loads it takes.
       const from = cursor! + 1n
       const to = from + CATCHUP_MAX_BLOCKS - 1n > head ? head : from + CATCHUP_MAX_BLOCKS - 1n
-      const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, to, quoteDecimals)
-      if (
-        shouldPersistScanCursor({
-          foundTrades: found.trades.length,
-          scannedTo: found.scannedTo,
-          from,
-          tapeIsStale: stale,
-        })
-      ) {
-        await persistTrades(key, found.trades, found.scannedTo)
-      }
+      const found = await scanSwapRange(
+        client, pool, tokenIs0, tokenDecimals, from, to, quoteDecimals, scanOpts,
+      )
+      await persistScan(from, found, to)
+      if (!budgetHit && found.scannedTo < head) reachedHead = false
     }
     // Cursor at head can still be a lie: empty getLogs from a public RPC parks it there.
     // Rewind from the last persisted fill, not a fixed 12k-block window.
-    await maybeRewindStaleCursor(client, key, pool, tokenIs0, tokenDecimals, head, quoteDecimals)
+    // Skip when the cycle budget already fired — rewind is another multi-chunk scan.
+    if (!budgetHit && (opts?.deadline == null || Date.now() < opts.deadline)) {
+      await maybeRewindStaleCursor(client, key, pool, tokenIs0, tokenDecimals, head, quoteDecimals)
+    } else if (budgetHit) {
+      reachedHead = false
+    }
   })
 
-  if (didWork) lastSyncedAt.set(key, Date.now())
+  // Only mark fresh when we finished (or skipped work). A budget yield must not
+  // suppress the next indexer cycle via SYNC_FRESH_MS.
+  if (didWork && !budgetHit) lastSyncedAt.set(key, Date.now())
+  return { reachedHead, budgetHit }
 }
 
 /**
