@@ -371,8 +371,13 @@ export function quoteSymbolForQuote(quote: string | null | undefined): string {
 
 /**
  * Raw launchVirtualQuote for Instant RWA creates.
- * Matches Instant USDC ~$5500 starting FDV encoding: stables use 5500 * 10^decimals;
- * cirBTC uses a baked ~$76k spot (live cirBTC/USDC pool, 2026-09-16) → ~0.0725 cirBTC.
+ * Stables: 5500 * 10^decimals (~$5500 starting FDV, same as Instant USDC / factory default).
+ *
+ * cirBTC (8dp): do NOT use a spot-scaled raw like ~7.25e6 (~$5500 at ~$76k BTC).
+ * Live Arc creates against RwaInstantV4Factory revert for that magnitude (VirtualQuote /
+ * seed path); factory `launchVirtualQuote` is 5_500_000_000 and succeeds. Until an 8dp
+ * encoding is proven on-chain for both token orderings, match that factory default.
+ * Override with NEXT_PUBLIC_ARC_RWA_CIRBTC_VIRTUAL_QUOTE when ready.
  */
 export function defaultRwaVirtualQuoteRaw(asset: Pick<ArcRwaAsset, 'id' | 'decimals'>): bigint {
   const envKey =
@@ -382,8 +387,8 @@ export function defaultRwaVirtualQuoteRaw(asset: Pick<ArcRwaAsset, 'id' | 'decim
   const raw = (process.env[envKey] || '').trim()
   if (/^\d+$/.test(raw)) return BigInt(raw)
   if (asset.id === 'cirbtc' || asset.decimals === 8) {
-    // ~5500 / 75875 * 1e8 ≈ 7_248_784; round to 7_250_000.
-    return 7_250_000n
+    // Same raw as factory launchVirtualQuote / VQ_6DP (5_500e6). Spot-scaled 8dp (~7.25e6) reverts on Arc.
+    return 5_500_000_000n
   }
   const dec = asset.decimals > 0 ? asset.decimals : 6
   return 5500n * 10n ** BigInt(dec)
