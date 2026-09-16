@@ -7,7 +7,7 @@
  *   npm run backfill-candles -- 0x19209E55049bc613c5cC8b66B7DF7824096e78CF
  *
  * Respects the same CANDLE_DURABLE_* allowlist as live writes (top-N by pad volume + always-list).
- * For every allowed indexed token, scans Uniswap V3 Swap logs from its pool's createdBlock (resuming
+ * For every allowed indexed token, scans Uniswap V3/V4 Swap logs from its pool's createdBlock (resuming
  * from arc_candle_backfill_state.scanned_up_to_block on a rerun) up to the chain head at the time
  * this script started, folding them into 1-minute candles in the durable Supabase store — see
  * lib/arc-candle-store.ts. This is what actually recovers a token's pre-existing history (e.g.
@@ -44,7 +44,7 @@ async function backfillToken(token: Address, createdBlock: bigint | null, head: 
     console.warn(`[backfill] ${token} — no pool, skipping`)
     return
   }
-  const { pool, tokenIs0, tokenDecimals, quoteDecimals } = orient
+  const { pool, tokenIs0, tokenDecimals, quoteDecimals, venue, poolId } = orient
   const client = arcLogsClient()
 
   const state = await getBackfillState(token)
@@ -65,7 +65,10 @@ async function backfillToken(token: Address, createdBlock: bigint | null, head: 
     const to = from + CHUNK_BLOCKS - 1n > head ? head : from + CHUNK_BLOCKS - 1n
     let found: Awaited<ReturnType<typeof scanSwapRange>>
     try {
-      found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, to, quoteDecimals)
+      found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, to, quoteDecimals, {
+        venue,
+        poolId,
+      })
     } catch (e) {
       console.warn(`[backfill] ${token} — scan ${from}-${to} failed, will retry next run:`, summarizeRpcError(e))
       return
