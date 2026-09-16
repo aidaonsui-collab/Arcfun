@@ -479,10 +479,11 @@ async function fetchArcV4InstantPoolTokenFromFactory(
       functionName: 'poolOf',
       args: [token],
     })
-    const launched = (Array.isArray(row) ? row[0] : (row as { token: Address }).token) as Address
-    const quoteAddr = (Array.isArray(row) ? row[1] : (row as { quote: Address }).quote) as Address
-    const creator = (Array.isArray(row) ? row[2] : (row as { creator: Address }).creator) as Address
-    const poolId = (Array.isArray(row) ? row[4] : (row as { id: `0x${string}` }).id) as `0x${string}`
+    const tuple = row as readonly [Address, Address, Address, Address, `0x${string}`]
+    const launched = tuple[0]
+    const quoteAddr = tuple[1]
+    const creator = tuple[2]
+    const poolId = tuple[4]
     if (!launched || launched === ZERO || !creator || creator === ZERO) return null
     if (launched.toLowerCase() !== token.toLowerCase()) return null
 
@@ -666,8 +667,9 @@ export async function isArcInstantToken(token: Address): Promise<boolean> {
           functionName: 'poolOf',
           args: [token],
         })
-        const launched = (Array.isArray(row) ? row[0] : (row as { token: Address }).token) as Address
-        const creator = (Array.isArray(row) ? row[2] : (row as { creator: Address }).creator) as Address
+        const tuple = row as readonly [Address, Address, Address, Address, `0x${string}`]
+        const launched = tuple[0]
+        const creator = tuple[2]
         if (launched && launched !== ZERO && creator && creator !== ZERO) return true
       } catch {
         /* try next factory */

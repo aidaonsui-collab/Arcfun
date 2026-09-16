@@ -104,7 +104,9 @@ export async function POST(req: NextRequest) {
           createdAt: row.createdAt || Math.floor(Date.now() / 1000),
           createdBlock: 0,
           dexVenue: row.dexVenue === 'v4' ? 'v4' : 'v3',
-          poolId: row.instantMeta?.poolId,
+          poolId: row.instantMeta?.poolId && row.instantMeta.poolId.startsWith('0x')
+            ? (row.instantMeta.poolId as `0x${string}`)
+            : undefined,
           quote: quoteAddr && quoteAddr.startsWith('0x') ? (quoteAddr as Address) : undefined,
         })
       } catch {
