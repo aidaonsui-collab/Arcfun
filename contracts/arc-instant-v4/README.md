@@ -31,7 +31,7 @@ Create UI: `/create` shows the fee chooser unless `NEXT_PUBLIC_ARC_INSTANT_V4=0`
 and reflect creates hit `EveInstantV4Factory`. The V3 Instant factory stays for tokens already
 on that path.
 
-## Live on Arc 5042 (2026-09-14)
+## Live on Arc 5042 (2026-09-16)
 
 Deployed with `script/DeployEveInstantV4.s.sol` through Arachnid's CREATE2 deployer
 (`0x4e59b44847b379578588920cA78FbF26c0B4956C`) so the hook address carries
@@ -41,12 +41,15 @@ so the CREATE2 factory is not locked as owner.
 | Contract | Address |
 | --- | --- |
 | Uniswap `PoolManager` | `0x8366a39CC670B4001A1121B8F6A443A643e40951` |
-| `EveFeeHook` | `0xd8F5790094711747ae4083651dDDfcE73699C044` |
-| `EveInstantV4Factory` | `0x0421a4c784ADCD0BB51bF0d108FF76E37bdB1297` |
-| `InstantAutoLpHelper` | `0x232097345561A453160B34021a6974293bA0DdD3` |
+| `EveFeeHook` | `0x8fa4B88e4052302FBd9E8419eeC6E9FdAC210044` |
+| `EveInstantV4Factory` | `0xCfC8287Fd6331A826565B2ACBc69CB3E083602Ea` |
+| `InstantAutoLpHelper` | `0xEbe049aF3725660A42736297d1fE82Ca21EB0cf3` |
 | `EveV4Router` | `0x494715a3923392Dd0fD312B0CC40055679Feaad2` |
-| `BundleSinkDeployer` | `0x90C261A932e29915DB97fb446e402EBd1438C680` |
-| `RwaInstantV4Factory` | `0x7f4D81281492D3EBc2629826721223451c20a5Ca` |
+| `BundleSinkDeployer` | `0xf775493CE7E16a94e175C1C984bcdF2F689895fc` |
+| `RwaInstantV4Factory` | `0x3489E76510238ef57Ee9d18005a6Fb110f17912D` |
+
+Give terminals **`RwaInstantV4Factory` `0x3489…912D`**. Quote is per-create (`TokenLaunched`).
+New Instant creates only. Already-launched tokens stay on the previous hook.
 
 PoolManager is Uniswap's official Arc address (`Uniswap/contracts` `deployments/json/5042.json`).
 Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
@@ -56,11 +59,10 @@ Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
 allowed). BundleSink creation code lives on `BundleSinkDeployer` so the factory stays under
 EIP-170.
 
-CREATE2-redeployed 2026-09-14 so auto-LP mint (`flushAutoLp`) and quote-burn swap
-(`flushQuoteBurn`) are on this hook. Factories above are a second deploy onto that hook
-with a 365-day platform LP reclaim (`unlockLiquidity`). Previous factories `0x32a0…` and
-`0x66Ca…` stay in the catalog (permanent LP, no timer). Router `0x4947…` was reused.
-Flush is permissionless, not automated.
+CREATE2-redeployed 2026-09-16 so flushQuoteBurn / flushAutoLp price-anchor checks are on
+this hook. Router `0x4947…` was reused. Previous 365-day factories `0x0421…` / `0x7f4D…`
+and permanent-LP factories `0x32a0…` / `0x66Ca…` stay in the catalog. Flush is
+permissionless, not automated.
 
 Quote is per-create. Issuer token addresses (USYC / BUIDL / CRCL) are still unset on
 mainnet, so those create cards stay Soon until `NEXT_PUBLIC_ARC_RWA_<ID>` is set.
