@@ -7,7 +7,6 @@
  * overlays after hydration. Holders RPC and the 400-row chart tape stay off the first paint.
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import nextDynamic from 'next/dynamic'
 import { type Address } from 'viem'
 import Link from 'next/link'
 import { Loader2, ExternalLink, Copy, Check, Globe, Filter } from 'lucide-react'
@@ -18,16 +17,12 @@ import { ArcDexTradePanel } from '@/components/ArcDexTradePanel'
 import type { TraderMeta } from '@/lib/arc-trader-meta'
 import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
-import { quoteChartLabel, rwaAssetByQuote } from '@/lib/arc-rwa-assets'
 import { arcMarketCapUsd } from '@/lib/arc-instant-tokens'
 import { priceChangeFromTrades } from '@/lib/candles'
 import { telegramHref, twitterHref, websiteHref } from '@/lib/social-href'
 import { cdnImage } from '@/lib/cdn-image'
 import { TokenListingEdit } from '@/components/TokenListingEdit'
-
-const TradingViewChart = nextDynamic(() => import('@/components/TradingViewChart'), {
-  ssr: false,
-})
+import { DexScreenerChart } from '@/components/DexScreenerChart'
 import {
   ageLabel,
   fmtCompact,
@@ -489,13 +484,8 @@ export function TokenPageClient({
 
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_22rem] gap-6 items-start">
           <div className="flex flex-col gap-5 min-w-0">
-            <div className="h-64 sm:h-72 rounded-[20px] bg-s1 border border-hair overflow-hidden">
-              <TradingViewChart
-                token={token}
-                symbol={pool.symbol}
-                quote={quoteChartLabel(quote, rwaAssetByQuote(pool.instantMeta?.quoteToken))}
-                height={288}
-              />
+            <div className="h-[420px] sm:h-[480px] rounded-[20px] bg-s1 border border-hair overflow-hidden">
+              <DexScreenerChart pool={pool} symbol={pool.symbol} />
             </div>
 
             <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
