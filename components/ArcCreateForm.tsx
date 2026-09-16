@@ -1299,8 +1299,8 @@ function RwaPairedPicker({
       : `Same Instant mint + LP lock, quoted in ${selected.symbol}.`
     : canPick
       ? gatedLabel
-        ? `Permissionless quotes only. ${gatedLabel} stay Soon (allowlisted / not live for public trade).`
-        : 'Pick a permissionless RWA quote.'
+        ? `Pick a quote. ${gatedLabel} stay Soon.`
+        : 'Pick a quote.'
       : gatedLabel
         ? `${gatedLabel} — permissioned or waiting on issuer. Public Instant pairing stays gated.`
         : 'Waiting on issuer + Instant factory.'
@@ -1373,7 +1373,6 @@ function RwaPairedPicker({
                         <span className="size-5 rounded-full bg-white/10 shrink-0" />
                       )}
                       <span className="font-medium">{a.symbol}</span>
-                      <span className="text-xs text-t3">Permissionless</span>
                     </button>
                   </li>
                 )
