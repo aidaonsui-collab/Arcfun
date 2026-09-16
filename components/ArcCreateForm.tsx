@@ -618,7 +618,11 @@ export function ArcCreateForm({
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
           split: splitForCreate,
-          launchVirtualQuote: rwaQuote ? defaultRwaVirtualQuoteRaw(rwaQuote) : undefined,
+          launchVirtualQuote: rwaQuote
+            ? defaultRwaVirtualQuoteRaw(rwaQuote, {
+                btcUsd: quoteId === 'cirbtc' ? await refreshBtcUsd(true) : undefined,
+              })
+            : undefined,
         })
         hash = await writeContractAsync({
           address: call.address,
@@ -674,7 +678,11 @@ export function ArcCreateForm({
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
           split: splitForCreate,
-          launchVirtualQuote: rwaQuote ? defaultRwaVirtualQuoteRaw(rwaQuote) : undefined,
+          launchVirtualQuote: rwaQuote
+            ? defaultRwaVirtualQuoteRaw(rwaQuote, {
+                btcUsd: quoteId === 'cirbtc' ? await refreshBtcUsd(true) : undefined,
+              })
+            : undefined,
         })
         hash = await writeContractAsync({
           address: call.address,

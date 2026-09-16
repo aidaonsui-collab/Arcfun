@@ -48,3 +48,10 @@ export function formatCirBtcApprox(usd: number, btcUsd: number | null | undefine
     cir >= 1 ? cir.toFixed(4) : cir >= 0.01 ? cir.toFixed(6) : cir.toFixed(8)
   return fixed.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '')
 }
+
+/** cirBTC human amount → USD. */
+export function cirBtcToUsd(cirBtc: number, btcUsd: number | null | undefined): number {
+  if (!(cirBtc > 0) || !btcUsd || !(btcUsd > 0)) return 0
+  const usd = cirBtc * btcUsd
+  return Number.isFinite(usd) && usd > 0 ? usd : 0
+}
