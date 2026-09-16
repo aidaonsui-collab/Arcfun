@@ -44,7 +44,15 @@ type TransferLog = Log<bigint, number, false, typeof TRANSFER, true> & {
 const DEAD = '0x000000000000000000000000000000000000dead' as Address
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 const BALANCE_FANOUT = 8
-const TRANSFER_LOG_CHUNK = 9_000n
+/**
+ * Arc eth_getLogs practical limit after #249/#250 is ~50 blocks (dRPC/Warp). Air had
+ * TRANSFER_LOG_CHUNK=9000 which spammed failed getLogs. Env override allowed but hard-capped at 50.
+ */
+const TRANSFER_LOG_CHUNK = (() => {
+  const raw = Number(process.env.TRANSFER_LOG_CHUNK)
+  const n = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 50
+  return BigInt(Math.min(n, 50))
+})()
 /** Same floor the rest of the indexer uses (lib/arc-indexer/run.ts, .../indexer/otc/route.ts) —
  *  avoids the "scan from genesis, waste the whole budget on empty pre-launch blocks" bug found
  *  live on a different project this session. Used only when a token's own createdBlock isn't
