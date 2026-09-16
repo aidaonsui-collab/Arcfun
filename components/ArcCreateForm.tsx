@@ -116,7 +116,16 @@ const LAUNCH_TYPES_V4: {
   },
 ]
 
-const FIRST_BUY_PRESETS = ['100', '250', '1000']
+/** USDC presets are dollar amounts; RWA presets are quote-token units (not USD). */
+function firstBuyPresets(quoteId: string, decimals: number): string[] {
+  if (quoteId === 'usdc' || decimals === 6) return ['100', '250', '1000']
+  if (quoteId === 'cirbtc' || decimals === 8) return ['0.0001', '0.001', '0.01']
+  return ['1', '10', '50']
+}
+
+function defaultFirstBuy(quoteId: string, decimals: number): string {
+  return firstBuyPresets(quoteId, decimals)[1] || '0'
+}
 
 export function ArcCreateForm({
   initial,
@@ -156,7 +165,7 @@ export function ArcCreateForm({
   /** Holder reward ERC-20 — default Arc USDC (6dp). Pool quote is always USDC. */
   const [rewardToken, setRewardToken] = useState<string>(ARC.USDC)
   const [buyAtLaunch, setBuyAtLaunch] = useState(false)
-  const [firstBuy, setFirstBuy] = useState('250')
+  const [firstBuy, setFirstBuy] = useState(() => defaultFirstBuy('usdc', 6))
 
   const [step, setStep] = useState<Step>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -176,7 +185,6 @@ export function ArcCreateForm({
   const [registerError, setRegisterError] = useState<string | null>(null)
   const [registering, setRegistering] = useState(false)
 
-  const usdcQ = useArcErc20Balance(ARC.USDC, isConnected && chainId === ARC_CHAIN_ID ? address : undefined)
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
   const configured = arcInstantEnabled()
   const reflectionLive = arcReflectionEnabled()
@@ -198,6 +206,18 @@ export function ArcCreateForm({
       setBundleOn(false)
     }
   }, [quoteId, rwaQuote?.permissioned])
+
+  const quoteDecimalsLive = rwaQuote?.decimals || 6
+  const quoteTokenLive = (rwaQuote?.address as Address | undefined) || ARC.USDC
+  const quoteBalQ = useArcErc20Balance(
+    quoteTokenLive,
+    isConnected && chainId === ARC_CHAIN_ID ? address : undefined,
+  )
+
+  // Keep first-buy amount in the active quote's units when the pair changes.
+  useEffect(() => {
+    setFirstBuy(defaultFirstBuy(quoteId, quoteDecimalsLive))
+  }, [quoteId, quoteDecimalsLive])
 
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
   const isReflection = launchType === 'reflection'
@@ -224,6 +244,11 @@ export function ArcCreateForm({
     : bundleOn
       ? 100
       : 0
+  // RWA factory reverts HoldersNotOnRwa unless Bundle is on — fold any leftover holders slice.
+  useEffect(() => {
+    if (!hideHolders || feeSplit.holdersBps === 0) return
+    setFeeSplit((s) => foldHoldersIntoCreator(s))
+  }, [hideHolders, feeSplit.holdersBps])
   const feeOk = !v4Ui || splitValid(feeSplit, { hideHolders, minHoldersBps }).ok
   const basketCheck = bundleOn
     ? basketValid(basketRows, {
@@ -389,6 +414,9 @@ export function ArcCreateForm({
       const quoteDecimals = rwaQuote?.decimals || 6
       const firstBuyQuote =
         buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcQuote(firstBuy, quoteDecimals) : 0n
+      // Belt-and-suspenders: never send holdersBps to plain RWA createToken.
+      const splitForCreate =
+        Boolean(rwaQuote) && !bundleOn ? foldHoldersIntoCreator(feeSplit) : feeSplit
       const factory =
         rwaV4Live && rwaFactoryAddr
           ? rwaFactoryAddr
@@ -402,6 +430,19 @@ export function ArcCreateForm({
       const quoteToken = (rwaQuote?.address as Address) || ARC.USDC
 
       if (firstBuyQuote > 0n) {
+        const bal = (await arcPublicClient().readContract({
+          address: quoteToken,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [address],
+        })) as bigint
+        if (bal < firstBuyQuote) {
+          const need = formatUnits(firstBuyQuote, quoteDecimals)
+          const have = formatUnits(bal, quoteDecimals)
+          throw new Error(
+            `First buy needs ${need} ${rwaQuote?.symbol || 'USDC'} (wallet has ${have}). This field is in ${rwaQuote?.symbol || 'USDC'}, not USD.`,
+          )
+        }
         const allowed = (await arcPublicClient().readContract({
           address: quoteToken,
           abi: erc20Abi,
@@ -430,7 +471,7 @@ export function ArcCreateForm({
           quote: quoteToken,
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
-          split: feeSplit,
+          split: splitForCreate,
           launchVirtualQuote: rwaQuote ? defaultRwaVirtualQuoteRaw(rwaQuote) : undefined,
         })
         hash = await writeContractAsync({
@@ -486,7 +527,7 @@ export function ArcCreateForm({
           quote: quoteToken,
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
-          split: feeSplit,
+          split: splitForCreate,
           launchVirtualQuote: rwaQuote ? defaultRwaVirtualQuoteRaw(rwaQuote) : undefined,
         })
         hash = await writeContractAsync({
@@ -510,7 +551,7 @@ export function ArcCreateForm({
           quote: quoteToken,
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
-          split: feeSplit,
+          split: splitForCreate,
         })
         hash = await writeContractAsync({
           address: call.address,
@@ -670,10 +711,27 @@ export function ArcCreateForm({
       ? `${rewardsWallet.trim().slice(0, 6)}…${rewardsWallet.trim().slice(-4)}`
       : 'Your wallet'
   const feeUsd = v4Live ? 0 : Number(arcCreationFeeWeiFor(address)) / 1e18
-  const buyUsd = buyAtLaunch ? Number(firstBuy) || 0 : 0
-  const payUsd = feeUsd + buyUsd
-  const walletUsd =
-    usdcQ.data != null ? Number(formatUnits(usdcQ.data, 6)) : null
+  const buyAmt = buyAtLaunch ? Number(firstBuy) || 0 : 0
+  // Preview card still expects a number; USDC first-buy ≈ USD, RWA is quote units only.
+  const buyUsd = quoteId === 'usdc' ? buyAmt : 0
+  const firstBuyLabel =
+    quoteId === 'usdc' ? `$${buyAmt.toFixed(2)}` : `${buyAmt} ${quoteSymbol}`
+  const payLabel =
+    quoteId === 'usdc'
+      ? `$${(feeUsd + buyAmt).toFixed(2)}`
+      : feeUsd > 0
+        ? `$${feeUsd.toFixed(2)} + ${buyAmt} ${quoteSymbol}`
+        : `${buyAmt} ${quoteSymbol}`
+  const walletLabel =
+    !isConnected
+      ? 'Not connected'
+      : quoteBalQ.data == null
+        ? quoteBalQ.isPending
+          ? '…'
+          : '—'
+        : quoteId === 'usdc'
+          ? fmtUsd(Number(formatUnits(quoteBalQ.data, quoteDecimalsLive)))
+          : `${formatUnits(quoteBalQ.data, quoteDecimalsLive)} ${quoteSymbol}`
   const previewToken: PoolToken = {
     id: 'preview',
     poolId: '',
@@ -1045,18 +1103,29 @@ export function ArcCreateForm({
                     className={FIELD}
                   />
                   <div className="flex gap-1.5 shrink-0">
-                    {FIRST_BUY_PRESETS.map((p) => (
+                    {firstBuyPresets(quoteId, quoteDecimalsLive).map((p) => (
                       <button
                         key={p}
                         type="button"
                         onClick={() => setFirstBuy(p)}
                         className="px-3 py-1.5 rounded-full bg-s1 border border-hair text-[13px] font-semibold tabular-nums text-t2 hover:text-white"
                       >
-                        ${p === '1000' ? '1K' : p}
+                        {quoteId === 'usdc'
+                          ? p === '1000'
+                            ? '$1K'
+                            : `$${p}`
+                          : p}
                       </button>
                     ))}
                   </div>
                 </div>
+                <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
+                  Amount is in {quoteSymbol}
+                  {quoteId === 'usdc' ? ' (USD)' : ', not USD'}.
+                  {quoteBalQ.data != null
+                    ? ` Wallet: ${formatUnits(quoteBalQ.data, quoteDecimalsLive)} ${quoteSymbol}.`
+                    : ''}
+                </p>
               </Field>
             )}
 
@@ -1208,20 +1277,9 @@ export function ArcCreateForm({
             <TokenCard token={previewToken} preview />
             <div className="rounded-2xl bg-s1 p-5 text-sm border border-hair">
               <FeeRow k="Creation fee" v={`$${feeUsd.toFixed(2)}`} />
-              <FeeRow k="First buy" v={`$${buyUsd.toFixed(2)}`} />
-              <FeeRow k="You pay" v={`$${payUsd.toFixed(2)}`} />
-              <FeeRow
-                k="Wallet"
-                v={
-                  !isConnected
-                    ? 'Not connected'
-                    : walletUsd == null
-                      ? usdcQ.isPending
-                        ? '…'
-                        : '—'
-                      : fmtUsd(walletUsd)
-                }
-              />
+              <FeeRow k="First buy" v={firstBuyLabel} />
+              <FeeRow k="You pay" v={payLabel} />
+              <FeeRow k="Wallet" v={walletLabel} />
               <div className="mt-4">{cta}</div>
               <p className="mt-3 mb-0 text-xs text-t3 leading-relaxed">
                 Gas on Arc · launch-token LP fees auto-burn · pair {quoteSymbol}
