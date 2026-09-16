@@ -3,12 +3,12 @@
 /**
  * Launch on Arc — Instant or Instant Reflection (both TOKEN/USDC + holder rewards path).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount, useConnect, useSwitchChain, useWriteContract, useSignMessage } from 'wagmi'
 import { erc20Abi, formatUnits, getAddress, isAddress, type Address } from 'viem'
 import { prepareTokenRegisterAuth } from '@/lib/arc-auth'
-import { Loader2, AlertCircle, CheckCircle, ImagePlus } from 'lucide-react'
+import { Loader2, AlertCircle, CheckCircle, ImagePlus, ChevronDown } from 'lucide-react'
 import {
   ARC,
   ARC_CHAIN_ID,
@@ -185,7 +185,20 @@ export function ArcCreateForm({
   const busy = step !== 'idle' && step !== 'done'
   const liveRwas = liveRwaQuoteAssets()
   const pendingRwas = pendingRwaQuoteAssets()
+  // Permissioned RWAs (USYC, …) stay UI-gated until public trading works.
+  const openRwas = liveRwas.filter((a) => !a.permissioned)
+  const gatedRwas = [
+    ...liveRwas.filter((a) => a.permissioned),
+    ...pendingRwas,
+  ]
   const rwaQuote = quoteId !== 'usdc' ? rwaAssetById(quoteId) : null
+  useEffect(() => {
+    if (quoteId !== 'usdc' && rwaQuote?.permissioned) {
+      setQuoteId('usdc')
+      setBundleOn(false)
+    }
+  }, [quoteId, rwaQuote?.permissioned])
+
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
   const isReflection = launchType === 'reflection'
   const v4Ui = arcInstantV4UiEnabled()
@@ -723,7 +736,7 @@ export function ArcCreateForm({
   }
 
   const typePicker = (
-    <div className={compact ? 'hidden' : ''}>
+    <div>
       <div className="mb-2 text-xs text-t3">Type</div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       {(v4Ui ? LAUNCH_TYPES_V4 : LAUNCH_TYPES).map((lt) => (
@@ -747,32 +760,20 @@ export function ArcCreateForm({
           }
         />
       ))}
-      {liveRwas.map((a) => (
-        <TypeCard
-          key={a.id}
-          active={launchType === 'instant' && quoteId === a.id}
-          title={`${a.symbol} paired`}
-          body={
-            a.permissioned
-              ? `Instant TOKEN/${a.symbol}. Permissioned — wallet must be allowlisted.`
-              : v4Ui
-                ? `Same Instant mint + LP lock, quoted in ${a.symbol}. Optional holder basket.`
-                : `Same Instant mint + LP lock, quoted in ${a.symbol}.`
-          }
-          onClick={() => {
+      {openRwas.length > 0 || gatedRwas.length > 0 ? (
+        <RwaPairedPicker
+          open={openRwas}
+          gated={gatedRwas}
+          active={launchType === 'instant' && quoteId !== 'usdc' && Boolean(openRwas.some((a) => a.id === quoteId))}
+          selectedId={openRwas.some((a) => a.id === quoteId) ? quoteId : null}
+          v4Ui={v4Ui}
+          disabled={!launchesLive}
+          onSelect={(id) => {
             setLaunchType('instant')
-            setQuoteId(a.id)
+            setQuoteId(id)
             setBundleOn(false)
             setFeeSplit(foldHoldersIntoCreator(feeSplit))
           }}
-        />
-      ))}
-      {pendingRwas.length > 0 && liveRwas.length === 0 ? (
-        <TypeCard
-          soon
-          disabled
-          title="RWA paired tokens"
-          body={`${pendingRwas.map((a) => a.symbol).join(' · ')} — waiting on issuer + Instant factory.`}
         />
       ) : null}
       </div>
@@ -1178,7 +1179,7 @@ export function ArcCreateForm({
       <div>
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em]">Launch this</h1>
         <p className="mt-2.5 mb-5 text-[15px] text-t2 leading-relaxed">
-          Instant TOKEN/USDC. 1B supply,{' '}
+          Instant TOKEN/{quoteSymbol}. 1B supply,{' '}
           {v4Live
             ? 'LP locked for 365 days, then platform-reclaimable.'
             : 'LP locked.'}{' '}
@@ -1247,6 +1248,176 @@ function FeeRow({ k, v }: { k: string; v: string }) {
     <div className="flex items-center justify-between py-1.5 text-sm">
       <span className="text-t2">{k}</span>
       <span className="tabular-nums">{v}</span>
+    </div>
+  )
+}
+
+function rwaMarkSrc(id: string): string | null {
+  const k = id.toLowerCase()
+  if (k === 'usyc') return '/marks/usyc.png'
+  if (k === 'cirbtc') return '/marks/cirbtc.svg'
+  if (k === 'buidl') return '/marks/buidl.png'
+  if (k === 'crcl') return '/marks/crcl.svg'
+  return null
+}
+
+function RwaPairedPicker({
+  open: openAssets,
+  gated,
+  active,
+  selectedId,
+  v4Ui,
+  disabled,
+  onSelect,
+}: {
+  open: ReturnType<typeof liveRwaQuoteAssets>
+  gated: ReturnType<typeof pendingRwaQuoteAssets>
+  active?: boolean
+  selectedId: string | null
+  v4Ui: boolean
+  disabled?: boolean
+  onSelect: (id: string) => void
+}) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const selected = openAssets.find((a) => a.id === selectedId) || null
+  const canPick = openAssets.length > 0 && !disabled
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [menuOpen])
+
+  const gatedLabel = gated.map((a) => a.symbol).join(' · ')
+  const body = selected
+    ? v4Ui
+      ? `Same Instant mint + LP lock, quoted in ${selected.symbol}. Optional holder basket.`
+      : `Same Instant mint + LP lock, quoted in ${selected.symbol}.`
+    : canPick
+      ? gatedLabel
+        ? `Permissionless quotes only. ${gatedLabel} stay Soon (allowlisted / not live for public trade).`
+        : 'Pick a permissionless RWA quote.'
+      : gatedLabel
+        ? `${gatedLabel} — permissioned or waiting on issuer. Public Instant pairing stays gated.`
+        : 'Waiting on issuer + Instant factory.'
+
+  const cls = `relative rounded-2xl bg-s1 p-4 text-left border transition-colors duration-150 sm:col-span-2 ${
+    !canPick
+      ? 'border-hair opacity-60'
+      : active
+        ? 'border-lime-line'
+        : 'border-hair hover:border-lime-line'
+  }`
+
+  return (
+    <div className={cls} ref={rootRef}>
+      {!canPick ? (
+        <span className="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide text-t3 bg-white/5">
+          Soon
+        </span>
+      ) : null}
+      <div className="text-sm font-medium">RWA paired</div>
+      <p className="mt-1 mb-3 text-xs leading-relaxed text-t2">{body}</p>
+      {canPick ? (
+        <div className="relative">
+          <button
+            type="button"
+            aria-expanded={menuOpen}
+            aria-haspopup="listbox"
+            onClick={() => setMenuOpen((v) => !v)}
+            className="w-full h-11 rounded-2xl bg-s2 px-3 text-sm text-white outline-none border border-hair focus:border-lime-line flex items-center gap-2.5"
+          >
+            {selected && rwaMarkSrc(selected.id) ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={rwaMarkSrc(selected.id)!}
+                alt=""
+                className="size-5 rounded-full object-cover bg-white/5 shrink-0"
+              />
+            ) : (
+              <span className="size-5 rounded-full bg-white/10 shrink-0" />
+            )}
+            <span className="flex-1 text-left font-medium">
+              {selected ? selected.symbol : 'Select RWA quote…'}
+            </span>
+            <ChevronDown className={`size-4 text-t3 shrink-0 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {menuOpen ? (
+            <ul
+              role="listbox"
+              className="absolute z-20 mt-1.5 w-full rounded-2xl border border-hair bg-s1 p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
+            >
+              {openAssets.map((a) => {
+                const on = selected?.id === a.id
+                const mark = rwaMarkSrc(a.id)
+                return (
+                  <li key={a.id} role="option" aria-selected={on}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelect(a.id)
+                        setMenuOpen(false)
+                      }}
+                      className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 h-10 text-left text-sm transition-colors ${
+                        on ? 'bg-lime/15 text-white' : 'text-t1 hover:bg-white/[0.04]'
+                      }`}
+                    >
+                      {mark ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={mark} alt="" className="size-5 rounded-full object-cover shrink-0" />
+                      ) : (
+                        <span className="size-5 rounded-full bg-white/10 shrink-0" />
+                      )}
+                      <span className="font-medium">{a.symbol}</span>
+                      <span className="text-xs text-t3">Permissionless</span>
+                    </button>
+                  </li>
+                )
+              })}
+              {gated.map((a) => {
+                const mark = rwaMarkSrc(a.id)
+                return (
+                  <li key={`gated-${a.id}`} role="option" aria-disabled="true">
+                    <div className="w-full flex items-center gap-2.5 rounded-xl px-2.5 h-10 text-left text-sm opacity-45 cursor-not-allowed">
+                      {mark ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={mark} alt="" className="size-5 rounded-full object-cover shrink-0" />
+                      ) : (
+                        <span className="size-5 rounded-full bg-white/10 shrink-0" />
+                      )}
+                      <span className="font-medium">{a.symbol}</span>
+                      <span className="ml-auto text-[10px] uppercase tracking-wide text-t3 font-semibold">Soon</span>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : null}
+        </div>
+      ) : gated.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {gated.map((a) => {
+            const mark = rwaMarkSrc(a.id)
+            return (
+              <span
+                key={a.id}
+                className="inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold border border-hair text-t3 bg-white/[0.03]"
+              >
+                {mark ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={mark} alt="" className="size-4 rounded-full object-cover" />
+                ) : null}
+                {a.symbol}
+                <span className="text-[10px] uppercase tracking-wide">Soon</span>
+              </span>
+            )
+          })}
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -11,12 +11,14 @@ import { cdnImage } from '@/lib/cdn-image'
 
 const EVE = '0x19209e55049bc613c5cc8b66b7df7824096e78cf'
 const MMF = new Set(['usyc', 'buidl', 'crcl'])
+const COMMODITY = new Set(['cirbtc'])
 
 const QUOTE_TINT: Record<string, string> = {
   usdc: '59 142 239',
   usyc: '125 211 252',
   buidl: '226 232 240',
   crcl: '110 231 183',
+  cirbtc: '247 147 26',
 }
 
 function quoteMarkSrc(quote: string): string | null {
@@ -25,6 +27,7 @@ function quoteMarkSrc(quote: string): string | null {
   if (id === 'usyc') return '/marks/usyc.png'
   if (id === 'buidl') return '/marks/buidl.png'
   if (id === 'crcl') return '/marks/crcl.svg'
+  if (id === 'cirbtc') return '/marks/cirbtc.svg'
   return null
 }
 
@@ -173,6 +176,17 @@ export function TokenCard({
             }}
           >
             MMF
+          </span>
+        ) : null}
+        {COMMODITY.has(quoteKey) ? (
+          <span
+            className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+            style={{
+              background: `rgb(${tint} / 0.14)`,
+              color: `rgb(${tint})`,
+            }}
+          >
+            BTC
           </span>
         ) : null}
         {token.rewardsHandle ? (
