@@ -32,11 +32,26 @@ function tradeTs(t: Pick<PoolToken, 'lastTradeAt'>): number {
 }
 
 /**
+ * Homepage MC must match the token page: Instant/v4 slot0, not the last tape print.
+ * Tape spark can be 2×+ slot0 (live $EVE: catalog $204.7K vs token page $83.5K).
+ * Only use the tape spot when the live row has no plausible price.
+ */
+export function catalogSpotFromLiveOrTape(
+  livePrice: number | undefined,
+  tapePrice: number | undefined,
+): { currentPrice: number; marketCap: number } | Record<string, never> {
+  const live = healIndexedSpotUsdc(Number(livePrice) || 0)
+  if (live > 0) return { currentPrice: live, marketCap: arcMarketCapUsd(live) }
+  const tape = healIndexedSpotUsdc(Number(tapePrice) || 0)
+  if (tape > 0) return { currentPrice: tape, marketCap: arcMarketCapUsd(tape) }
+  return {}
+}
+
+/**
  * RPC/catalog rows win on identity; indexer fills ids the rebuild missed.
  * When fallback lastTradeAt is newer (or primary has none), take trade/volume
  * fields from fallback and keep Instant metadata (name, image, instantMeta).
- * Price/mcap/spark are healed first: a stale 6dp-as-18 print must not overwrite
- * a live slot0, and a zero fallback must not wipe a plausible primary spot.
+ * Price/mcap stay on live slot0 when the primary already has a plausible spot.
  */
 export function mergeCatalogTokens(primary: PoolToken[], fallback: PoolToken[]): PoolToken[] {
   const byId = new Map<string, PoolToken>()
@@ -56,12 +71,9 @@ export function mergeCatalogTokens(primary: PoolToken[], fallback: PoolToken[]):
     const fallbackAt = tradeTs(healed)
     const primaryAt = tradeTs(existing)
     if (fallbackAt > primaryAt) {
-      const fallbackPx = healIndexedSpotUsdc(healed.currentPrice)
       byId.set(id, {
         ...existing,
-        ...(fallbackPx > 0
-          ? { currentPrice: fallbackPx, marketCap: arcMarketCapUsd(fallbackPx) }
-          : {}),
+        ...catalogSpotFromLiveOrTape(existing.currentPrice, healed.currentPrice),
         lastTradeAt: healed.lastTradeAt,
         volume1h: healed.volume1h,
         volume6h: healed.volume6h,
