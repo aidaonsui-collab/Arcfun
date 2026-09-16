@@ -143,6 +143,7 @@ export function indexedRowToPoolToken(
       isMarginBacked: false,
       dexId: 0,
       quote,
+      quoteToken: row.quote || undefined,
       poolId: row.poolId,
       feeBps: meta?.feeBps,
     },
