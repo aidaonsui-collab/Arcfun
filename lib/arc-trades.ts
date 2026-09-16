@@ -151,10 +151,12 @@ export async function resolvePool(
     let factory = ''
     // KV first — no eth_call. Infura quota on getPool/token0 used to make
     // resolvePool return null and skip the whole tape sync.
+    let indexedQuote = ''
     try {
       const row = await getToken(token)
       if (row?.pool && row.pool !== ZERO) pool = row.pool as Address
       factory = row?.factory || ''
+      indexedQuote = (row?.quote || '').toLowerCase()
     } catch {
       /* fall through to on-chain */
     }
@@ -164,7 +166,12 @@ export async function resolvePool(
       factory = t?.moonbagsPackageId || factory
     }
     if (!pool || pool === ZERO) return null
-    const quote = (quoteTokenForFactory(factory) || ARC.USDC_ERC20 || ARC.USDC).toLowerCase()
+    const quote = (
+      indexedQuote ||
+      quoteTokenForFactory(factory) ||
+      ARC.USDC_ERC20 ||
+      ARC.USDC
+    ).toLowerCase()
     const tokenIs0 = token.toLowerCase() < quote
     return {
       pool,
