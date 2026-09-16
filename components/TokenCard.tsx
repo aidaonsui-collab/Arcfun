@@ -10,8 +10,9 @@ import { ageLabel, changeParts, fmtUsd, sparkPathFromValues, tileGradient } from
 import { cdnImage } from '@/lib/cdn-image'
 
 const EVE = '0x19209e55049bc613c5cc8b66b7df7824096e78cf'
-const MMF = new Set(['usyc', 'buidl', 'crcl'])
+const MMF = new Set(['usyc', 'buidl', 'jaaa', 'jtrsy'])
 const COMMODITY = new Set(['cirbtc'])
+const EQUITY = new Set(['crcl'])
 
 const QUOTE_TINT: Record<string, string> = {
   usdc: '59 142 239',
@@ -187,6 +188,17 @@ export function TokenCard({
             }}
           >
             BTC
+          </span>
+        ) : null}
+        {EQUITY.has(quoteKey) ? (
+          <span
+            className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+            style={{
+              background: `rgb(${tint} / 0.14)`,
+              color: `rgb(${tint})`,
+            }}
+          >
+            Equity
           </span>
         ) : null}
         {token.rewardsHandle ? (

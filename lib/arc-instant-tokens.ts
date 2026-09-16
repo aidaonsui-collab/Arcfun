@@ -6,16 +6,19 @@ import {
   ARC,
   ARC_UNI_V3,
   arcInstantEnabled,
+  arcInstantV4Enabled,
   arcCurveEnabled,
   arcReflectionEnabled,
   arcPublicClient,
   instantCatalogFactories,
+  instantV4CatalogFactories,
 } from './contracts-arc'
 import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
+import { EVE_INSTANT_V4_FACTORY_ABI } from './eve-instant-v4-launchpad'
 import { erc20Abi as ERC20_ABI } from 'viem'
 import { getArcTokenMeta, getArcTokenMetas } from './arc-token-meta'
 import { type PoolToken } from './tokens'
-import { quoteSymbolForFactory } from './arc-rwa-assets'
+import { quoteSymbolForFactory, quoteSymbolForQuote } from './arc-rwa-assets'
 import { summarizeRpcError } from './rpc-error'
 import { attachLaunchCreatedAt } from './arc-launch-created'
 
@@ -463,20 +466,138 @@ function toPoolToken(
   }
 }
 
-export async function fetchArcInstantPoolToken(token: Address): Promise<PoolToken | null> {
-  if (!arcInstantEnabled()) return null
-  // Same two factories the catalog (fetchArcInstantPoolTokens) merges — current first, then the
-  // pre–LaunchToken18 legacy factory. Without this fallback, any token whose pool lives only on
-  // the legacy factory shows fine in the home-grid catalog but 404s on its own /token page, since
-  // this single-lookup path used to check only ARC.INSTANT_FACTORY.
-  for (const factory of instantCatalogFactories()) {
-    const row = await fetchArcInstantPoolTokenFromFactory(token, factory)
+/** v4 Instant / RWA: poolOf(token) → quote address (shared factory is multi-quote). */
+async function fetchArcV4InstantPoolTokenFromFactory(
+  token: Address,
+  factory: Address,
+): Promise<PoolToken | null> {
+  const client = arcPublicClient()
+  try {
+    const row = await client.readContract({
+      address: factory,
+      abi: EVE_INSTANT_V4_FACTORY_ABI,
+      functionName: 'poolOf',
+      args: [token],
+    })
+    const tuple = row as readonly [Address, Address, Address, Address, `0x${string}`]
+    const launched = tuple[0]
+    const quoteAddr = tuple[1]
+    const creator = tuple[2]
+    const poolId = tuple[4]
+    if (!launched || launched === ZERO || !creator || creator === ZERO) return null
+    if (launched.toLowerCase() !== token.toLowerCase()) return null
+
+    const quoteSym = quoteSymbolForQuote(quoteAddr)
+    const [name, symbol, launchVq, tokenDecimals, meta] = await Promise.all([
+      client.readContract({ address: token, abi: ERC20_ABI, functionName: 'name' }).catch(() => '') as Promise<string>,
+      client.readContract({ address: token, abi: ERC20_ABI, functionName: 'symbol' }).catch(() => '') as Promise<string>,
+      client
+        .readContract({
+          address: factory,
+          abi: [
+            {
+              type: 'function',
+              name: 'launchVirtualQuote',
+              stateMutability: 'view',
+              inputs: [],
+              outputs: [{ type: 'uint256' }],
+            },
+          ] as const,
+          functionName: 'launchVirtualQuote',
+        })
+        .catch(() => 5_500_000_000n) as Promise<bigint>,
+      client
+        .readContract({ address: token, abi: ERC20_ABI, functionName: 'decimals' })
+        .then((d) => Number(d))
+        .catch(() => ARC.TOKEN_DECIMALS) as Promise<number>,
+      getArcTokenMeta(token).catch(() => null),
+    ])
+    const dec = Number.isFinite(tokenDecimals) && tokenDecimals > 0 ? tokenDecimals : ARC.TOKEN_DECIMALS
+    // Virtual quote encoding matches Instant USDC FDV (~$5500) even for cirBTC / RWA creates.
+    const defaultPrice = defaultArcInstantPriceUsdc(launchVq, dec)
+    const priceUsdc = defaultPrice > 0 ? defaultPrice : 0
+    const creatorAddr = creator
+    return {
+      id: token,
+      chain: 'arc',
+      poolId: token,
+      coinType: token,
+      name: name || meta?.name || symbol,
+      symbol: symbol || meta?.symbol || '',
+      description: meta?.description ?? '',
+      imageUrl: meta?.imageUrl ?? '',
+      logoUrl: meta?.imageUrl ?? '',
+      twitter: meta?.twitter ?? '',
+      telegram: meta?.telegram ?? '',
+      website: meta?.website ?? '',
+      streamUrl: meta?.streamUrl ?? '',
+      creator: creatorAddr,
+      creatorShort: `${creatorAddr.slice(0, 6)}…${creatorAddr.slice(-4)}`,
+      creatorFull: creatorAddr,
+      rewardsHandle: meta?.rewardsHandle || undefined,
+      currentPrice: priceUsdc,
+      realSuiRaised: 0,
+      threshold: 0,
+      progress: 100,
+      bondingProgress: 100,
+      isCompleted: true,
+      instantLaunch: true,
+      instant: true,
+      reflection: false,
+      launchKind: 'instant',
+      instantMeta: {
+        uniPool: ZERO,
+        positionId: '0',
+        isMeme: quoteSym === 'USDC',
+        isRwaBacked: quoteSym !== 'USDC',
+        isMarginBacked: false,
+        dexId: 0,
+        quote: quoteSym,
+        quoteToken: quoteAddr,
+        poolId,
+        feeBps: meta?.feeBps,
+      },
+      dexVenue: 'v4',
+      virtualSuiReserves: launchVq,
+      virtualTokenReserves: VIRTUAL_TOKEN_INIT_18,
+      moonbagsPackageId: factory,
+      volume1h: 0,
+      priceChange24h: 0,
+      age: '',
+      marketCap: arcMarketCapUsd(priceUsdc),
+      totalSupply: TOTAL_SUPPLY_HUMAN,
+    }
+  } catch (e) {
+    console.warn('[arc-instant-tokens] v4 poolOf', factory, summarizeRpcError(e))
+    return null
+  }
+}
+
+export async function fetchArcV4InstantPoolToken(token: Address): Promise<PoolToken | null> {
+  if (!arcInstantV4Enabled()) return null
+  for (const factory of instantV4CatalogFactories()) {
+    const row = await fetchArcV4InstantPoolTokenFromFactory(token, factory)
     if (row) {
       const [withAge] = await attachLaunchCreatedAt([row])
       return withAge
     }
   }
   return null
+}
+
+export async function fetchArcInstantPoolToken(token: Address): Promise<PoolToken | null> {
+  if (!arcInstantEnabled() && !arcInstantV4Enabled()) return null
+  // V3 Instant factories (incl. legacy), then v4 USDC + RWA factories via poolOf.
+  if (arcInstantEnabled()) {
+    for (const factory of instantCatalogFactories()) {
+      const row = await fetchArcInstantPoolTokenFromFactory(token, factory)
+      if (row) {
+        const [withAge] = await attachLaunchCreatedAt([row])
+        return withAge
+      }
+    }
+  }
+  return fetchArcV4InstantPoolToken(token)
 }
 
 async function fetchArcInstantPoolTokenFromFactory(token: Address, factory: Address): Promise<PoolToken | null> {
@@ -520,19 +641,39 @@ async function fetchArcInstantPoolTokenFromFactory(token: Address, factory: Addr
 }
 
 export async function isArcInstantToken(token: Address): Promise<boolean> {
-  if (!arcInstantEnabled()) return false
+  if (!arcInstantEnabled() && !arcInstantV4Enabled()) return false
   const client = arcPublicClient()
-  for (const factory of instantCatalogFactories()) {
-    try {
-      const p = (await client.readContract({
-        address: factory,
-        abi: INSTANT_QUOTE_FACTORY_ABI,
-        functionName: 'getPool',
-        args: [token],
-      })) as InstantQuotePool
-      if (p?.creator && p.creator !== ZERO && p.uniPool && p.uniPool !== ZERO) return true
-    } catch {
-      /* try next factory */
+  if (arcInstantEnabled()) {
+    for (const factory of instantCatalogFactories()) {
+      try {
+        const p = (await client.readContract({
+          address: factory,
+          abi: INSTANT_QUOTE_FACTORY_ABI,
+          functionName: 'getPool',
+          args: [token],
+        })) as InstantQuotePool
+        if (p?.creator && p.creator !== ZERO && p.uniPool && p.uniPool !== ZERO) return true
+      } catch {
+        /* try next factory */
+      }
+    }
+  }
+  if (arcInstantV4Enabled()) {
+    for (const factory of instantV4CatalogFactories()) {
+      try {
+        const row = await client.readContract({
+          address: factory,
+          abi: EVE_INSTANT_V4_FACTORY_ABI,
+          functionName: 'poolOf',
+          args: [token],
+        })
+        const tuple = row as readonly [Address, Address, Address, Address, `0x${string}`]
+        const launched = tuple[0]
+        const creator = tuple[2]
+        if (launched && launched !== ZERO && creator && creator !== ZERO) return true
+      } catch {
+        /* try next factory */
+      }
     }
   }
   return false
@@ -1008,7 +1149,38 @@ export async function buildArcCatalog(): Promise<{ tokens: PoolToken[]; source: 
     const id = (t.coinType || t.poolId || t.id || '').toLowerCase()
     if (id) byId.set(id, t)
   }
-  const sources = ['arc-instant', reflection.length ? 'reflection' : '', curve.length ? 'curve' : '']
+  // V4 Instant / RWA factories have no allTokens enumerator — hydrate any indexed v4
+  // launches (and heal quote badges) via poolOf so home shows cirBTC / USYC pairs.
+  try {
+    const { listTokenAddresses, getIndexedTokensMap } = await import('./arc-indexer/store')
+    const ids = await listTokenAddresses()
+    const rows = await getIndexedTokensMap(ids)
+    const missing = ids.filter((id) => id && !byId.has(id.toLowerCase()))
+    const v4ish = [
+      ...missing,
+      ...ids.filter((id) => {
+        const r = rows[id]
+        return r?.dexVenue === 'v4' || Boolean(r?.quote)
+      }),
+    ]
+    const uniq = [...new Set(v4ish.map((x) => x.toLowerCase()))]
+    const hydrated = await Promise.all(
+      uniq.slice(0, 80).map((id) => fetchArcV4InstantPoolToken(id as Address).catch(() => null)),
+    )
+    for (const t of hydrated) {
+      if (!t) continue
+      const id = (t.coinType || t.poolId || t.id || '').toLowerCase()
+      if (!id) continue
+      const prev = byId.get(id)
+      // Prefer v4 row when it carries a non-USDC quote (shared RWA factory).
+      if (!prev || (t.instantMeta?.quote && t.instantMeta.quote !== 'USDC')) {
+        byId.set(id, t)
+      }
+    }
+  } catch (e) {
+    console.warn('[arc-instant-tokens] v4 catalog hydrate', summarizeRpcError(e))
+  }
+  const sources = ['arc-instant', reflection.length ? 'reflection' : '', curve.length ? 'curve' : '', 'v4']
     .filter(Boolean)
     .join('+')
   const tokens = await attachLaunchCreatedAt([...byId.values()])
