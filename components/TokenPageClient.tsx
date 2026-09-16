@@ -18,6 +18,7 @@ import { ArcDexTradePanel } from '@/components/ArcDexTradePanel'
 import type { TraderMeta } from '@/lib/arc-trader-meta'
 import { ARC_EXPLORER } from '@/lib/contracts-arc'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
+import { quoteChartLabel, rwaAssetByQuote } from '@/lib/arc-rwa-assets'
 import { arcMarketCapUsd } from '@/lib/arc-instant-tokens'
 import { priceChangeFromTrades } from '@/lib/candles'
 import { telegramHref, twitterHref, websiteHref } from '@/lib/social-href'
@@ -492,7 +493,7 @@ export function TokenPageClient({
               <TradingViewChart
                 token={token}
                 symbol={pool.symbol}
-                quote={quote === 'cirBTC' ? 'USD' : quote}
+                quote={quoteChartLabel(quote, rwaAssetByQuote(pool.instantMeta?.quoteToken))}
                 height={288}
               />
             </div>

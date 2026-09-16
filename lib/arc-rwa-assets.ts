@@ -51,6 +51,10 @@ const CIRBTC_MAINNET = {
 
 export type RwaAssetKind = 'mmf' | 'equity' | 'commodity'
 
+/** USD source for FDV, tape, and first-buy. Required on every catalog row. */
+export type QuoteUsdMode = 'peg' | 'spot' | 'none'
+export type QuoteUsdSpot = 'BTC-USD'
+
 export interface ArcRwaAsset {
   id: string
   symbol: string
@@ -68,6 +72,20 @@ export interface ArcRwaAsset {
   chainId: number
   /** Extra kill. Default on once address+factory are set. */
   enabled: boolean
+  /**
+   * How this quote maps to USD. Never infer from decimals (that is how cirBTC
+   * inherited 5500e6 and launched at ~$4M FDV).
+   * - peg: 1 token ≈ $1. Virtual quote = 5500 * 10^decimals. First-buy UI is dollars.
+   * - spot: USD from `usdSpot`. Virtual quote = 5500/spot * 10^decimals. First-buy UI is dollars.
+   * - none: quote units only. Never label the field as USD.
+   */
+  usd: QuoteUsdMode
+  usdSpot?: QuoteUsdSpot
+  /**
+   * Create first-buy may pay USDC and swap into this quote when the wallet is short.
+   * Instant still pulls the quote token. Only for permissionless quotes with a USDC book.
+   */
+  payUsdcSwap?: boolean
 }
 
 function envAddr(key: string): Address | '' {
@@ -119,6 +137,9 @@ function mergeAsset(base: ArcRwaAsset, over?: Partial<ArcRwaAsset>): ArcRwaAsset
     decimals: Number(over.decimals) > 0 ? Number(over.decimals) : base.decimals,
     enabled,
     chainId: base.chainId,
+    usd: over.usd || base.usd,
+    usdSpot: over.usdSpot !== undefined ? over.usdSpot : base.usdSpot,
+    payUsdcSwap: typeof over.payUsdcSwap === 'boolean' ? over.payUsdcSwap : base.payUsdcSwap,
   }
 }
 
@@ -157,6 +178,7 @@ function builtinCatalog(): ArcRwaAsset[] {
         (ARC_IS_TESTNET ? USYC_TESTNET.entitlements : USYC_MAINNET.entitlements),
       chainId: ARC_CHAIN_ID,
       enabled: usycEnabled ?? Boolean(usycAddr && usycFactory),
+      usd: 'peg',
     },
     {
       id: 'buidl',
@@ -170,6 +192,7 @@ function builtinCatalog(): ArcRwaAsset[] {
       permissioned: true,
       chainId: ARC_CHAIN_ID,
       enabled: buidlEnabled ?? Boolean(buidlAddr && buidlFactory),
+      usd: 'peg',
     },
     {
       id: 'crcl',
@@ -186,6 +209,7 @@ function builtinCatalog(): ArcRwaAsset[] {
       permissioned: true,
       chainId: ARC_CHAIN_ID,
       enabled: crclEnabled ?? Boolean(crclAddr && crclFactory),
+      usd: 'none',
     },
     {
       id: 'cirbtc',
@@ -205,6 +229,9 @@ function builtinCatalog(): ArcRwaAsset[] {
         (envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC') || (!ARC_IS_TESTNET && CIRBTC_MAINNET.address)) &&
           (envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_FACTORY') || sharedFactory),
       ),
+      usd: 'spot',
+      usdSpot: 'BTC-USD',
+      payUsdcSwap: true,
     },
     {
       id: 'jaaa',
@@ -221,6 +248,7 @@ function builtinCatalog(): ArcRwaAsset[] {
         envAddr('NEXT_PUBLIC_ARC_RWA_JAAA') &&
           (envAddr('NEXT_PUBLIC_ARC_RWA_JAAA_FACTORY') || sharedFactory),
       ),
+      usd: 'peg',
     },
     {
       id: 'jtrsy',
@@ -237,6 +265,7 @@ function builtinCatalog(): ArcRwaAsset[] {
         envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY') &&
           (envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY_FACTORY') || sharedFactory),
       ),
+      usd: 'peg',
     },
   ]
 }
@@ -270,6 +299,9 @@ export function listRwaAssets(): ArcRwaAsset[] {
         entitlements: o.entitlements,
         chainId: ARC_CHAIN_ID,
         enabled: typeof o.enabled === 'boolean' ? o.enabled : Boolean(factory),
+        usd: o.usd === 'spot' || o.usd === 'peg' || o.usd === 'none' ? o.usd : 'none',
+        usdSpot: o.usdSpot,
+        payUsdcSwap: o.payUsdcSwap,
       })
     }
   }
@@ -369,30 +401,89 @@ export function quoteSymbolForQuote(quote: string | null | undefined): string {
   return rwaAssetByQuote(q)?.symbol || 'USDC'
 }
 
-/** USD per 1 whole quote token. USDC/USYC = 1. cirBTC = BTC-USD spot. */
+export type QuotePolicy = {
+  usd: QuoteUsdMode
+  usdSpot: QuoteUsdSpot | null
+  payUsdcSwap: boolean
+}
+
+/** USDC (no catalog row) is a $1 peg. Catalog rows must set `usd` explicitly. */
+export function quotePolicy(asset: Pick<ArcRwaAsset, 'usd' | 'usdSpot' | 'payUsdcSwap' | 'permissioned'> | null | undefined): QuotePolicy {
+  if (!asset) return { usd: 'peg', usdSpot: null, payUsdcSwap: false }
+  const usd: QuoteUsdMode = asset.usd === 'spot' || asset.usd === 'none' || asset.usd === 'peg' ? asset.usd : 'none'
+  const usdSpot = usd === 'spot' ? asset.usdSpot || null : null
+  const payUsdcSwap = Boolean(asset.payUsdcSwap) && !asset.permissioned && usd !== 'none'
+  return { usd, usdSpot, payUsdcSwap }
+}
+
+/** Catalog invariant: no silent USDC 6dp inheritance. */
+export function quotePolicyOk(asset: ArcRwaAsset): { ok: true } | { ok: false; reason: string } {
+  if (asset.usd !== 'peg' && asset.usd !== 'spot' && asset.usd !== 'none') {
+    return { ok: false, reason: `${asset.id}: set usd to peg | spot | none` }
+  }
+  if (asset.usd === 'spot' && asset.usdSpot !== 'BTC-USD') {
+    return { ok: false, reason: `${asset.id}: usd=spot requires usdSpot` }
+  }
+  if (asset.usd !== 'spot' && asset.usdSpot) {
+    return { ok: false, reason: `${asset.id}: usdSpot only valid with usd=spot` }
+  }
+  if (asset.payUsdcSwap && (asset.permissioned || asset.usd === 'none')) {
+    return { ok: false, reason: `${asset.id}: payUsdcSwap is for permissionless USD-input quotes` }
+  }
+  return { ok: true }
+}
+
+export function quoteUsesUsdInput(asset: ArcRwaAsset | null | undefined, quoteId?: string): boolean {
+  if ((quoteId || '') === 'usdc') return true
+  const p = quotePolicy(asset)
+  return p.usd === 'peg' || p.usd === 'spot'
+}
+
+export function quotePayUsdcSwap(asset: ArcRwaAsset | null | undefined): boolean {
+  return quotePolicy(asset).payUsdcSwap
+}
+
+export function quoteChartLabel(symbol: string, asset: ArcRwaAsset | null | undefined): string {
+  if (symbol === 'USDC') return 'USDC'
+  const p = quotePolicy(asset)
+  if (p.usd === 'spot') return 'USD'
+  if (p.usd === 'peg') return symbol
+  return symbol
+}
+
+/** USD per 1 whole quote token. Peg = 1. Spot = live USD. none = 0 (do not fake $). */
 export async function quoteUsdMultiplier(quote: string | null | undefined): Promise<number> {
-  const sym = quoteSymbolForQuote(quote)
-  if (sym === 'cirBTC') {
+  const q = (quote || '').toLowerCase()
+  if (!q || q === ZERO || q === USDC.toLowerCase()) return 1
+  const asset = rwaAssetByQuote(q)
+  const p = quotePolicy(asset)
+  if (p.usd === 'peg') return 1
+  if (p.usd === 'spot' && p.usdSpot === 'BTC-USD') {
     const { fetchBtcUsdSpot } = await import('./btc-usd-spot')
     const btc = await fetchBtcUsdSpot()
     return btc && btc > 0 ? btc : 0
   }
-  return 1
+  return 0
 }
 
-/** Instant USDC starting FDV. cirBTC uses the same dollars, encoded in 8dp at BTC-USD. */
+export function usdToQuoteHuman(usd: number, usdPerQuote: number, decimals: number): string {
+  if (!(usd > 0) || !(usdPerQuote > 0) || !(decimals > 0)) return '0'
+  const q = usd / usdPerQuote
+  const dp = Math.min(Math.max(0, Math.floor(decimals)), 18)
+  const fixed = q.toFixed(dp)
+  return fixed.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '') || '0'
+}
+
+/** Instant USDC starting FDV. Spot quotes encode the same dollars in native decimals. */
 export const INSTANT_TARGET_FDV_USD = 5500
 
 /**
  * Raw launchVirtualQuote for Instant RWA creates.
- * Stables: 5500 * 10^decimals (~$5500 starting FDV, same as Instant USDC / factory default).
- *
- * cirBTC (8dp): seed ~$5500 of cirBTC, not 5_500e6 raw. 5_500e6 is 55 cirBTC (~$4M FDV)
- * because the factory default is a 6dp USDC encoding. Pass `btcUsd` so 5500/spot * 1e8
- * lands in the same ballpark as Argus / Instant USDC. Env override still wins.
+ * Peg: 5500 * 10^decimals. Spot: 5500/usdPerQuote * 10^decimals.
+ * Never use 5500e6 for an 8dp non-peg (that is 55 BTC, ~$4M FDV).
  */
 export function defaultRwaVirtualQuoteRaw(
-  asset: Pick<ArcRwaAsset, 'id' | 'decimals'>,
+  asset: Pick<ArcRwaAsset, 'id' | 'decimals' | 'usd' | 'usdSpot' | 'payUsdcSwap' | 'permissioned'>,
   opts?: { btcUsd?: number | null },
 ): bigint {
   const envKey =
@@ -401,15 +492,16 @@ export function defaultRwaVirtualQuoteRaw(
       : `NEXT_PUBLIC_ARC_RWA_${asset.id.toUpperCase()}_VIRTUAL_QUOTE`
   const raw = (process.env[envKey] || '').trim()
   if (/^\d+$/.test(raw)) return BigInt(raw)
-  if (asset.id === 'cirbtc' || asset.decimals === 8) {
+  const dec = asset.decimals > 0 ? asset.decimals : 6
+  const p = quotePolicy(asset)
+  if (p.usd === 'spot' && p.usdSpot === 'BTC-USD') {
     const btc = opts?.btcUsd
     if (btc && btc > 0) {
-      const raw8 = Math.round((INSTANT_TARGET_FDV_USD / btc) * 1e8)
-      if (raw8 > 0) return BigInt(raw8)
+      const rawN = Math.round((INSTANT_TARGET_FDV_USD / btc) * 10 ** dec)
+      if (rawN > 0) return BigInt(rawN)
     }
-    // ~$5500 at $100k BTC. Never 5_500_000_000n (55 cirBTC ≈ $4M).
-    return 5_500_000n
+    // $5500 at $100k BTC. Not 5500e6.
+    return (5500n * 10n ** BigInt(dec)) / 100_000n
   }
-  const dec = asset.decimals > 0 ? asset.decimals : 6
   return 5500n * 10n ** BigInt(dec)
 }
