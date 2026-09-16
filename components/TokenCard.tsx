@@ -27,6 +27,7 @@ function quoteMarkSrc(quote: string): string | null {
   if (id === 'usyc') return '/marks/usyc.png'
   if (id === 'buidl') return '/marks/buidl.png'
   if (id === 'crcl') return '/marks/crcl.svg'
+  if (id === 'cirbtc') return '/marks/cirbtc.svg'
   return null
 }
 
