@@ -13,6 +13,8 @@ import {
   ARC,
   ARC_CHAIN_ID,
   ARC_INSTANT_CREATE_GAS,
+  ARC_ERC20_APPROVE_GAS,
+  ARC_SWAP_GAS,
   ARC_MAX_APPROVAL,
   arcInstantEnabled,
   arcReflectionEnabled,
@@ -69,12 +71,14 @@ import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 import type { PoolToken } from '@/lib/tokens'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
 import { fetchBtcUsdSpot, formatCirBtcApprox, usdToCirBtcAmount } from '@/lib/btc-usd-spot'
+import { parseUsdc, planUsdcBuyOfToken } from '@/lib/arc-swap'
 
 type Step =
   | 'idle'
   | 'uploading'
   | 'vault'
   | 'approving'
+  | 'swapping'
   | 'creating'
   | 'confirming'
   | 'basket'
@@ -220,6 +224,10 @@ export function ArcCreateForm({
   const quoteBalQ = useArcErc20Balance(
     quoteTokenLive,
     isConnected && chainId === ARC_CHAIN_ID ? address : undefined,
+  )
+  const usdcBalQ = useArcErc20Balance(
+    ARC.USDC,
+    isConnected && chainId === ARC_CHAIN_ID && quoteId === 'cirbtc' ? address : undefined,
   )
 
   // Keep first-buy amount in the active quote's units when the pair changes.
@@ -498,25 +506,89 @@ export function ArcCreateForm({
       const quoteToken = (rwaQuote?.address as Address) || ARC.USDC
 
       if (firstBuyQuote > 0n) {
-        const bal = (await arcPublicClient().readContract({
+        const client = arcPublicClient()
+        let bal = (await client.readContract({
           address: quoteToken,
           abi: erc20Abi,
           functionName: 'balanceOf',
           args: [address],
         })) as bigint
+
+        // cirBTC Instant still pulls cirBTC on create. USD input → swap USDC to cirBTC first.
+        if (quoteId === 'cirbtc' && bal < firstBuyQuote && firstBuyUsdForErr != null) {
+          const usdcIn = parseUsdc(firstBuyUsdForErr)
+          if (usdcIn <= 0n) {
+            throw new Error('First buy amount is too small.')
+          }
+          const usdcBal = (await client.readContract({
+            address: ARC.USDC,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [address],
+          })) as bigint
+          if (usdcBal < usdcIn) {
+            throw new Error(
+              `First buy needs $${firstBuyUsdForErr.toFixed(2)} USDC to swap into cirBTC (wallet has $${Number(formatUnits(usdcBal, 6)).toFixed(2)}).`,
+            )
+          }
+          const plan = await planUsdcBuyOfToken(quoteToken, usdcIn, address, 100)
+          if (!plan) {
+            throw new Error('Could not quote USDC → cirBTC. The cirBTC/USDC pool may be unavailable.')
+          }
+          const usdcAllow = (await client.readContract({
+            address: ARC.USDC,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [address, plan.spender],
+          })) as bigint
+          if (usdcAllow < usdcIn) {
+            setStep('approving')
+            await writeContractAsync({
+              address: ARC.USDC,
+              abi: erc20Abi,
+              functionName: 'approve',
+              args: [plan.spender, ARC_MAX_APPROVAL],
+              chainId: ARC_CHAIN_ID,
+              gas: ARC_ERC20_APPROVE_GAS,
+            })
+          }
+          setStep('swapping')
+          const swapHash = await writeContractAsync({
+            address: plan.call.address,
+            abi: plan.call.abi as never,
+            functionName: plan.call.functionName as never,
+            args: plan.call.args as never,
+            chainId: plan.call.chainId,
+            gas: ARC_SWAP_GAS,
+          })
+          await waitArcTxConfirmed(swapHash)
+          const cirAfter = (await client.readContract({
+            address: quoteToken,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [address],
+          })) as bigint
+          const received = cirAfter > bal ? cirAfter - bal : cirAfter
+          if (received <= 0n) {
+            throw new Error('USDC → cirBTC swap returned no cirBTC.')
+          }
+          firstBuyQuote = received
+          bal = cirAfter
+        }
+
         if (bal < firstBuyQuote) {
           const need = formatUnits(firstBuyQuote, quoteDecimals)
           const have = formatUnits(bal, quoteDecimals)
           if (quoteId === 'cirbtc' && firstBuyUsdForErr != null) {
             throw new Error(
-              `First buy needs ${need} cirBTC (≈ $${firstBuyUsdForErr.toFixed(2)}; wallet has ${have} cirBTC).`,
+              `First buy needs ${need} cirBTC (≈ $${firstBuyUsdForErr.toFixed(2)}; wallet has ${have} cirBTC). Swap USDC → cirBTC failed or was short.`,
             )
           }
           throw new Error(
             `First buy needs ${need} ${rwaQuote?.symbol || 'USDC'} (wallet has ${have}). This field is in ${rwaQuote?.symbol || 'USDC'}, not USD.`,
           )
         }
-        const allowed = (await arcPublicClient().readContract({
+        const allowed = (await client.readContract({
           address: quoteToken,
           abi: erc20Abi,
           functionName: 'allowance',
@@ -530,6 +602,7 @@ export function ArcCreateForm({
             functionName: 'approve',
             args: [factory, ARC_MAX_APPROVAL],
             chainId: ARC_CHAIN_ID,
+            gas: ARC_ERC20_APPROVE_GAS,
           })
         }
       }
@@ -1222,9 +1295,15 @@ export function ArcCreateForm({
                             ? ' BTC-USD unavailable — retry before creating.'
                             : ''}
                       {cirBtcApproxLabel ? ` ≈ ${cirBtcApproxLabel} cirBTC.` : ''}
-                      {quoteBalQ.data != null
-                        ? ` Wallet: ${formatUnits(quoteBalQ.data, quoteDecimalsLive)} cirBTC.`
+                      {' '}We swap your USDC to cirBTC, then the factory pulls cirBTC for the first buy.
+                      {usdcBalQ.data != null
+                        ? ` Wallet: ${Number(formatUnits(usdcBalQ.data, 6)).toFixed(2)} USDC`
                         : ''}
+                      {quoteBalQ.data != null
+                        ? `${usdcBalQ.data != null ? ',' : ' Wallet:'} ${formatUnits(quoteBalQ.data, quoteDecimalsLive)} cirBTC.`
+                        : usdcBalQ.data != null
+                          ? '.'
+                          : ''}
                     </>
                   ) : (
                     <>
@@ -1662,7 +1741,9 @@ function stepLabel(step: Step): string {
     case 'vault':
       return 'Creating handle vault…'
     case 'approving':
-      return 'Approve USDC…'
+      return 'Approve token…'
+    case 'swapping':
+      return 'Swapping USDC → cirBTC…'
     case 'creating':
       return 'Confirm in wallet…'
     case 'confirming':
