@@ -27,6 +27,7 @@
     "node_modules",
     "subgraph",
     "public",
-    "contracts"
+    "contracts",
+    "scripts/launch-liquidity-launcher-token.ts"
   ]
 }
