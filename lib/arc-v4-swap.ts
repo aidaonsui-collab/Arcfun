@@ -2,7 +2,8 @@
  * Exact-in swaps against eve.fun Instant v4 pools via EveV4Router.
  * Quote is a slot0 linear estimate with the hook fee haircut — not a full curve sim.
  */
-import { concat, keccak256, pad, toHex, type Address, type Hex } from 'viem'
+import { concat, keccak256, pad, toHex, type Address, type Client, type Hex } from 'viem'
+import { readContract } from 'viem/actions'
 import { ARC, ARC_CHAIN_ID, instantV4CatalogFactories } from './contracts-arc'
 import {
   EVE_FEE_HOOK_CONFIGS_ABI,
@@ -40,31 +41,29 @@ export type EveV4PoolInfo = {
   key: EveV4PoolKey
 }
 
-type Rpc = { readContract: (args: never) => Promise<unknown> }
-
 export async function readEveV4Pool(
   token: Address,
-  client: { readContract: (args: never) => Promise<unknown> },
+  client: Client,
 ): Promise<EveV4PoolInfo | null> {
   if (!ARC.INSTANT_V4_HOOK || ARC.INSTANT_V4_HOOK === ZERO) return null
   for (const factory of instantV4CatalogFactories()) {
     try {
-      const row = (await client.readContract({
+      const row = (await readContract(client, {
         address: factory,
         abi: EVE_INSTANT_V4_FACTORY_ABI,
         functionName: 'poolOf',
         args: [token],
-      } as never)) as readonly [Address, Address, Address, Address, Hex]
+      })) as readonly [Address, Address, Address, Address, Hex]
       const launched = row[0]
       const quote = row[1]
       if (!launched || launched === ZERO || !quote || quote === ZERO) continue
       let hooks = ARC.INSTANT_V4_HOOK
       try {
-        const factoryHook = (await client.readContract({
+        const factoryHook = (await readContract(client, {
           address: factory,
           abi: EVE_INSTANT_V4_FACTORY_ABI,
           functionName: 'hook',
-        } as never)) as Address
+        })) as Address
         if (factoryHook && factoryHook !== ZERO) hooks = factoryHook
       } catch {
         /* older factory ABI without hook(); PoolKey uses the env hook */
@@ -127,26 +126,26 @@ export function estimateEveV4ExactIn(opts: {
   return (gross * BigInt(10_000 - fee)) / 10_000n
 }
 
-export async function readEveV4SqrtPriceX96(poolId: Hex, client: Rpc): Promise<bigint> {
+export async function readEveV4SqrtPriceX96(poolId: Hex, client: Client): Promise<bigint> {
   if (!ARC.POOL_MANAGER || ARC.POOL_MANAGER === ZERO) return 0n
-  const word = (await client.readContract({
+  const word = (await readContract(client, {
     address: ARC.POOL_MANAGER,
     abi: EVE_V4_POOL_MANAGER_STATE_ABI,
     functionName: 'extsload',
     args: [eveV4PoolStateSlot(poolId)],
-  } as never)) as Hex
+  })) as Hex
   return sqrtPriceX96FromExtsload(word)
 }
 
-export async function readEveV4FeeBps(hooks: Address, poolId: Hex, client: Rpc): Promise<number> {
+export async function readEveV4FeeBps(hooks: Address, poolId: Hex, client: Client): Promise<number> {
   if (!hooks || hooks === ZERO) return EVE_V4_DEFAULT_FEE_BPS
   try {
-    const row = (await client.readContract({
+    const row = (await readContract(client, {
       address: hooks,
       abi: EVE_FEE_HOOK_CONFIGS_ABI,
       functionName: 'configs',
       args: [poolId],
-    } as never)) as readonly [
+    })) as readonly [
       boolean,
       Address,
       Address,
@@ -172,7 +171,7 @@ export async function quoteEveV4ExactIn(
   pool: EveV4PoolInfo,
   amountIn: bigint,
   zeroForOne: boolean,
-  client: Rpc,
+  client: Client,
 ): Promise<bigint | null> {
   if (amountIn <= 0n) return null
   const sqrtPriceX96 = await readEveV4SqrtPriceX96(pool.poolId, client)

@@ -248,19 +248,26 @@ export function ArcDexTradePanel({
             return
           }
           const zeroForOne = mode === 'buy' ? !v4Pool.tokenIsCurrency0 : v4Pool.tokenIsCurrency0
-          const client = (wallet ?? arcPublicClient()) as Parameters<typeof quoteEveV4ExactIn>[3]
-          const local = await quoteEveV4ExactIn(v4Pool, inAmt, zeroForOne, client)
+          // Public client first: wagmi's wallet client has no readContract (V3 uses
+          // viem/actions; a connected wallet used to throw and print "Quote failed").
+          const clients = [arcPublicClient(), wallet].filter(Boolean)
+          let local: bigint | null = null
+          for (const c of clients) {
+            try {
+              local = await quoteEveV4ExactIn(v4Pool, inAmt, zeroForOne, c as Parameters<typeof quoteEveV4ExactIn>[3])
+              if (local != null && local > 0n) break
+            } catch {
+              /* try the next client / API */
+            }
+          }
           if (cancelled) return
           if (local != null && local > 0n) {
             setEstOut(local)
             setError(null)
             return
           }
-          setEstOut(null)
-          setError('No quote for this size.')
-          return
         }
-        if (wallet) {
+        if (!isV4 && wallet) {
           const local =
             mode === 'buy'
               ? await quoteArcBuy(token, parseUsdc(amount), ref, wallet)
@@ -673,7 +680,7 @@ export function ArcDexTradePanel({
                 quoting ||
                 !amount ||
                 Number(amount) <= 0 ||
-                (estOut == null && !needApprove)
+                estOut == null
               }
               onClick={() => void onSubmit()}
               className={`mt-5 w-full h-11 rounded-full text-sm font-semibold tracking-tightish disabled:opacity-40 transition-colors ${
