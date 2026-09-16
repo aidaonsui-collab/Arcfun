@@ -489,7 +489,12 @@ export function TokenPageClient({
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_22rem] gap-6 items-start">
           <div className="flex flex-col gap-5 min-w-0">
             <div className="h-64 sm:h-72 rounded-[20px] bg-s1 border border-hair overflow-hidden">
-              <TradingViewChart token={token} symbol={pool.symbol} height={288} />
+              <TradingViewChart
+                token={token}
+                symbol={pool.symbol}
+                quote={quote === 'cirBTC' ? 'USD' : quote}
+                height={288}
+              />
             </div>
 
             <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
