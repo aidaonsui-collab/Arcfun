@@ -723,7 +723,7 @@ export function ArcCreateForm({
   }
 
   const typePicker = (
-    <div className={compact ? 'hidden' : ''}>
+    <div>
       <div className="mb-2 text-xs text-t3">Type</div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       {(v4Ui ? LAUNCH_TYPES_V4 : LAUNCH_TYPES).map((lt) => (
@@ -1178,7 +1178,7 @@ export function ArcCreateForm({
       <div>
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em]">Launch this</h1>
         <p className="mt-2.5 mb-5 text-[15px] text-t2 leading-relaxed">
-          Instant TOKEN/USDC. 1B supply,{' '}
+          Instant TOKEN/{quoteSymbol}. 1B supply,{' '}
           {v4Live
             ? 'LP locked for 365 days, then platform-reclaimable.'
             : 'LP locked.'}{' '}

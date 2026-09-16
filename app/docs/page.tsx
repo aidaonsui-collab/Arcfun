@@ -89,18 +89,17 @@ export default function DocsPage() {
               </dl>
             </article>
 
-            <article className="relative border border-hair rounded-[22px] bg-s1 p-5 sm:p-6 opacity-80">
+            <article className="relative border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="m-0 text-[17px] font-semibold tracking-tightish">RWA paired</h3>
-                <span className="px-2 py-0.5 rounded-full bg-white/[0.06] text-[11px] font-bold uppercase tracking-wide text-t3">
-                  Soon
+                <span className="px-2 py-0.5 rounded-full bg-lime/15 text-[11px] font-bold uppercase tracking-wide text-lime-t">
+                  Live
                 </span>
               </div>
               <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
-                Same Instant mint + LP lock, quoted against USYC, BUIDL, or tokenized CRCL
-                instead of USDC. Wired as a factory swap: when the issuer token is on Arc and we
-                deploy Instant against it, the create card turns on. TOKEN/USDC trading is
-                unaffected.
+                Same Instant mint + LP lock, quoted against cirBTC (permissionless) or USYC
+                (allowlisted wallets). Pick the quote on /create. BUIDL / JAAA / JTRSY stay Soon
+                until issuers publish Arc addresses. TOKEN/USDC trading is unaffected.
               </p>
             </article>
           </div>
