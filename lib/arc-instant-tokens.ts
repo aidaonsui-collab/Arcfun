@@ -598,8 +598,9 @@ export async function fetchArcV4InstantPoolToken(token: Address): Promise<PoolTo
   for (const factory of instantV4CatalogFactories()) {
     const row = await fetchArcV4InstantPoolTokenFromFactory(token, factory)
     if (row) {
-      const [withAge] = await attachLaunchCreatedAt([row])
-      return withAge
+      // Do not attachLaunchCreatedAt — that walks V3 InstantQuoteTokenCreated getLogs
+      // and times out token-page ohlcv on a fresh V4 launch. Age comes from the indexer.
+      return row
     }
   }
   return null

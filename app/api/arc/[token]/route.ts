@@ -10,6 +10,7 @@ import { type Address } from 'viem'
 import {
   arcMarketCapUsd,
   fetchArcPoolToken,
+  fetchArcV4InstantPoolToken,
   getArcLivePriceUsdc,
   getArcPoolLiquidityUsdc,
   healIndexedSpotUsdc,
@@ -59,6 +60,16 @@ async function overlayLivePrice(pool: PoolToken, token: Address): Promise<PoolTo
         ...pool,
         currentPrice: live,
         marketCap: arcMarketCapUsd(live),
+      }
+    }
+  }
+  if (pool.dexVenue === 'v4' || pool.instantMeta?.poolId) {
+    const live = await withTimeout(fetchArcV4InstantPoolToken(token), SLOT0_MS)
+    if (live && live.currentPrice > 0) {
+      return {
+        ...pool,
+        currentPrice: live.currentPrice,
+        marketCap: arcMarketCapUsd(live.currentPrice),
       }
     }
   }

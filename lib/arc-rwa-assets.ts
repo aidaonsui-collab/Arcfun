@@ -369,6 +369,17 @@ export function quoteSymbolForQuote(quote: string | null | undefined): string {
   return rwaAssetByQuote(q)?.symbol || 'USDC'
 }
 
+/** USD per 1 whole quote token. USDC/USYC = 1. cirBTC = BTC-USD spot. */
+export async function quoteUsdMultiplier(quote: string | null | undefined): Promise<number> {
+  const sym = quoteSymbolForQuote(quote)
+  if (sym === 'cirBTC') {
+    const { fetchBtcUsdSpot } = await import('./btc-usd-spot')
+    const btc = await fetchBtcUsdSpot()
+    return btc && btc > 0 ? btc : 0
+  }
+  return 1
+}
+
 /** Instant USDC starting FDV. cirBTC uses the same dollars, encoded in 8dp at BTC-USD. */
 export const INSTANT_TARGET_FDV_USD = 5500
 
