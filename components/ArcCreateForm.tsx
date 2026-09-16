@@ -28,7 +28,8 @@ import {
   buildCreateTokenMemeInstantArc,
   parseArcQuote,
 } from '@/lib/arc-instant-launchpad'
-import { buildCreateTokenEveV4 } from '@/lib/eve-instant-v4-launchpad'
+import { buildCreateTokenEveV4, EVE_V4_DEFAULT_VIRTUAL_QUOTE } from '@/lib/eve-instant-v4-launchpad'
+import { estimateInstantFirstBuyTokens } from '@/lib/instant-first-buy'
 import {
   liveRwaQuoteAssets,
   pendingRwaQuoteAssets,
@@ -67,7 +68,7 @@ import {
   computeHandlePayVault,
 } from '@/lib/handle-pay'
 import { uploadImage } from '@/lib/upload-image'
-import { fmtUsd } from '@/lib/ui-format'
+import { fmtCompact, fmtUsd } from '@/lib/ui-format'
 import { TokenCard } from '@/components/TokenCard'
 import { FeeSplitCard } from '@/components/FeeSplitCard'
 import {
@@ -876,6 +877,29 @@ export function ArcCreateForm({
   // Preview card: peg/spot first-buy are USD inputs; other RWA stay quote units.
   const buyUsd = usdInput ? buyAmt : 0
   const cirBtcApproxLabel = spotUsd ? formatCirBtcApprox(buyAmt, btcUsd) : null
+  let firstBuyTokens = 0
+  if (buyAtLaunch && buyAmt > 0 && !(spotUsd && !(btcUsd != null && btcUsd > 0))) {
+    try {
+      const quoteHuman = spotUsd && btcUsd
+        ? usdToQuoteHuman(buyAmt, btcUsd, quoteDecimalsLive)
+        : firstBuy
+      const quoteInRaw = parseArcQuote(quoteHuman, quoteDecimalsLive)
+      const virtualQuoteRaw = rwaQuote
+        ? defaultRwaVirtualQuoteRaw(rwaQuote, { btcUsd })
+        : EVE_V4_DEFAULT_VIRTUAL_QUOTE
+      firstBuyTokens = estimateInstantFirstBuyTokens({
+        quoteInRaw,
+        virtualQuoteRaw,
+        tokenDecimals: 18,
+        feeBps: v4Ui ? feeSplit.feeBps : 100,
+      })
+    } catch {
+      firstBuyTokens = 0
+    }
+  }
+  const ticker = (symbol || '').trim().toUpperCase() || 'tokens'
+  const firstBuyTokensLabel =
+    firstBuyTokens > 0 ? `~${fmtCompact(firstBuyTokens)} ${ticker === 'tokens' ? 'tokens' : `$${ticker}`}` : null
   const firstBuyLabel = usdInput
     ? spotUsd && cirBtcApproxLabel
       ? `$${buyAmt.toFixed(2)} (≈ ${cirBtcApproxLabel} ${quoteSymbol})`
@@ -1300,6 +1324,13 @@ export function ArcCreateForm({
                     ))}
                   </div>
                 </div>
+                {firstBuyTokensLabel ? (
+                  <p className="mt-2 mb-0 text-[13px] font-medium tabular-nums text-white">
+                    You receive (est.) {firstBuyTokensLabel}
+                  </p>
+                ) : spotUsd && buyAmt > 0 && btcUsdStatus !== 'ready' ? (
+                  <p className="mt-2 mb-0 text-[12px] text-t3">You receive (est.) …</p>
+                ) : null}
                 <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
                   {spotUsd ? (
                     <>
@@ -1484,6 +1515,7 @@ export function ArcCreateForm({
             <div className="rounded-2xl bg-s1 p-5 text-sm border border-hair">
               <FeeRow k="Creation fee" v={`$${feeUsd.toFixed(2)}`} />
               <FeeRow k="First buy" v={firstBuyLabel} />
+              {firstBuyTokensLabel ? <FeeRow k="You receive (est.)" v={firstBuyTokensLabel} /> : null}
               <FeeRow k="You pay" v={payLabel} />
               <FeeRow k="Wallet" v={walletLabel} />
               <div className="mt-4">{cta}</div>

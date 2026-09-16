@@ -242,6 +242,8 @@ export function defaultArcInstantPriceUsdc(launchVirtualQuote: bigint, tokenDeci
   return q / t
 }
 
+export { estimateInstantFirstBuyTokens } from './instant-first-buy'
+
 /** FDV = price × full 1B supply (RadarDEX / standard meme convention). */
 export function arcMarketCapUsd(priceUsdc: number): number {
   if (!(priceUsdc > 0) || !Number.isFinite(priceUsdc)) return 0
