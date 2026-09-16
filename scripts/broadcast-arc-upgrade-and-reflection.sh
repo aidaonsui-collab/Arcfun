@@ -15,8 +15,8 @@ set +a
 
 : "${PRIVATE_KEY:?PRIVATE_KEY missing in .env.deploy}"
 
-RPC="${ARC_RPC_URL:-https://arc-mainnet-rpc.baracat.meme}"
-for try in "${ARC_RPC_URL:-}" "https://arc-mainnet-rpc.baracat.meme"; do
+RPC="${ARC_RPC_URL:-https://rpc.mainnet.arc.io}"
+for try in "${ARC_RPC_URL:-}" "https://rpc.mainnet.arc.io" "https://arc-mainnet-rpc.baracat.meme"; do
   [ -z "$try" ] && continue
   if cast chain-id --rpc-url "$try" >/dev/null 2>&1; then
     RPC="$try"

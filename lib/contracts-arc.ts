@@ -19,6 +19,10 @@
  *
  * 2026-08-06: thirdweb (`https://5042.rpc.thirdweb.com`) is BANNED as an Arc endpoint — see the
  * block above ARC_RPC_URLS. It is not a weak fallback, it is a poisoned one.
+ *
+ * 2026-09-15: new public mainnet RPC `https://rpc.mainnet.arc.io` verified and promoted to
+ * primary (ARC_MAINNET_RPC_DEFAULT), ahead of baracat/theleak/arc-scan everywhere in this file.
+ * See ARC_IO_RPC's own comment below for what was checked.
  */
 import { createPublicClient, createWalletClient, defineChain, fallback, http, isAddress, maxUint256, type Address } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
@@ -100,6 +104,20 @@ const ARC_CUSP_RPC = 'https://thecusp.io/api/arc-rpc'
  * fails through to whatever (if anything) is configured after it — never breaks silently.
  */
 const ARC_THELEAK_RPC = 'https://ac-rpc.theleak.cx'
+
+/**
+ * New public mainnet endpoint, `rpc.mainnet.arc.io` — mirrors the naming of the testnet default
+ * (`rpc.testnet.arc.network`) above. Verified 2026-09-15 with real protocol calls, not just
+ * eth_chainId (see the thirdweb ban below for why chainId alone proves nothing): eth_chainId =
+ * 0x13b2 (5042) across repeated calls, eth_call on USDC.decimals() correctly returned 6,
+ * eth_blockNumber returned a live, current block, and eth_getLogs on that block returned real
+ * event data referencing the known Uniswap v4 PoolManager (0x8366a39c…40951) — an independent
+ * cross-check against an address already hardcoded elsewhere in this file. Unlike ARC_THELEAK_RPC
+ * it does not disable eth_getLogs, and unlike ARC_BARACAT_RPC/ARC_SCAN_RPC it showed no errors or
+ * rate-limiting during verification. Promoted to primary below; kept as its own named constant so
+ * it can be pulled out again the same way the others have been if it turns out to be no better.
+ */
+const ARC_IO_RPC = 'https://rpc.mainnet.arc.io'
 
 /**
  * Endpoints that must never serve Arc, no matter who configures them.
@@ -203,12 +221,15 @@ export const ARC_RPC_INFRA_HINT =
   'answers eth_call, then hard-refresh and retry.'
 
 /**
- * Primary mainnet default for the browser: baracat. Infura is appended only on the server
- * (see ARC_SERVER_RPC_CANDIDATES). It used to lead the public list and leaked the project id.
+ * Primary mainnet default for the browser: ARC_IO_RPC (2026-09-15, see its comment above for the
+ * verification behind this). Baracat previously led here; it is still in the fallback list below
+ * but demoted after this endpoint checked out clean on every real-call test baracat has failed at
+ * one time or another (eth_call, eth_blockNumber, eth_getLogs). Infura is appended only on the
+ * server (see ARC_SERVER_RPC_CANDIDATES).
  *
- * Do NOT promote arc-scan here on eth_blockNumber latency alone. Tried 2026-09-01 and reverted:
- * a single blockNumber probe made arc-scan look 20x faster (0.63s vs 13.39s), but sampling the
- * call that actually dominates this app told the opposite story —
+ * Do NOT promote a candidate here on eth_blockNumber latency alone. Tried with arc-scan 2026-09-01
+ * and reverted: a single blockNumber probe made arc-scan look 20x faster (0.63s vs 13.39s), but
+ * sampling the call that actually dominates this app told the opposite story —
  *
  *   eth_call x8    arc-scan  4/8 ok, avg 13371ms  (503, -32603 "could not complete", unreachable)
  *                  baracat   7/8 ok, avg  4038ms  (one transient 522)
@@ -217,7 +238,7 @@ export const ARC_RPC_INFRA_HINT =
  * not predict eth_call health, and eth_call is what balances, offers(), and every token read use.
  * Re-measure eth_call before touching this order.
  */
-const ARC_MAINNET_RPC_DEFAULT = ARC_BARACAT_RPC
+const ARC_MAINNET_RPC_DEFAULT = ARC_IO_RPC
 
 /** Ordered public RPC candidates for wagmi. Never includes a keyed Infura URL. */
 export const ARC_RPC_URLS: string[] = (() => {
@@ -234,7 +255,15 @@ export const ARC_RPC_URLS: string[] = (() => {
     .filter(Boolean)
   const defaults = ARC_IS_TESTNET
     ? [ARC_TESTNET_RPC]
-    : [ARC_BARACAT_RPC, ARC_DRPC_RPC, ARC_WARP_RPC, ARC_THELEAK_RPC, ARC_SCAN_RPC, ARC_CUSP_RPC].filter(Boolean)
+    : [
+        ARC_IO_RPC,
+        ARC_BARACAT_RPC,
+        ARC_DRPC_RPC,
+        ARC_WARP_RPC,
+        ARC_THELEAK_RPC,
+        ARC_SCAN_RPC,
+        ARC_CUSP_RPC,
+      ].filter(Boolean)
   const seen = new Set<string>()
   const out: string[] = []
   for (const u of [primary, ...extras, ...defaults]) {
@@ -270,13 +299,18 @@ export const ARC_RPC = ARC_RPC_URLS[0] || ''
  * own connector client, even after a full reload, until they manually fix the network in their
  * wallet. Exported so both the transport below and addOrSwitchArc use the same non-baracat-first
  * order — new connections should never reproduce this.
+ *
+ * ARC_IO_RPC leads even this list: it is already primary in ARC_RPC_URLS (so this mostly makes
+ * that explicit), and nothing about the baracat wallet-hang incident implicates it — it wasn't in
+ * service when that was diagnosed. scan/theleak stay ahead of the rest of ARC_RPC_URLS as the
+ * existing safety net in case it ever needs to be pulled back out the way baracat was.
  */
 export function arcBrowserRpcUrls(): string[] {
   const seen = new Set<string>()
   const urls: string[] = []
   const ordered = ARC_IS_TESTNET
     ? ARC_RPC_URLS
-    : [ARC_SCAN_RPC, ARC_THELEAK_RPC, ...ARC_RPC_URLS]
+    : [ARC_IO_RPC, ARC_SCAN_RPC, ARC_THELEAK_RPC, ...ARC_RPC_URLS]
   for (const u of ordered) {
     if (!u || seen.has(u) || isBannedArcRpc(u) || isKeyedInfuraUrl(u)) continue
     seen.add(u)
@@ -382,7 +416,7 @@ export const arcChain = defineChain({
   id: ARC_CHAIN_ID,
   name: ARC_IS_TESTNET ? 'Arc Testnet' : 'Arc',
   nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 18 },
-  rpcUrls: { default: { http: ARC_RPC_URLS.length ? ARC_RPC_URLS : [ARC_BARACAT_RPC] } },
+  rpcUrls: { default: { http: ARC_RPC_URLS.length ? ARC_RPC_URLS : [ARC_IO_RPC] } },
   ...(ARC_EXPLORER
     ? {
         blockExplorers: {
@@ -773,7 +807,7 @@ export function arcReceiptClient() {
   const infura = serverInfuraRpc()
   const seen = new Set<string>()
   const urls: string[] = []
-  for (const u of [infura, ARC_SCAN_RPC, ...ARC_SERVER_RPC_CANDIDATES]) {
+  for (const u of [infura, ARC_IO_RPC, ARC_SCAN_RPC, ...ARC_SERVER_RPC_CANDIDATES]) {
     if (!u || isBannedArcRpc(u) || seen.has(u)) continue
     seen.add(u)
     urls.push(u)
@@ -813,6 +847,7 @@ export function arcLogsRpcUrls(): string[] {
   const infuraFromCandidates = ARC_SERVER_RPC_CANDIDATES.filter((u) => isKeyedInfuraUrl(u))
   // Infura Arc project lost network access (2026-09-15); prefer public logs RPCs first.
   for (const u of [
+    ARC_IO_RPC,
     ARC_DRPC_RPC,
     ARC_WARP_RPC,
     ARC_BARACAT_RPC,

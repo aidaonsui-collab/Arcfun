@@ -73,7 +73,7 @@ the first collect.
      cast send 0x84F486d7254aEDc89986bce392771D88bf5828EA \
        "setLockBeneficiary(uint256,address)" 4695 0x17A0f26daE40AE5eF7b4357d53cDbaFd767Ce6f1 \
        --private-key $TREASURY_PRIVATE_KEY \
-       --rpc-url https://rpc.arc-scan.org
+       --rpc-url https://rpc.mainnet.arc.io
      ```
 
    **This is the point of no return for the manual side** — once sent, only the keeper wallet
@@ -103,7 +103,7 @@ If anything looks wrong and you want to stop this before the 14 days are up, the
 cast send 0x84F486d7254aEDc89986bce392771D88bf5828EA \
   "setLockBeneficiary(uint256,address)" 4695 0x26bD491560b5175ee8bD1DA4998Fe260FfC413c9 \
   --private-key $ARC_EVE_REWARDS_KEEPER_PRIVATE_KEY \
-  --rpc-url https://rpc.arc-scan.org
+  --rpc-url https://rpc.mainnet.arc.io
 ```
 
 The next cron tick after this detects the beneficiary is no longer the keeper, pays out whatever
