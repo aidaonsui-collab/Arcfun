@@ -13,10 +13,9 @@
  *
  *   NEXT_PUBLIC_ARC_RWA_ASSETS=[{"id":"usyc","symbol":"USYC","address":"0x…","factory":"0x…","decimals":6}]
  *
- * Create is ready only when address + factory are both set. Token-only (Circle
- * published USYC / a tokenized CRCL share, we have not deployed Instant against
- * it) stays Soon.
- * Permissioned MMFs still need Circle to allowlist the factory / NFPM / locker.
+ * Create is ready only when address + factory are both set. Mainnet USYC + cirBTC
+ * token CAs are baked in (Arc 2026-09-16 live assets post); BUIDL / JAAA / JTRSY
+ * stay Soon until issuers publish Arc addresses. Permissioned MMFs still need Circle to allowlist the factory / NFPM / locker.
  */
 import { isAddress, type Address } from 'viem'
 
@@ -33,6 +32,20 @@ const USYC_TESTNET = {
   entitlements: '0xcc205224862c7641930c87679e98999d23c26113',
   oracle: '0x52b56c7642E71dc54714d879127d97cd0B3D4581',
   teller: '0x9fdF14c5B14173D74C08Af27AebFf39240dC105A',
+} as const
+
+/** Official Circle USYC on Arc Mainnet (developers.circle.com / docs.arc.io, 2026-09-16). */
+const USYC_MAINNET = {
+  address: '0x8a5D989Bbb96929F689B0200f435f53dA42bF490',
+  entitlements: '0xb69ecb156Dc0028198028c501340d5367845ca72',
+  oracle: '0x4BC8d5aCD3d040d2903dD9C5B7048520c6ff537A',
+  teller: '0x51A8CE47dC08ba5CD19c7aa84EA6fD6664f60f9b',
+} as const
+
+/** Circle Wrapped Bitcoin on Arc Mainnet (developers.circle.com/assets/cirbtc-contract-addresses). */
+const CIRBTC_MAINNET = {
+  address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0',
+  decimals: 8,
 } as const
 
 export type RwaAssetKind = 'mmf' | 'equity' | 'commodity'
@@ -116,7 +129,7 @@ function builtinCatalog(): ArcRwaAsset[] {
   const sharedFactory = sharedRwaV4Factory()
   const usycAddr =
     envAddr('NEXT_PUBLIC_ARC_RWA_USYC') ||
-    (ARC_IS_TESTNET ? (USYC_TESTNET.address as Address) : '')
+    (ARC_IS_TESTNET ? (USYC_TESTNET.address as Address) : (USYC_MAINNET.address as Address))
   const usycFactory = envAddr('NEXT_PUBLIC_ARC_RWA_USYC_FACTORY') || sharedFactory
   const usycEnabled = envFlag('NEXT_PUBLIC_ARC_RWA_USYC_ENABLED')
   const buidlAddr = envAddr('NEXT_PUBLIC_ARC_RWA_BUIDL')
@@ -137,10 +150,10 @@ function builtinCatalog(): ArcRwaAsset[] {
       factory: usycFactory,
       locker: envAddr('NEXT_PUBLIC_ARC_RWA_USYC_LOCKER'),
       permissioned: true,
-      navOracle: envAddr('NEXT_PUBLIC_ARC_RWA_USYC_ORACLE') || (ARC_IS_TESTNET ? USYC_TESTNET.oracle : ''),
+      navOracle: envAddr('NEXT_PUBLIC_ARC_RWA_USYC_ORACLE') || (ARC_IS_TESTNET ? USYC_TESTNET.oracle : USYC_MAINNET.oracle),
       entitlements:
         envAddr('NEXT_PUBLIC_ARC_RWA_USYC_ENTITLEMENTS') ||
-        (ARC_IS_TESTNET ? USYC_TESTNET.entitlements : ''),
+        (ARC_IS_TESTNET ? USYC_TESTNET.entitlements : USYC_MAINNET.entitlements),
       chainId: ARC_CHAIN_ID,
       enabled: usycEnabled ?? Boolean(usycAddr && usycFactory),
     },
@@ -172,6 +185,57 @@ function builtinCatalog(): ArcRwaAsset[] {
       permissioned: true,
       chainId: ARC_CHAIN_ID,
       enabled: crclEnabled ?? Boolean(crclAddr && crclFactory),
+    },
+    {
+      id: 'cirbtc',
+      symbol: 'cirBTC',
+      name: 'Circle Wrapped Bitcoin',
+      kind: 'commodity',
+      address:
+        envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC') ||
+        (ARC_IS_TESTNET ? '' : (CIRBTC_MAINNET.address as Address)),
+      decimals: CIRBTC_MAINNET.decimals,
+      // Quote Instant against cirBTC only when an env factory is set (not the shared MMF factory).
+      factory: envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_FACTORY'),
+      locker: envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_LOCKER'),
+      permissioned: false,
+      chainId: ARC_CHAIN_ID,
+      enabled: envFlag('NEXT_PUBLIC_ARC_RWA_CIRBTC_ENABLED') ?? Boolean(
+        (envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC') || (!ARC_IS_TESTNET && CIRBTC_MAINNET.address)) &&
+          envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_FACTORY'),
+      ),
+    },
+    {
+      id: 'jaaa',
+      symbol: 'JAAA',
+      name: 'Janus Henderson Anemoy AAA CLO Fund',
+      kind: 'mmf',
+      address: envAddr('NEXT_PUBLIC_ARC_RWA_JAAA'),
+      decimals: 6,
+      factory: envAddr('NEXT_PUBLIC_ARC_RWA_JAAA_FACTORY') || sharedFactory,
+      locker: envAddr('NEXT_PUBLIC_ARC_RWA_JAAA_LOCKER'),
+      permissioned: true,
+      chainId: ARC_CHAIN_ID,
+      enabled: envFlag('NEXT_PUBLIC_ARC_RWA_JAAA_ENABLED') ?? Boolean(
+        envAddr('NEXT_PUBLIC_ARC_RWA_JAAA') &&
+          (envAddr('NEXT_PUBLIC_ARC_RWA_JAAA_FACTORY') || sharedFactory),
+      ),
+    },
+    {
+      id: 'jtrsy',
+      symbol: 'JTRSY',
+      name: 'Janus Henderson Anemoy Treasury Fund',
+      kind: 'mmf',
+      address: envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY'),
+      decimals: 6,
+      factory: envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY_FACTORY') || sharedFactory,
+      locker: envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY_LOCKER'),
+      permissioned: true,
+      chainId: ARC_CHAIN_ID,
+      enabled: envFlag('NEXT_PUBLIC_ARC_RWA_JTRSY_ENABLED') ?? Boolean(
+        envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY') &&
+          (envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY_FACTORY') || sharedFactory),
+      ),
     },
   ]
 }
