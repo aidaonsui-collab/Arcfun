@@ -23,8 +23,8 @@ import {
   quoteArcSell,
   withRecipient,
 } from '@/lib/arc-swap'
-import { quoteDecimalsForToken, quoteSymbolForQuote, rwaAssetByQuote } from '@/lib/arc-rwa-assets'
-import { cirBtcToUsd, fetchBtcUsdSpot, usdToCirBtcAmount } from '@/lib/btc-usd-spot'
+import { quoteDecimalsForToken, quotePolicy, quoteSymbolForQuote, rwaAssetByQuote, usdToQuoteHuman } from '@/lib/arc-rwa-assets'
+import { cirBtcToUsd, fetchBtcUsdSpot } from '@/lib/btc-usd-spot'
 import { formatToken, parseToken } from '@/lib/token-format'
 import { getIncomingReferralCode } from '@/lib/crucible'
 import { fmtPrice, fmtUsd, tileGradient } from '@/lib/ui-format'
@@ -77,10 +77,15 @@ function quoteMarkSrc(quote: Address | undefined): string | null {
   return null
 }
 
-function quoteHumanToUsd(human: number, symbol: string, btcUsd: number | null): number | null {
+function quoteHumanToUsd(
+  human: number,
+  quote: Address | undefined,
+  btcUsd: number | null,
+): number | null {
   if (!(human > 0) || !Number.isFinite(human)) return null
-  if (symbol === 'USDC' || symbol === 'USYC') return human
-  if (symbol === 'cirBTC') {
+  const p = quotePolicy(rwaAssetByQuote(quote))
+  if (p.usd === 'peg') return human
+  if (p.usd === 'spot') {
     const usd = cirBtcToUsd(human, btcUsd)
     return usd > 0 ? usd : null
   }
@@ -140,6 +145,8 @@ export function ArcDexTradePanel({
   const quoteToken: Address = v4Pool?.quote ?? ARC.USDC
   const quoteSym = quoteSymbolForQuote(quoteToken)
   const quoteDec = quoteDecimalsForToken(quoteToken)
+  const quoteAsset = rwaAssetByQuote(quoteToken)
+  const spotUsd = quotePolicy(quoteAsset).usd === 'spot'
 
   useEffect(() => {
     let cancelled = false
@@ -164,7 +171,7 @@ export function ArcDexTradePanel({
   }, [token])
 
   useEffect(() => {
-    if (quoteSym !== 'cirBTC') {
+    if (!spotUsd) {
       setBtcUsd(null)
       return
     }
@@ -175,7 +182,7 @@ export function ArcDexTradePanel({
     return () => {
       cancelled = true
     }
-  }, [quoteSym])
+  }, [spotUsd])
   const refCode = mode === 'buy' ? getIncomingReferralCode() : ''
   const { tile, mono } = tileGradient(token)
   const initial = (symbol || '?').charAt(0).toUpperCase()
@@ -459,9 +466,9 @@ export function ArcDexTradePanel({
   const receiveSym = mode === 'buy' ? symbol : isV4 ? quoteSym : 'USDC'
   const receiveUsd =
     mode === 'sell' && estOut != null && estOut > 0n
-      ? quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteSym : 'USDC', btcUsd)
+      ? quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteToken : ARC.USDC, btcUsd)
       : mode === 'buy' && amtNum > 0
-        ? quoteHumanToUsd(amtNum, isV4 ? quoteSym : 'USDC', btcUsd)
+        ? quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, btcUsd)
         : null
   const TokenChip = ({ kind }: { kind: 'quote' | 'token' }) =>
     kind === 'quote' ? (
@@ -501,12 +508,12 @@ export function ArcDexTradePanel({
     )
 
   const feeBps = isV4 ? v4Pool?.feeBps || 100 : 100
-  const inUsd = quoteHumanToUsd(amtNum, isV4 ? quoteSym : 'USDC', btcUsd)
+  const inUsd = quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, btcUsd)
   const outUsd =
     estOut != null && estOut > 0n
       ? mode === 'buy'
         ? null
-        : quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteSym : 'USDC', btcUsd)
+        : quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteToken : ARC.USDC, btcUsd)
       : null
   const feeUsd =
     mode === 'buy'
@@ -580,7 +587,7 @@ export function ArcDexTradePanel({
               Max
             </button>
           </div>
-          {mode === 'buy' && isV4 && quoteSym === 'cirBTC' && amtNum > 0 && btcUsd ? (
+          {mode === 'buy' && isV4 && spotUsd && amtNum > 0 && btcUsd ? (
             <p className="mt-1 mb-0 text-[11px] text-t3">≈ {fmtUsd(cirBtcToUsd(amtNum, btcUsd))}</p>
           ) : null}
           {mode === 'buy' ? (
@@ -589,11 +596,11 @@ export function ArcDexTradePanel({
                 <button
                   key={v}
                   type="button"
-                  disabled={quoteSym === 'cirBTC' && !(btcUsd && btcUsd > 0)}
+                  disabled={spotUsd && !(btcUsd && btcUsd > 0)}
                   onClick={() => {
-                    if (quoteSym === 'cirBTC') {
+                    if (spotUsd) {
                       if (!btcUsd) return
-                      setAmount(usdToCirBtcAmount(v, btcUsd))
+                      setAmount(usdToQuoteHuman(v, btcUsd, quoteDec))
                     } else {
                       setAmount(String(v))
                     }

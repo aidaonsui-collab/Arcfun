@@ -18,9 +18,8 @@ import { EVE_INSTANT_V4_FACTORY_ABI } from './eve-instant-v4-launchpad'
 import { erc20Abi as ERC20_ABI } from 'viem'
 import { getArcTokenMeta, getArcTokenMetas } from './arc-token-meta'
 import { type PoolToken } from './tokens'
-import { quoteDecimalsForToken, quoteSymbolForFactory, quoteSymbolForQuote } from './arc-rwa-assets'
+import { quoteDecimalsForToken, quoteSymbolForFactory, quoteSymbolForQuote, quoteUsdMultiplier } from './arc-rwa-assets'
 import { readEveV4SqrtPriceX96 } from './arc-v4-swap'
-import { fetchBtcUsdSpot } from './btc-usd-spot'
 import { summarizeRpcError } from './rpc-error'
 import { attachLaunchCreatedAt } from './arc-launch-created'
 
@@ -522,12 +521,8 @@ async function fetchArcV4InstantPoolTokenFromFactory(
       const sqrt = await readEveV4SqrtPriceX96(poolId, client)
       const quotePerToken = usdcPerTokenFromSqrtX96(sqrt, tokenIsCurrency0, dec, qDec)
       if (quotePerToken > 0) {
-        if (quoteSym === 'cirBTC') {
-          const btc = await fetchBtcUsdSpot()
-          priceUsdc = btc && btc > 0 ? quotePerToken * btc : 0
-        } else {
-          priceUsdc = quotePerToken
-        }
+        const usdMult = await quoteUsdMultiplier(quoteAddr)
+        priceUsdc = usdMult > 0 ? quotePerToken * usdMult : 0
       }
     } catch {
       /* slot0 miss — leave 0 rather than treat 8dp cirBTC as 6dp USDC */
