@@ -14,8 +14,9 @@
  *   NEXT_PUBLIC_ARC_RWA_ASSETS=[{"id":"usyc","symbol":"USYC","address":"0x…","factory":"0x…","decimals":6}]
  *
  * Create is ready only when address + factory are both set. Mainnet USYC + cirBTC
- * token CAs are baked in (Arc 2026-09-16 live assets post); BUIDL / JAAA / JTRSY
- * stay Soon until issuers publish Arc addresses. Permissioned MMFs still need Circle to allowlist the factory / NFPM / locker.
+ * token CAs are baked in; both Instant-create against the shared RwaInstantV4Factory
+ * by default (Arc 2026-09-16 live assets post). BUIDL / JAAA / JTRSY stay Soon until
+ * issuers publish Arc addresses. Permissioned MMFs still need Circle to allowlist the factory / NFPM / locker.
  */
 import { isAddress, type Address } from 'viem'
 
@@ -195,14 +196,14 @@ function builtinCatalog(): ArcRwaAsset[] {
         envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC') ||
         (ARC_IS_TESTNET ? '' : (CIRBTC_MAINNET.address as Address)),
       decimals: CIRBTC_MAINNET.decimals,
-      // Quote Instant against cirBTC only when an env factory is set (not the shared MMF factory).
-      factory: envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_FACTORY'),
+      // Same shared RwaInstantV4Factory as USYC (quote is per-create). Override with env if needed.
+      factory: envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_FACTORY') || sharedFactory,
       locker: envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_LOCKER'),
       permissioned: false,
       chainId: ARC_CHAIN_ID,
       enabled: envFlag('NEXT_PUBLIC_ARC_RWA_CIRBTC_ENABLED') ?? Boolean(
         (envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC') || (!ARC_IS_TESTNET && CIRBTC_MAINNET.address)) &&
-          envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_FACTORY'),
+          (envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_FACTORY') || sharedFactory),
       ),
     },
     {
@@ -293,15 +294,32 @@ export function pendingRwaQuoteAssets(): ArcRwaAsset[] {
 }
 
 export function rwaInstantFactories(): Address[] {
-  return liveRwaQuoteAssets()
-    .map((a) => a.factory)
-    .filter((f): f is Address => Boolean(asAddr(f)))
+  const seen = new Set<string>()
+  const out: Address[] = []
+  for (const a of liveRwaQuoteAssets()) {
+    const f = asAddr(a.factory)
+    if (!f) continue
+    const k = f.toLowerCase()
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(f)
+  }
+  return out
 }
 
 export function rwaAssetByFactory(factory: string | null | undefined): ArcRwaAsset | null {
   const f = (factory || '').toLowerCase()
   if (!f || f === ZERO) return null
-  return listRwaAssets().find((a) => a.factory && a.factory.toLowerCase() === f) || null
+  const matches = listRwaAssets().filter((a) => a.factory && a.factory.toLowerCase() === f)
+  // Shared RwaInstantV4Factory serves multiple quotes — factory alone is ambiguous.
+  if (matches.length === 1) return matches[0]
+  return null
+}
+
+export function rwaAssetByQuote(quote: string | null | undefined): ArcRwaAsset | null {
+  const q = (quote || '').toLowerCase()
+  if (!q || q === ZERO) return null
+  return listRwaAssets().find((a) => a.address && a.address.toLowerCase() === q) || null
 }
 
 export function rwaAssetById(id: string | null | undefined): ArcRwaAsset | null {
@@ -341,4 +359,32 @@ export function quoteDecimalsForFactory(factory: string | null | undefined): num
 
 export function quoteSymbolForFactory(factory: string | null | undefined): string {
   return rwaAssetByFactory(factory)?.symbol || 'USDC'
+}
+
+/** Prefer when the indexer/row knows the per-launch quote (shared RWA factory). */
+export function quoteSymbolForQuote(quote: string | null | undefined): string {
+  const q = (quote || '').toLowerCase()
+  if (!q || q === ZERO) return 'USDC'
+  if (q === USDC.toLowerCase()) return 'USDC'
+  return rwaAssetByQuote(q)?.symbol || 'USDC'
+}
+
+/**
+ * Raw launchVirtualQuote for Instant RWA creates.
+ * Matches Instant USDC ~$5500 starting FDV encoding: stables use 5500 * 10^decimals;
+ * cirBTC uses a baked ~$76k spot (live cirBTC/USDC pool, 2026-09-16) → ~0.0725 cirBTC.
+ */
+export function defaultRwaVirtualQuoteRaw(asset: Pick<ArcRwaAsset, 'id' | 'decimals'>): bigint {
+  const envKey =
+    asset.id === 'cirbtc'
+      ? 'NEXT_PUBLIC_ARC_RWA_CIRBTC_VIRTUAL_QUOTE'
+      : `NEXT_PUBLIC_ARC_RWA_${asset.id.toUpperCase()}_VIRTUAL_QUOTE`
+  const raw = (process.env[envKey] || '').trim()
+  if (/^\d+$/.test(raw)) return BigInt(raw)
+  if (asset.id === 'cirbtc' || asset.decimals === 8) {
+    // ~5500 / 75875 * 1e8 ≈ 7_248_784; round to 7_250_000.
+    return 7_250_000n
+  }
+  const dec = asset.decimals > 0 ? asset.decimals : 6
+  return 5500n * 10n ** BigInt(dec)
 }

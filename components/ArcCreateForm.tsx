@@ -27,7 +27,7 @@ import {
   parseArcQuote,
 } from '@/lib/arc-instant-launchpad'
 import { buildCreateTokenEveV4 } from '@/lib/eve-instant-v4-launchpad'
-import { liveRwaQuoteAssets, pendingRwaQuoteAssets, rwaAssetById } from '@/lib/arc-rwa-assets'
+import { liveRwaQuoteAssets, pendingRwaQuoteAssets, rwaAssetById, defaultRwaVirtualQuoteRaw } from '@/lib/arc-rwa-assets'
 import { BundleBasketCard } from '@/components/BundleBasketCard'
 import {
   RWA_V4_FACTORY_ABI,
@@ -418,6 +418,7 @@ export function ArcCreateForm({
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
           split: feeSplit,
+          launchVirtualQuote: rwaQuote ? defaultRwaVirtualQuoteRaw(rwaQuote) : undefined,
         })
         hash = await writeContractAsync({
           address: call.address,
@@ -473,6 +474,7 @@ export function ArcCreateForm({
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
           split: feeSplit,
+          launchVirtualQuote: rwaQuote ? defaultRwaVirtualQuoteRaw(rwaQuote) : undefined,
         })
         hash = await writeContractAsync({
           address: call.address,
