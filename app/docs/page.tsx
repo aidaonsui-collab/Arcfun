@@ -97,9 +97,9 @@ export default function DocsPage() {
                 </span>
               </div>
               <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
-                Same Instant mint + LP lock, quoted against cirBTC (permissionless) or USYC
-                (allowlisted wallets). Pick the quote on /create. BUIDL / JAAA / JTRSY stay Soon
-                until issuers publish Arc addresses. TOKEN/USDC trading is unaffected.
+                Same Instant mint + LP lock, quoted against cirBTC (permissionless). USYC and
+                other allowlisted RWAs stay Soon in the create UI until public trading works.
+                BUIDL / JAAA / JTRSY wait on Arc addresses. TOKEN/USDC trading is unaffected.
               </p>
             </article>
           </div>
