@@ -369,17 +369,21 @@ export function quoteSymbolForQuote(quote: string | null | undefined): string {
   return rwaAssetByQuote(q)?.symbol || 'USDC'
 }
 
+/** Instant USDC starting FDV. cirBTC uses the same dollars, encoded in 8dp at BTC-USD. */
+export const INSTANT_TARGET_FDV_USD = 5500
+
 /**
  * Raw launchVirtualQuote for Instant RWA creates.
  * Stables: 5500 * 10^decimals (~$5500 starting FDV, same as Instant USDC / factory default).
  *
- * cirBTC (8dp): do NOT use a spot-scaled raw like ~7.25e6 (~$5500 at ~$76k BTC).
- * Live Arc creates against RwaInstantV4Factory revert for that magnitude (VirtualQuote /
- * seed path); factory `launchVirtualQuote` is 5_500_000_000 and succeeds. Until an 8dp
- * encoding is proven on-chain for both token orderings, match that factory default.
- * Override with NEXT_PUBLIC_ARC_RWA_CIRBTC_VIRTUAL_QUOTE when ready.
+ * cirBTC (8dp): seed ~$5500 of cirBTC, not 5_500e6 raw. 5_500e6 is 55 cirBTC (~$4M FDV)
+ * because the factory default is a 6dp USDC encoding. Pass `btcUsd` so 5500/spot * 1e8
+ * lands in the same ballpark as Argus / Instant USDC. Env override still wins.
  */
-export function defaultRwaVirtualQuoteRaw(asset: Pick<ArcRwaAsset, 'id' | 'decimals'>): bigint {
+export function defaultRwaVirtualQuoteRaw(
+  asset: Pick<ArcRwaAsset, 'id' | 'decimals'>,
+  opts?: { btcUsd?: number | null },
+): bigint {
   const envKey =
     asset.id === 'cirbtc'
       ? 'NEXT_PUBLIC_ARC_RWA_CIRBTC_VIRTUAL_QUOTE'
@@ -387,8 +391,13 @@ export function defaultRwaVirtualQuoteRaw(asset: Pick<ArcRwaAsset, 'id' | 'decim
   const raw = (process.env[envKey] || '').trim()
   if (/^\d+$/.test(raw)) return BigInt(raw)
   if (asset.id === 'cirbtc' || asset.decimals === 8) {
-    // Same raw as factory launchVirtualQuote / VQ_6DP (5_500e6). Spot-scaled 8dp (~7.25e6) reverts on Arc.
-    return 5_500_000_000n
+    const btc = opts?.btcUsd
+    if (btc && btc > 0) {
+      const raw8 = Math.round((INSTANT_TARGET_FDV_USD / btc) * 1e8)
+      if (raw8 > 0) return BigInt(raw8)
+    }
+    // ~$5500 at $100k BTC. Never 5_500_000_000n (55 cirBTC ≈ $4M).
+    return 5_500_000n
   }
   const dec = asset.decimals > 0 ? asset.decimals : 6
   return 5500n * 10n ** BigInt(dec)

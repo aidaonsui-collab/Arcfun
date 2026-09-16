@@ -108,6 +108,30 @@ export const EVE_V4_POOL_MANAGER_STATE_ABI = [
   },
 ] as const
 
+/** EveFeeHook.configs(poolId) — feeBps is levied on swap output. */
+export const EVE_FEE_HOOK_CONFIGS_ABI = [
+  {
+    type: 'function',
+    name: 'configs',
+    stateMutability: 'view',
+    inputs: [{ name: 'id', type: 'bytes32' }],
+    outputs: [
+      { name: 'registered', type: 'bool' },
+      { name: 'creator', type: 'address' },
+      { name: 'holders', type: 'address' },
+      { name: 'autoLp', type: 'address' },
+      { name: 'platformWallet', type: 'address' },
+      { name: 'launch', type: 'address' },
+      { name: 'feeBps', type: 'uint16' },
+      { name: 'creatorBps', type: 'uint16' },
+      { name: 'burnBps', type: 'uint16' },
+      { name: 'holdersBps', type: 'uint16' },
+      { name: 'autoLpBps', type: 'uint16' },
+      { name: 'platformBps', type: 'uint16' },
+    ],
+  },
+] as const
+
 export type EveV4WriteCall = {
   address: Address
   abi: typeof EVE_INSTANT_V4_FACTORY_ABI
