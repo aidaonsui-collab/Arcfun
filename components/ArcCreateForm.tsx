@@ -27,7 +27,7 @@ import {
   parseArcQuote,
 } from '@/lib/arc-instant-launchpad'
 import { buildCreateTokenEveV4 } from '@/lib/eve-instant-v4-launchpad'
-import { liveRwaQuoteAssets, pendingRwaQuoteAssets, rwaAssetById, defaultRwaVirtualQuoteRaw } from '@/lib/arc-rwa-assets'
+import { liveRwaQuoteAssets, pendingRwaQuoteAssets, rwaAssetById, defaultRwaVirtualQuoteRaw, type ArcRwaAsset } from '@/lib/arc-rwa-assets'
 import { BundleBasketCard } from '@/components/BundleBasketCard'
 import {
   RWA_V4_FACTORY_ABI,
@@ -116,15 +116,19 @@ const LAUNCH_TYPES_V4: {
   },
 ]
 
-/** USDC presets are dollar amounts; RWA presets are quote-token units (not USD). */
-function firstBuyPresets(quoteId: string, decimals: number): string[] {
-  if (quoteId === 'usdc' || decimals === 6) return ['100', '250', '1000']
+/** USDC presets are dollar chips; every other quote uses token units (never fake $). */
+function firstBuyPresets(quoteId: string, decimals: number, kind?: ArcRwaAsset['kind']): string[] {
+  if (quoteId === 'usdc') return ['100', '250', '1000']
   if (quoteId === 'cirbtc' || decimals === 8) return ['0.0001', '0.001', '0.01']
+  // USD-pegged MMFs / 6dp stables (USYC, JAAA, JTRSY): same magnitude, labeled as quote units.
+  if (decimals === 6 || kind === 'mmf') return ['100', '250', '1000']
+  // 18dp funds / equities (BUIDL, CRCL, …)
+  if (decimals >= 18) return ['1', '10', '50']
   return ['1', '10', '50']
 }
 
-function defaultFirstBuy(quoteId: string, decimals: number): string {
-  return firstBuyPresets(quoteId, decimals)[1] || '0'
+function defaultFirstBuy(quoteId: string, decimals: number, kind?: ArcRwaAsset['kind']): string {
+  return firstBuyPresets(quoteId, decimals, kind)[1] || '0'
 }
 
 export function ArcCreateForm({
@@ -193,19 +197,13 @@ export function ArcCreateForm({
   const busy = step !== 'idle' && step !== 'done'
   const liveRwas = liveRwaQuoteAssets()
   const pendingRwas = pendingRwaQuoteAssets()
-  // Permissioned RWAs (USYC, …) stay UI-gated until public trading works.
+  // Create-ready quotes (incl. permissioned USYC) are selectable — first-buy UI is quote-aware.
+  // True pending (no issuer CA / factory) stay Soon in the picker.
   const openRwas = liveRwas.filter((a) => !a.permissioned)
-  const gatedRwas = [
-    ...liveRwas.filter((a) => a.permissioned),
-    ...pendingRwas,
-  ]
+  const readyGatedRwas = liveRwas.filter((a) => a.permissioned)
+  const selectableRwas = [...openRwas, ...readyGatedRwas]
+  const soonRwas = pendingRwas
   const rwaQuote = quoteId !== 'usdc' ? rwaAssetById(quoteId) : null
-  useEffect(() => {
-    if (quoteId !== 'usdc' && rwaQuote?.permissioned) {
-      setQuoteId('usdc')
-      setBundleOn(false)
-    }
-  }, [quoteId, rwaQuote?.permissioned])
 
   const quoteDecimalsLive = rwaQuote?.decimals || 6
   const quoteTokenLive = (rwaQuote?.address as Address | undefined) || ARC.USDC
@@ -216,8 +214,8 @@ export function ArcCreateForm({
 
   // Keep first-buy amount in the active quote's units when the pair changes.
   useEffect(() => {
-    setFirstBuy(defaultFirstBuy(quoteId, quoteDecimalsLive))
-  }, [quoteId, quoteDecimalsLive])
+    setFirstBuy(defaultFirstBuy(quoteId, quoteDecimalsLive, rwaQuote?.kind))
+  }, [quoteId, quoteDecimalsLive, rwaQuote?.kind])
 
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
   const isReflection = launchType === 'reflection'
@@ -818,12 +816,12 @@ export function ArcCreateForm({
           }
         />
       ))}
-      {openRwas.length > 0 || gatedRwas.length > 0 ? (
+      {selectableRwas.length > 0 || soonRwas.length > 0 ? (
         <RwaPairedPicker
-          open={openRwas}
-          gated={gatedRwas}
-          active={launchType === 'instant' && quoteId !== 'usdc' && Boolean(openRwas.some((a) => a.id === quoteId))}
-          selectedId={openRwas.some((a) => a.id === quoteId) ? quoteId : null}
+          open={selectableRwas}
+          gated={soonRwas}
+          active={launchType === 'instant' && quoteId !== 'usdc' && Boolean(selectableRwas.some((a) => a.id === quoteId))}
+          selectedId={selectableRwas.some((a) => a.id === quoteId) ? quoteId : null}
           v4Ui={v4Ui}
           disabled={!launchesLive}
           onSelect={(id) => {
@@ -845,6 +843,13 @@ export function ArcCreateForm({
         ) : null}
 
         {typePicker}
+
+        {rwaQuote?.permissioned ? (
+          <p className="mt-2 mb-0 text-[12px] text-amber-200/90 leading-snug">
+            {quoteSymbol} is permissioned — Instant create works when the issuer has allowlisted the factory.
+            First buy is in {quoteSymbol} units, not USD.
+          </p>
+        ) : null}
 
         {v4Ui && launchesLive ? (
           <div className="mt-3 space-y-3">
@@ -1103,7 +1108,7 @@ export function ArcCreateForm({
                     className={FIELD}
                   />
                   <div className="flex gap-1.5 shrink-0">
-                    {firstBuyPresets(quoteId, quoteDecimalsLive).map((p) => (
+                    {firstBuyPresets(quoteId, quoteDecimalsLive, rwaQuote?.kind).map((p) => (
                       <button
                         key={p}
                         type="button"
@@ -1352,15 +1357,17 @@ function RwaPairedPicker({
 
   const gatedLabel = gated.map((a) => a.symbol).join(' · ')
   const body = selected
-    ? v4Ui
-      ? `Same Instant mint + LP lock, quoted in ${selected.symbol}. Optional holder basket.`
-      : `Same Instant mint + LP lock, quoted in ${selected.symbol}.`
+    ? selected.permissioned
+      ? `Quoted in ${selected.symbol} (permissioned). First buy is in ${selected.symbol}, not USD.`
+      : v4Ui
+        ? `Same Instant mint + LP lock, quoted in ${selected.symbol}. Optional holder basket.`
+        : `Same Instant mint + LP lock, quoted in ${selected.symbol}.`
     : canPick
       ? gatedLabel
-        ? `Pick a quote. ${gatedLabel} stay Soon.`
+        ? `Pick a quote. ${gatedLabel} stay Soon until the issuer publishes an Arc address.`
         : 'Pick a quote.'
       : gatedLabel
-        ? `${gatedLabel} — permissioned or waiting on issuer. Public Instant pairing stays gated.`
+        ? `${gatedLabel} — waiting on issuer address + Instant factory.`
         : 'Waiting on issuer + Instant factory.'
 
   const cls = `relative rounded-2xl bg-s1 p-4 text-left border transition-colors duration-150 sm:col-span-2 ${
@@ -1431,6 +1438,9 @@ function RwaPairedPicker({
                         <span className="size-5 rounded-full bg-white/10 shrink-0" />
                       )}
                       <span className="font-medium">{a.symbol}</span>
+                      {a.permissioned ? (
+                        <span className="ml-auto text-[10px] uppercase tracking-wide text-amber-200/80 font-semibold">Gated</span>
+                      ) : null}
                     </button>
                   </li>
                 )
