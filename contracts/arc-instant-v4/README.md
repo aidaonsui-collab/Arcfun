@@ -38,15 +38,32 @@ Deployed with `script/DeployEveInstantV4.s.sol` through Arachnid's CREATE2 deplo
 `AFTER_SWAP | AFTER_SWAP_RETURNS_DELTA` (flags 68). Owner is passed into the hook constructor
 so the CREATE2 factory is not locked as owner.
 
+Redeployed 2026-09-16 onto a fresh `EveFeeHook` carrying the `flushQuoteBurn`/`flushAutoLp`
+price-manipulation bound (commit 300cd1d) — the previous hook never had that fix live. Since
+a pool's hook address is part of its Uniswap v4 pool identity, every pool created before this
+redeploy stays permanently on the old hook; only new launches route through the fixed one.
+`InstantAutoLpHelper` and `BundleSinkDeployer` are deployed fresh inside the factory
+constructors every time, so they're new addresses too even though the router carried over
+unchanged. Old addresses are kept as `ARC_INSTANT_V4_*_PREV` in `lib/contracts-arc.ts` so
+pre-redeploy tokens stay in the catalog.
+
 | Contract | Address |
 | --- | --- |
 | Uniswap `PoolManager` | `0x8366a39CC670B4001A1121B8F6A443A643e40951` |
-| `EveFeeHook` | `0xd8F5790094711747ae4083651dDDfcE73699C044` |
-| `EveInstantV4Factory` | `0x0421a4c784ADCD0BB51bF0d108FF76E37bdB1297` |
-| `InstantAutoLpHelper` | `0x232097345561A453160B34021a6974293bA0DdD3` |
-| `EveV4Router` | `0x494715a3923392Dd0fD312B0CC40055679Feaad2` |
-| `BundleSinkDeployer` | `0x90C261A932e29915DB97fb446e402EBd1438C680` |
-| `RwaInstantV4Factory` | `0x7f4D81281492D3EBc2629826721223451c20a5Ca` |
+| `EveFeeHook` | `0x8fa4B88e4052302FBd9E8419eeC6E9FdAC210044` |
+| `EveInstantV4Factory` | `0xCfC8287Fd6331A826565B2ACBc69CB3E083602Ea` |
+| `InstantAutoLpHelper` | `0xEbe049aF3725660A42736297d1fE82Ca21EB0cf3` |
+| `EveV4Router` | `0x494715a3923392Dd0fD312B0CC40055679Feaad2` (reused, unaffected by the hook fix) |
+| `BundleSinkDeployer` | `0xf775493CE7E16a94e175C1C984bcdF2F689895fc` |
+| `RwaInstantV4Factory` | `0x3489E76510238ef57Ee9d18005a6Fb110f17912D` |
+
+Previous generation (permanently in use by tokens launched before 2026-09-16):
+
+| Contract | Address |
+| --- | --- |
+| `EveFeeHook` (old) | `0xd8F5790094711747ae4083651dDDfcE73699C044` |
+| `EveInstantV4Factory` (old) | `0x0421a4c784ADCD0BB51bF0d108FF76E37bdB1297` |
+| `RwaInstantV4Factory` (old) | `0x7f4D81281492D3EBc2629826721223451c20a5Ca` |
 
 PoolManager is Uniswap's official Arc address (`Uniswap/contracts` `deployments/json/5042.json`).
 Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
