@@ -27,7 +27,7 @@ import {BundleSinkDeployer} from "../src/BundleSinkDeployer.sol";
 contract DeployRwaInstantV4 is Script {
     uint256 internal constant CHAIN_ARC_MAINNET = 5_042;
     address internal constant ARC_POOL_MANAGER = 0x8366a39CC670B4001A1121B8F6A443A643e40951;
-    address internal constant LIVE_HOOK = 0xd8F5790094711747ae4083651dDDfcE73699C044;
+    address internal constant LIVE_HOOK = 0x8fa4B88e4052302FBd9E8419eeC6E9FdAC210044;
     uint256 internal constant DEFAULT_VIRTUAL_QUOTE = 5_500e6;
 
     function run() external {
