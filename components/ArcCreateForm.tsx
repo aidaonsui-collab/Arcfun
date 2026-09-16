@@ -3,7 +3,7 @@
 /**
  * Launch on Arc — Instant or Instant Reflection (both TOKEN/USDC + holder rewards path).
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount, useConnect, useSwitchChain, useWriteContract, useSignMessage } from 'wagmi'
 import { erc20Abi, formatUnits, getAddress, isAddress, type Address } from 'viem'
@@ -68,6 +68,7 @@ import {
 import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 import type { PoolToken } from '@/lib/tokens'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
+import { fetchBtcUsdSpot, formatCirBtcApprox, usdToCirBtcAmount } from '@/lib/btc-usd-spot'
 
 type Step =
   | 'idle'
@@ -116,15 +117,21 @@ const LAUNCH_TYPES_V4: {
   },
 ]
 
-/** USDC presets are dollar chips; every other quote uses token units (never fake $). */
+/** USDC + cirBTC presets are dollar chips; other quotes use token units (never fake $). */
 function firstBuyPresets(quoteId: string, decimals: number, kind?: ArcRwaAsset['kind']): string[] {
   if (quoteId === 'usdc') return ['100', '250', '1000']
-  if (quoteId === 'cirbtc' || decimals === 8) return ['0.0001', '0.001', '0.01']
+  // cirBTC pair still settles in cirBTC; UI enters USDC (≈ old 0.0001/0.001/0.01 @ ~$100k BTC).
+  if (quoteId === 'cirbtc') return ['10', '100', '1000']
+  if (decimals === 8) return ['0.0001', '0.001', '0.01']
   // USD-pegged MMFs / 6dp stables (USYC, JAAA, JTRSY): same magnitude, labeled as quote units.
   if (decimals === 6 || kind === 'mmf') return ['100', '250', '1000']
   // 18dp funds / equities (BUIDL, CRCL, …)
   if (decimals >= 18) return ['1', '10', '50']
   return ['1', '10', '50']
+}
+
+function firstBuyUsesUsdInput(quoteId: string): boolean {
+  return quoteId === 'usdc' || quoteId === 'cirbtc'
 }
 
 function defaultFirstBuy(quoteId: string, decimals: number, kind?: ArcRwaAsset['kind']): string {
@@ -170,6 +177,9 @@ export function ArcCreateForm({
   const [rewardToken, setRewardToken] = useState<string>(ARC.USDC)
   const [buyAtLaunch, setBuyAtLaunch] = useState(false)
   const [firstBuy, setFirstBuy] = useState(() => defaultFirstBuy('usdc', 6))
+  /** Live BTC-USD spot for cirBTC USD→cirBTC conversion (display + submit). */
+  const [btcUsd, setBtcUsd] = useState<number | null>(null)
+  const [btcUsdStatus, setBtcUsdStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
 
   const [step, setStep] = useState<Step>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -213,11 +223,55 @@ export function ArcCreateForm({
   )
 
   // Keep first-buy amount in the active quote's units when the pair changes.
+  // cirBTC keeps USD string state (converted to cirBTC raw only at submit).
   useEffect(() => {
     setFirstBuy(defaultFirstBuy(quoteId, quoteDecimalsLive, rwaQuote?.kind))
   }, [quoteId, quoteDecimalsLive, rwaQuote?.kind])
 
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
+  const cirBtcUsdInput = quoteId === 'cirbtc'
+
+  const refreshBtcUsd = useCallback(async (force = false) => {
+    if (!cirBtcUsdInput) return null
+    setBtcUsdStatus((s) => (s === 'ready' && !force ? s : 'loading'))
+    const price = await fetchBtcUsdSpot({ force })
+    if (price == null) {
+      setBtcUsdStatus('error')
+      return null
+    }
+    setBtcUsd(price)
+    setBtcUsdStatus('ready')
+    return price
+  }, [cirBtcUsdInput])
+
+  useEffect(() => {
+    if (!cirBtcUsdInput) {
+      setBtcUsdStatus('idle')
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const price = await fetchBtcUsdSpot()
+      if (cancelled) return
+      if (price == null) {
+        setBtcUsdStatus('error')
+        return
+      }
+      setBtcUsd(price)
+      setBtcUsdStatus('ready')
+    })()
+    const t = window.setInterval(() => {
+      void fetchBtcUsdSpot({ force: true }).then((price) => {
+        if (cancelled || price == null) return
+        setBtcUsd(price)
+        setBtcUsdStatus('ready')
+      })
+    }, 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(t)
+    }
+  }, [cirBtcUsdInput])
   const isReflection = launchType === 'reflection'
   const v4Ui = arcInstantV4UiEnabled()
   const v4Live = arcInstantV4Enabled()
@@ -410,8 +464,24 @@ export function ArcCreateForm({
       let pool: Address | undefined
 
       const quoteDecimals = rwaQuote?.decimals || 6
-      const firstBuyQuote =
-        buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcQuote(firstBuy, quoteDecimals) : 0n
+      let firstBuyQuote = 0n
+      let firstBuyUsdForErr: number | null = null
+      if (buyAtLaunch && firstBuy && Number(firstBuy) > 0) {
+        if (quoteId === 'cirbtc') {
+          firstBuyUsdForErr = Number(firstBuy)
+          const spot = await refreshBtcUsd(true)
+          if (spot == null || !(spot > 0)) {
+            throw new Error('Could not fetch BTC-USD price for cirBTC conversion. Retry in a moment.')
+          }
+          const cirAmount = usdToCirBtcAmount(firstBuyUsdForErr, spot)
+          if (!(Number(cirAmount) > 0)) {
+            throw new Error('First buy amount is too small after BTC-USD conversion.')
+          }
+          firstBuyQuote = parseArcQuote(cirAmount, quoteDecimals)
+        } else {
+          firstBuyQuote = parseArcQuote(firstBuy, quoteDecimals)
+        }
+      }
       // Belt-and-suspenders: never send holdersBps to plain RWA createToken.
       const splitForCreate =
         Boolean(rwaQuote) && !bundleOn ? foldHoldersIntoCreator(feeSplit) : feeSplit
@@ -437,6 +507,11 @@ export function ArcCreateForm({
         if (bal < firstBuyQuote) {
           const need = formatUnits(firstBuyQuote, quoteDecimals)
           const have = formatUnits(bal, quoteDecimals)
+          if (quoteId === 'cirbtc' && firstBuyUsdForErr != null) {
+            throw new Error(
+              `First buy needs ${need} cirBTC (≈ $${firstBuyUsdForErr.toFixed(2)}; wallet has ${have} cirBTC).`,
+            )
+          }
           throw new Error(
             `First buy needs ${need} ${rwaQuote?.symbol || 'USDC'} (wallet has ${have}). This field is in ${rwaQuote?.symbol || 'USDC'}, not USD.`,
           )
@@ -710,16 +785,23 @@ export function ArcCreateForm({
       : 'Your wallet'
   const feeUsd = v4Live ? 0 : Number(arcCreationFeeWeiFor(address)) / 1e18
   const buyAmt = buyAtLaunch ? Number(firstBuy) || 0 : 0
-  // Preview card still expects a number; USDC first-buy ≈ USD, RWA is quote units only.
-  const buyUsd = quoteId === 'usdc' ? buyAmt : 0
-  const firstBuyLabel =
-    quoteId === 'usdc' ? `$${buyAmt.toFixed(2)}` : `${buyAmt} ${quoteSymbol}`
-  const payLabel =
-    quoteId === 'usdc'
-      ? `$${(feeUsd + buyAmt).toFixed(2)}`
-      : feeUsd > 0
-        ? `$${feeUsd.toFixed(2)} + ${buyAmt} ${quoteSymbol}`
-        : `${buyAmt} ${quoteSymbol}`
+  // Preview card: USDC + cirBTC first-buy are USD inputs; other RWA stay quote units.
+  const buyUsd = firstBuyUsesUsdInput(quoteId) ? buyAmt : 0
+  const cirBtcApproxLabel = cirBtcUsdInput ? formatCirBtcApprox(buyAmt, btcUsd) : null
+  const firstBuyLabel = firstBuyUsesUsdInput(quoteId)
+    ? cirBtcUsdInput && cirBtcApproxLabel
+      ? `$${buyAmt.toFixed(2)} (≈ ${cirBtcApproxLabel} cirBTC)`
+      : `$${buyAmt.toFixed(2)}`
+    : `${buyAmt} ${quoteSymbol}`
+  const payLabel = firstBuyUsesUsdInput(quoteId)
+    ? cirBtcUsdInput && cirBtcApproxLabel
+      ? feeUsd > 0
+        ? `$${feeUsd.toFixed(2)} + $${buyAmt.toFixed(2)} (≈ ${cirBtcApproxLabel} cirBTC)`
+        : `$${buyAmt.toFixed(2)} (≈ ${cirBtcApproxLabel} cirBTC)`
+      : `$${(feeUsd + buyAmt).toFixed(2)}`
+    : feeUsd > 0
+      ? `$${feeUsd.toFixed(2)} + ${buyAmt} ${quoteSymbol}`
+      : `${buyAmt} ${quoteSymbol}`
   const walletLabel =
     !isConnected
       ? 'Not connected'
@@ -847,7 +929,9 @@ export function ArcCreateForm({
         {rwaQuote?.permissioned ? (
           <p className="mt-2 mb-0 text-[12px] text-amber-200/90 leading-snug">
             {quoteSymbol} is permissioned — Instant create works when the issuer has allowlisted the factory.
-            First buy is in {quoteSymbol} units, not USD.
+            {quoteId === 'cirbtc'
+              ? 'Enter first buy in USDC; it converts to cirBTC at the live BTC-USD spot.'
+              : `First buy is in ${quoteSymbol} units, not USD.`}
           </p>
         ) : null}
 
@@ -1092,14 +1176,16 @@ export function ArcCreateForm({
               <div className="flex flex-col gap-0.5 pr-5">
                 <span className="text-[15px] font-semibold tracking-tightish">Buy at launch</span>
                 <span className="text-[13px] text-t3 leading-snug">
-                  Bundle a {quoteSymbol} first buy into the create transaction.
+                  {cirBtcUsdInput
+                    ? 'Bundle a first buy into create — enter USDC, settle in cirBTC.'
+                    : `Bundle a ${quoteSymbol} first buy into the create transaction.`}
                 </span>
               </div>
               <Toggle on={buyAtLaunch} onToggle={() => setBuyAtLaunch((v) => !v)} />
             </div>
 
             {buyAtLaunch && (
-              <Field label={`Buy at launch · ${quoteSymbol}`}>
+              <Field label={cirBtcUsdInput ? 'Buy at launch · USDC' : `Buy at launch · ${quoteSymbol}`}>
                 <div className="flex items-center gap-3">
                   <input
                     value={firstBuy}
@@ -1115,7 +1201,7 @@ export function ArcCreateForm({
                         onClick={() => setFirstBuy(p)}
                         className="px-3 py-1.5 rounded-full bg-s1 border border-hair text-[13px] font-semibold tabular-nums text-t2 hover:text-white"
                       >
-                        {quoteId === 'usdc'
+                        {firstBuyUsesUsdInput(quoteId)
                           ? p === '1000'
                             ? '$1K'
                             : `$${p}`
@@ -1125,11 +1211,30 @@ export function ArcCreateForm({
                   </div>
                 </div>
                 <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
-                  Amount is in {quoteSymbol}
-                  {quoteId === 'usdc' ? ' (USD)' : ', not USD'}.
-                  {quoteBalQ.data != null
-                    ? ` Wallet: ${formatUnits(quoteBalQ.data, quoteDecimalsLive)} ${quoteSymbol}.`
-                    : ''}
+                  {cirBtcUsdInput ? (
+                    <>
+                      Amount is in USDC (dollars), then converted to cirBTC at the live BTC-USD spot for the on-chain buy.
+                      {btcUsdStatus === 'ready' && btcUsd != null
+                        ? ` Spot ≈ $${btcUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}.`
+                        : btcUsdStatus === 'loading'
+                          ? ' Fetching BTC-USD…'
+                          : btcUsdStatus === 'error'
+                            ? ' BTC-USD unavailable — retry before creating.'
+                            : ''}
+                      {cirBtcApproxLabel ? ` ≈ ${cirBtcApproxLabel} cirBTC.` : ''}
+                      {quoteBalQ.data != null
+                        ? ` Wallet: ${formatUnits(quoteBalQ.data, quoteDecimalsLive)} cirBTC.`
+                        : ''}
+                    </>
+                  ) : (
+                    <>
+                      Amount is in {quoteSymbol}
+                      {quoteId === 'usdc' ? ' (USD)' : ', not USD'}.
+                      {quoteBalQ.data != null
+                        ? ` Wallet: ${formatUnits(quoteBalQ.data, quoteDecimalsLive)} ${quoteSymbol}.`
+                        : ''}
+                    </>
+                  )}
                 </p>
               </Field>
             )}
