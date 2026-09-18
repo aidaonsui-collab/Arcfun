@@ -24,7 +24,7 @@ import {
   withRecipient,
 } from '@/lib/arc-swap'
 import { quoteDecimalsForToken, quotePolicy, quoteSymbolForQuote, rwaAssetByQuote, usdToQuoteHuman } from '@/lib/arc-rwa-assets'
-import { cirBtcToUsd, fetchBtcUsdSpot } from '@/lib/btc-usd-spot'
+import { fetchQuoteUsdSpot, spotQuoteToUsd } from '@/lib/quote-usd-spot'
 import { formatToken, parseToken } from '@/lib/token-format'
 import { getIncomingReferralCode } from '@/lib/crucible'
 import { fmtPrice, fmtUsd, tileGradient } from '@/lib/ui-format'
@@ -71,6 +71,7 @@ function parseQuoteAmt(v: string, decimals: number): bigint {
 function quoteMarkSrc(quote: Address | undefined): string | null {
   const id = rwaAssetByQuote(quote)?.id
   if (id === 'cirbtc') return '/marks/cirbtc.svg'
+  if (id === 'xaum') return '/marks/xaum.svg'
   if (id === 'usyc') return '/marks/usyc.png'
   if (id === 'buidl') return '/marks/buidl.png'
   if (id === 'crcl') return '/marks/crcl.svg'
@@ -80,13 +81,13 @@ function quoteMarkSrc(quote: Address | undefined): string | null {
 function quoteHumanToUsd(
   human: number,
   quote: Address | undefined,
-  btcUsd: number | null,
+  spotPx: number | null,
 ): number | null {
   if (!(human > 0) || !Number.isFinite(human)) return null
   const p = quotePolicy(rwaAssetByQuote(quote))
   if (p.usd === 'peg') return human
   if (p.usd === 'spot') {
-    const usd = cirBtcToUsd(human, btcUsd)
+    const usd = spotQuoteToUsd(human, spotPx)
     return usd > 0 ? usd : null
   }
   return null
@@ -131,7 +132,7 @@ export function ArcDexTradePanel({
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>()
   const [v4Pool, setV4Pool] = useState<EveV4PoolInfo | null>(null)
   const [v4Ready, setV4Ready] = useState(false)
-  const [btcUsd, setBtcUsd] = useState<number | null>(null)
+  const [spotPx, setSpotPx] = useState<number | null>(null)
   const submitLock = useRef(false)
 
   const { isSuccess: mined } = useWaitForTransactionReceipt({ hash: txHash })
@@ -146,7 +147,9 @@ export function ArcDexTradePanel({
   const quoteSym = quoteSymbolForQuote(quoteToken)
   const quoteDec = quoteDecimalsForToken(quoteToken)
   const quoteAsset = rwaAssetByQuote(quoteToken)
-  const spotUsd = quotePolicy(quoteAsset).usd === 'spot'
+  const spotPolicy = quotePolicy(quoteAsset)
+  const spotUsd = spotPolicy.usd === 'spot'
+  const spotPair = spotPolicy.usdSpot
 
   useEffect(() => {
     let cancelled = false
@@ -171,18 +174,18 @@ export function ArcDexTradePanel({
   }, [token])
 
   useEffect(() => {
-    if (!spotUsd) {
-      setBtcUsd(null)
+    if (!spotUsd || !spotPair) {
+      setSpotPx(null)
       return
     }
     let cancelled = false
-    void fetchBtcUsdSpot().then((px) => {
-      if (!cancelled) setBtcUsd(px)
+    void fetchQuoteUsdSpot(spotPair).then((px) => {
+      if (!cancelled) setSpotPx(px)
     })
     return () => {
       cancelled = true
     }
-  }, [spotUsd])
+  }, [spotUsd, spotPair])
   const refCode = mode === 'buy' ? getIncomingReferralCode() : ''
   const { tile, mono } = tileGradient(token)
   const initial = (symbol || '?').charAt(0).toUpperCase()
@@ -466,9 +469,9 @@ export function ArcDexTradePanel({
   const receiveSym = mode === 'buy' ? symbol : isV4 ? quoteSym : 'USDC'
   const receiveUsd =
     mode === 'sell' && estOut != null && estOut > 0n
-      ? quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteToken : ARC.USDC, btcUsd)
+      ? quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteToken : ARC.USDC, spotPx)
       : mode === 'buy' && amtNum > 0
-        ? quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, btcUsd)
+        ? quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, spotPx)
         : null
   const TokenChip = ({ kind }: { kind: 'quote' | 'token' }) =>
     kind === 'quote' ? (
@@ -508,12 +511,12 @@ export function ArcDexTradePanel({
     )
 
   const feeBps = isV4 ? v4Pool?.feeBps || 100 : 100
-  const inUsd = quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, btcUsd)
+  const inUsd = quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, spotPx)
   const outUsd =
     estOut != null && estOut > 0n
       ? mode === 'buy'
         ? null
-        : quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteToken : ARC.USDC, btcUsd)
+        : quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteToken : ARC.USDC, spotPx)
       : null
   const feeUsd =
     mode === 'buy'
@@ -587,8 +590,8 @@ export function ArcDexTradePanel({
               Max
             </button>
           </div>
-          {mode === 'buy' && isV4 && spotUsd && amtNum > 0 && btcUsd ? (
-            <p className="mt-1 mb-0 text-[11px] text-t3">≈ {fmtUsd(cirBtcToUsd(amtNum, btcUsd))}</p>
+          {mode === 'buy' && isV4 && spotUsd && amtNum > 0 && spotPx ? (
+            <p className="mt-1 mb-0 text-[11px] text-t3">≈ {fmtUsd(spotQuoteToUsd(amtNum, spotPx))}</p>
           ) : null}
           {mode === 'buy' ? (
             <div className="mt-2 flex gap-1.5">
@@ -596,11 +599,11 @@ export function ArcDexTradePanel({
                 <button
                   key={v}
                   type="button"
-                  disabled={spotUsd && !(btcUsd && btcUsd > 0)}
+                  disabled={spotUsd && !(spotPx && spotPx > 0)}
                   onClick={() => {
                     if (spotUsd) {
-                      if (!btcUsd) return
-                      setAmount(usdToQuoteHuman(v, btcUsd, quoteDec))
+                      if (!spotPx) return
+                      setAmount(usdToQuoteHuman(v, spotPx, quoteDec))
                     } else {
                       setAmount(String(v))
                     }

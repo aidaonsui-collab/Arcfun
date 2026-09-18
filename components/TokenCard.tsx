@@ -11,7 +11,7 @@ import { cdnImage } from '@/lib/cdn-image'
 
 const EVE = '0x19209e55049bc613c5cc8b66b7df7824096e78cf'
 const MMF = new Set(['usyc', 'buidl', 'jaaa', 'jtrsy'])
-const COMMODITY = new Set(['cirbtc'])
+const COMMODITY = new Set(['cirbtc', 'xaum'])
 const EQUITY = new Set(['crcl'])
 
 const QUOTE_TINT: Record<string, string> = {
@@ -20,6 +20,12 @@ const QUOTE_TINT: Record<string, string> = {
   buidl: '226 232 240',
   crcl: '110 231 183',
   cirbtc: '247 147 26',
+  xaum: '212 175 55',
+}
+
+const COMMODITY_LABEL: Record<string, string> = {
+  cirbtc: 'BTC',
+  xaum: 'Gold',
 }
 
 function quoteMarkSrc(quote: string): string | null {
@@ -29,6 +35,7 @@ function quoteMarkSrc(quote: string): string | null {
   if (id === 'buidl') return '/marks/buidl.png'
   if (id === 'crcl') return '/marks/crcl.svg'
   if (id === 'cirbtc') return '/marks/cirbtc.svg'
+  if (id === 'xaum') return '/marks/xaum.svg'
   return null
 }
 
@@ -187,7 +194,7 @@ export function TokenCard({
               color: `rgb(${tint})`,
             }}
           >
-            BTC
+            {COMMODITY_LABEL[quoteKey] || 'Commodity'}
           </span>
         ) : null}
         {EQUITY.has(quoteKey) ? (
