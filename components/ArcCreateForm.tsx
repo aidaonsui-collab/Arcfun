@@ -29,7 +29,7 @@ import {
   parseArcQuote,
 } from '@/lib/arc-instant-launchpad'
 import { buildCreateTokenEveV4, EVE_V4_DEFAULT_VIRTUAL_QUOTE } from '@/lib/eve-instant-v4-launchpad'
-import { estimateInstantFirstBuyTokens } from '@/lib/instant-first-buy'
+import { estimateInstantFirstBuyTokens, instantListedMcUsd } from '@/lib/instant-first-buy'
 import {
   liveRwaQuoteAssets,
   pendingRwaQuoteAssets,
@@ -874,9 +874,16 @@ export function ArcCreateForm({
       : 'Your wallet'
   const feeUsd = v4Live ? 0 : Number(arcCreationFeeWeiFor(address)) / 1e18
   const buyAmt = buyAtLaunch ? Number(firstBuy) || 0 : 0
-  // Preview card: peg/spot first-buy are USD inputs; other RWA stay quote units.
-  const buyUsd = usdInput ? buyAmt : 0
   const cirBtcApproxLabel = spotUsd ? formatCirBtcApprox(buyAmt, btcUsd) : null
+  const virtualQuoteRaw = rwaQuote
+    ? defaultRwaVirtualQuoteRaw(rwaQuote, { btcUsd })
+    : EVE_V4_DEFAULT_VIRTUAL_QUOTE
+  const usdPerQuote = spotUsd ? (btcUsd != null && btcUsd > 0 ? btcUsd : 0) : usdInput ? 1 : 0
+  const listedMcUsd = instantListedMcUsd({
+    virtualQuoteRaw,
+    quoteDecimals: quoteDecimalsLive,
+    usdPerQuote,
+  })
   let firstBuyTokens = 0
   if (buyAtLaunch && buyAmt > 0 && !(spotUsd && !(btcUsd != null && btcUsd > 0))) {
     try {
@@ -884,9 +891,6 @@ export function ArcCreateForm({
         ? usdToQuoteHuman(buyAmt, btcUsd, quoteDecimalsLive)
         : firstBuy
       const quoteInRaw = parseArcQuote(quoteHuman, quoteDecimalsLive)
-      const virtualQuoteRaw = rwaQuote
-        ? defaultRwaVirtualQuoteRaw(rwaQuote, { btcUsd })
-        : EVE_V4_DEFAULT_VIRTUAL_QUOTE
       firstBuyTokens = estimateInstantFirstBuyTokens({
         quoteInRaw,
         virtualQuoteRaw,
@@ -940,7 +944,7 @@ export function ArcCreateForm({
     creatorShort: '',
     creatorFull: address || '',
     rewardsHandle: handleMode && handleNorm ? handleNorm : undefined,
-    currentPrice: 0,
+    currentPrice: listedMcUsd > 0 ? listedMcUsd / 1_000_000_000 : 0,
     realSuiRaised: 0,
     threshold: 0,
     progress: 100,
@@ -948,7 +952,7 @@ export function ArcCreateForm({
     volume1h: 0,
     priceChange24h: 0,
     age: '0s',
-    marketCap: buyUsd,
+    marketCap: listedMcUsd,
     totalSupply: 1_000_000_000,
     bondingProgress: 100,
     createdAt: Date.now(),
