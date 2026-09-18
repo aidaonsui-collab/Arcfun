@@ -6,7 +6,10 @@ import { ARC, ARC_CHAIN_ID, arcInstantV4Enabled } from './contracts-arc'
 import type { FeeSplit } from './eve-fee-split'
 
 export const EVE_V4_TICK_SPACING = 200
-export const EVE_V4_DEFAULT_VIRTUAL_QUOTE = 5_500_000_000n // 5500e6, same FDV encoding as Instant V3
+/** Listed Instant meme FDV target. MC = VQ * 1e9 / VIRTUAL_TOKEN_INIT. */
+export const INSTANT_MEME_TARGET_FDV_USD = 1500
+/** USDC 6dp virtual quote so listed MC is $1,500 (1600e6 / 1.066…e9 * 1e9). RWA seeds stay at $5500. */
+export const EVE_V4_DEFAULT_VIRTUAL_QUOTE = 1_600_000_000n
 
 export const EVE_FEE_HOOK_SPLIT_COMPONENTS = [
   { name: 'feeBps', type: 'uint16' },
