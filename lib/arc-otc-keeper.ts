@@ -207,7 +207,20 @@ async function waitReceipt(client: PublicClient, hash: Hex, label: string): Prom
     pollingInterval: 2_000,
   })
   if (receipt.status !== 'success') {
-    throw new Error(`${label} tx reverted: ${hash}`)
+    // Include the on-chain revert reason when the RPC node returns one (Arc's does — confirmed
+    // live 2026-09-05 on a releaseReservation revert: revertReason "done"). Every "done"/"not
+    // allowed" detection in this file (safeReleaseReservation, sweepKnownOrphanReservations,
+    // sweepIndexedReservations) pattern-matches the THROWN error message expecting exactly this
+    // string — but releaseReservation/unlock/settle are never simulated before being broadcast
+    // (unlike deliver, which does call simulateContract first), so a doomed call always reaches
+    // this branch with only "tx reverted: <hash>" and no reason. That made the "done" checks
+    // dead code for anything discovered post-broadcast: a reservation already released before the
+    // sweep ran reverted "done" every single tick, forever, instead of being recognized as the
+    // expected steady state and skipped — see KNOWN_ORPHAN_RESERVATIONS below, both of whose
+    // entries turned out to already be released and had been silently re-reverting on ~60s
+    // cadence indefinitely.
+    const reason = (receipt as { revertReason?: string }).revertReason
+    throw new Error(`${label} tx reverted: ${hash}${reason ? ` (${reason})` : ''}`)
   }
 }
 
@@ -642,19 +655,19 @@ export async function runOtcKeeperTick(opts?: {
  * In the meantime this is a manually-curated list of specific reservationIds already confirmed
  * on-chain (via direct `reservations()` reads) to be reserved, unconsumed, unreleased. Safe to
  * over-list: releaseReservation() reverts harmlessly on anything already consumed/released or not
- * yet expired, and that revert is swallowed the same way the main sweep does it. Remove an entry
- * once it shows `released: true` on-chain — this list is not meant to grow into a real index.
+ * yet expired — in principle. In practice `waitReceipt`'s "done"/"not allowed" detection couldn't
+ * actually catch that revert (see its comment — the thrown message never included the on-chain
+ * revert reason until 2026-09-05), so an entry left here past its actual release date wasn't a
+ * harmless no-op tick after tick, it was a real reverting transaction on ~60s cadence indefinitely.
+ * Remove an entry once it shows `released: true` on-chain — this list is not meant to grow into a
+ * real index.
  *
- * Found 2026-08-12 investigating "$15 open liquidity but only a few trades succeeded":
- *   0x9a9978c0…db201 — 1.5 USDC — from a fillOffer that reverted out-of-gas (fixed in PR #31)
- *   before ArcFun's own gas limits were widened; the Arc-side reserve() had already landed.
+ * 2026-09-05: confirmed both entries below (0x9a9978c0…db201 and 0x4b13c857…d57989) already show
+ * released: true on-chain — the first had been reverting "done" on every tick since some point
+ * after 2026-08-12, silently burning real gas each time. Cleared. Add a fresh entry here only for
+ * a genuinely still-unreleased orphan, confirmed via a live `reservations()` read first.
  */
-const KNOWN_ORPHAN_RESERVATIONS: readonly Hex[] = [
-  '0x9a9978c04dbbd1e4416f2fe2a0935ce415ea302e2491ab17498c98bd291db201',
-  // 2026-08-19: $120 par offer — fillOffer never mined (buyer out of gas). Released
-  // manually; left here so a replayed keeper tick is a no-op if KV missed it.
-  '0x4b13c857847f6e2751c04f11c6dc455cacf1532a6adcd3f2d4f3ec776cd57989',
-]
+const KNOWN_ORPHAN_RESERVATIONS: readonly Hex[] = []
 
 async function sweepKnownOrphanReservations(
   arcPub: ReturnType<typeof arcPublicClient>,
