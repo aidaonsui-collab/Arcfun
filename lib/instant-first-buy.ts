@@ -12,6 +12,24 @@ function virtualTokenInit(tokenDecimals: number): bigint {
   return tokenDecimals >= 18 ? VIRTUAL_TOKEN_INIT_18 : VIRTUAL_TOKEN_INIT_6
 }
 
+/** Listed Instant FDV = virtual quote (in USD) × 1e9 / VIRTUAL_TOKEN_INIT. */
+export function instantListedMcUsd(opts: {
+  virtualQuoteRaw: bigint
+  quoteDecimals?: number
+  usdPerQuote?: number
+}): number {
+  const vq = opts.virtualQuoteRaw
+  if (vq <= 0n) return 0
+  const dec = opts.quoteDecimals && opts.quoteDecimals > 0 ? opts.quoteDecimals : 6
+  const usd = opts.usdPerQuote != null && Number.isFinite(opts.usdPerQuote) ? opts.usdPerQuote : 1
+  if (!(usd > 0)) return 0
+  const vti = Number(formatUnits(VIRTUAL_TOKEN_INIT_18, 18))
+  const quoteHuman = Number(formatUnits(vq, dec))
+  if (!(vti > 0) || !(quoteHuman > 0)) return 0
+  const mc = (quoteHuman * usd * 1_000_000_000) / vti
+  return Number.isFinite(mc) && mc > 0 ? mc : 0
+}
+
 export function estimateInstantFirstBuyTokens(opts: {
   quoteInRaw: bigint
   virtualQuoteRaw: bigint

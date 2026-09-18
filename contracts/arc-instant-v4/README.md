@@ -138,7 +138,7 @@ retired `RwaFeeHook`, with its own off-chain keeper computing holder balances an
 - **Starting valuation is optional.** `createToken(..., launchVirtualQuote, firstBuyQuoteAmount)`
   uses the same raw-unit encoding as Instant V3 (`VIRTUAL_TOKEN_INIT` vs quote raw). 0 falls
   back to the factory default (`setLaunchVirtualQuote`); if that is also 0 the pool still opens
-  at the usable-tick edge. Pass `5500e6` on a 6dp quote for the ~$5.2k FDV Instant uses on USDC.
+  at the usable-tick edge. eve.fun USDC memes pass `1600e6` (~$1.5k listed FDV). RWA creates still encode $5500.
 - **First buy is in the create tx.** Nonzero `firstBuyQuoteAmount` is pulled from the caller
   (approve the factory) and swapped quote→token inside the same `unlock()` as the LP mint. The
   hook taxes that swap like any other. 0 skips the swap. The original 4-arg `createToken` is
