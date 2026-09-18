@@ -13,9 +13,9 @@
  *
  *   NEXT_PUBLIC_ARC_RWA_ASSETS=[{"id":"usyc","symbol":"USYC","address":"0x…","factory":"0x…","decimals":6}]
  *
- * Create is ready only when address + factory are both set. Mainnet USYC + cirBTC
- * token CAs are baked in; both Instant-create against the shared RwaInstantV4Factory
- * by default (Arc 2026-09-16 live assets post). BUIDL / JAAA / JTRSY stay Soon until
+ * Create is ready only when address + factory are both set. Mainnet USYC + cirBTC + XAUM
+ * token CAs are baked in; Instant-create against the shared RwaInstantV4Factory
+ * by default (Arc 2026-09-16 live assets post; XAUM 2026-09-18). BUIDL / JAAA / JTRSY stay Soon until
  * issuers publish Arc addresses. Permissioned MMFs still need Circle to allowlist the factory / NFPM / locker.
  */
 import { isAddress, type Address } from 'viem'
@@ -49,11 +49,19 @@ const CIRBTC_MAINNET = {
   decimals: 8,
 } as const
 
+/** Matrixdock Gold (XAUM) on Arc Mainnet — 1 XAUM ≈ 1 troy oz gold. */
+const XAUM_MAINNET = {
+  address: '0x178b01f61CBeA1D2a5581Fe1621Be607835EC349',
+  decimals: 18,
+} as const
+
 export type RwaAssetKind = 'mmf' | 'equity' | 'commodity'
 
 /** USD source for FDV, tape, and first-buy. Required on every catalog row. */
 export type QuoteUsdMode = 'peg' | 'spot' | 'none'
-export type QuoteUsdSpot = 'BTC-USD'
+export type QuoteUsdSpot = 'BTC-USD' | 'XAU-USD'
+
+export const QUOTE_USD_SPOTS: readonly QuoteUsdSpot[] = ['BTC-USD', 'XAU-USD']
 
 export interface ArcRwaAsset {
   id: string
@@ -231,6 +239,27 @@ function builtinCatalog(): ArcRwaAsset[] {
       ),
       usd: 'spot',
       usdSpot: 'BTC-USD',
+      payUsdcSwap: true,
+    },
+    {
+      id: 'xaum',
+      symbol: 'XAUM',
+      name: 'Matrixdock Gold',
+      kind: 'commodity',
+      address:
+        envAddr('NEXT_PUBLIC_ARC_RWA_XAUM') ||
+        (ARC_IS_TESTNET ? '' : (XAUM_MAINNET.address as Address)),
+      decimals: XAUM_MAINNET.decimals,
+      factory: envAddr('NEXT_PUBLIC_ARC_RWA_XAUM_FACTORY') || sharedFactory,
+      locker: envAddr('NEXT_PUBLIC_ARC_RWA_XAUM_LOCKER'),
+      permissioned: false,
+      chainId: ARC_CHAIN_ID,
+      enabled: envFlag('NEXT_PUBLIC_ARC_RWA_XAUM_ENABLED') ?? Boolean(
+        (envAddr('NEXT_PUBLIC_ARC_RWA_XAUM') || (!ARC_IS_TESTNET && XAUM_MAINNET.address)) &&
+          (envAddr('NEXT_PUBLIC_ARC_RWA_XAUM_FACTORY') || sharedFactory),
+      ),
+      usd: 'spot',
+      usdSpot: 'XAU-USD',
       payUsdcSwap: true,
     },
     {
@@ -421,8 +450,8 @@ export function quotePolicyOk(asset: ArcRwaAsset): { ok: true } | { ok: false; r
   if (asset.usd !== 'peg' && asset.usd !== 'spot' && asset.usd !== 'none') {
     return { ok: false, reason: `${asset.id}: set usd to peg | spot | none` }
   }
-  if (asset.usd === 'spot' && asset.usdSpot !== 'BTC-USD') {
-    return { ok: false, reason: `${asset.id}: usd=spot requires usdSpot` }
+  if (asset.usd === 'spot' && !(asset.usdSpot && QUOTE_USD_SPOTS.includes(asset.usdSpot))) {
+    return { ok: false, reason: `${asset.id}: usd=spot requires usdSpot (BTC-USD | XAU-USD)` }
   }
   if (asset.usd !== 'spot' && asset.usdSpot) {
     return { ok: false, reason: `${asset.id}: usdSpot only valid with usd=spot` }
@@ -458,10 +487,10 @@ export async function quoteUsdMultiplier(quote: string | null | undefined): Prom
   const asset = rwaAssetByQuote(q)
   const p = quotePolicy(asset)
   if (p.usd === 'peg') return 1
-  if (p.usd === 'spot' && p.usdSpot === 'BTC-USD') {
-    const { fetchBtcUsdSpot } = await import('./btc-usd-spot')
-    const btc = await fetchBtcUsdSpot()
-    return btc && btc > 0 ? btc : 0
+  if (p.usd === 'spot' && p.usdSpot) {
+    const { fetchQuoteUsdSpot } = await import('./quote-usd-spot')
+    const px = await fetchQuoteUsdSpot(p.usdSpot)
+    return px && px > 0 ? px : 0
   }
   return 0
 }
@@ -484,24 +513,22 @@ export const INSTANT_TARGET_FDV_USD = 5500
  */
 export function defaultRwaVirtualQuoteRaw(
   asset: Pick<ArcRwaAsset, 'id' | 'decimals' | 'usd' | 'usdSpot' | 'payUsdcSwap' | 'permissioned'>,
-  opts?: { btcUsd?: number | null },
+  opts?: { spotUsd?: number | null; btcUsd?: number | null },
 ): bigint {
-  const envKey =
-    asset.id === 'cirbtc'
-      ? 'NEXT_PUBLIC_ARC_RWA_CIRBTC_VIRTUAL_QUOTE'
-      : `NEXT_PUBLIC_ARC_RWA_${asset.id.toUpperCase()}_VIRTUAL_QUOTE`
+  const envKey = `NEXT_PUBLIC_ARC_RWA_${asset.id.toUpperCase()}_VIRTUAL_QUOTE`
   const raw = (process.env[envKey] || '').trim()
   if (/^\d+$/.test(raw)) return BigInt(raw)
   const dec = asset.decimals > 0 ? asset.decimals : 6
   const p = quotePolicy(asset)
-  if (p.usd === 'spot' && p.usdSpot === 'BTC-USD') {
-    const btc = opts?.btcUsd
-    if (btc && btc > 0) {
-      const rawN = Math.round((INSTANT_TARGET_FDV_USD / btc) * 10 ** dec)
+  if (p.usd === 'spot' && p.usdSpot) {
+    const spot = opts?.spotUsd ?? opts?.btcUsd
+    if (spot && spot > 0) {
+      const rawN = Math.round((INSTANT_TARGET_FDV_USD / spot) * 10 ** dec)
       if (rawN > 0) return BigInt(rawN)
     }
-    // $5500 at $100k BTC. Not 5500e6.
-    return (5500n * 10n ** BigInt(dec)) / 100_000n
+    // Fallbacks: $5500 at $100k BTC / $4k XAU. Never 5500e6 for non-6dp.
+    const fb = p.usdSpot === 'XAU-USD' ? 4_000n : 100_000n
+    return (5500n * 10n ** BigInt(dec)) / fb
   }
   return 5500n * 10n ** BigInt(dec)
 }

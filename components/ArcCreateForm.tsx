@@ -81,7 +81,7 @@ import {
 import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 import type { PoolToken } from '@/lib/tokens'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
-import { fetchBtcUsdSpot, formatCirBtcApprox } from '@/lib/btc-usd-spot'
+import { fetchQuoteUsdSpot, formatSpotQuoteApprox } from '@/lib/quote-usd-spot'
 import { parseUsdc, planUsdcBuyOfToken } from '@/lib/arc-swap'
 
 type Step =
@@ -186,9 +186,9 @@ export function ArcCreateForm({
   const [rewardToken, setRewardToken] = useState<string>(ARC.USDC)
   const [buyAtLaunch, setBuyAtLaunch] = useState(false)
   const [firstBuy, setFirstBuy] = useState(() => defaultFirstBuy('usdc', null))
-  /** Live BTC-USD spot for spot-quoted first-buy / virtual quote. */
-  const [btcUsd, setBtcUsd] = useState<number | null>(null)
-  const [btcUsdStatus, setBtcUsdStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  /** Live USD spot (BTC-USD / XAU-USD) for spot-quoted first-buy / virtual quote. */
+  const [spotPx, setSpotPx] = useState<number | null>(null)
+  const [spotPxStatus, setSpotPxStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
 
   const [step, setStep] = useState<Step>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -225,7 +225,9 @@ export function ArcCreateForm({
   const rwaQuote = quoteId !== 'usdc' ? rwaAssetById(quoteId) : null
   const usdInput = quoteUsesUsdInput(rwaQuote, quoteId)
   const payUsdcSwap = quotePayUsdcSwap(rwaQuote)
-  const spotUsd = quotePolicy(rwaQuote).usd === 'spot'
+  const spotPolicy = quotePolicy(rwaQuote)
+  const spotUsd = spotPolicy.usd === 'spot'
+  const spotPair = spotPolicy.usdSpot
 
   const quoteDecimalsLive = rwaQuote?.decimals || 6
   const quoteTokenLive = (rwaQuote?.address as Address | undefined) || ARC.USDC
@@ -245,49 +247,49 @@ export function ArcCreateForm({
   }, [quoteId, quoteDecimalsLive, rwaQuote])
 
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
-  const cirBtcUsdInput = spotUsd
 
-  const refreshBtcUsd = useCallback(async (force = false) => {
-    if (!spotUsd) return null
-    setBtcUsdStatus((s) => (s === 'ready' && !force ? s : 'loading'))
-    const price = await fetchBtcUsdSpot({ force })
+  const refreshSpotPx = useCallback(async (force = false) => {
+    if (!spotUsd || !spotPair) return null
+    setSpotPxStatus((s) => (s === 'ready' && !force ? s : 'loading'))
+    const price = await fetchQuoteUsdSpot(spotPair, { force })
     if (price == null) {
-      setBtcUsdStatus('error')
+      setSpotPxStatus('error')
       return null
     }
-    setBtcUsd(price)
-    setBtcUsdStatus('ready')
+    setSpotPx(price)
+    setSpotPxStatus('ready')
     return price
-  }, [spotUsd])
+  }, [spotUsd, spotPair])
 
   useEffect(() => {
-    if (!spotUsd) {
-      setBtcUsdStatus('idle')
+    if (!spotUsd || !spotPair) {
+      setSpotPxStatus('idle')
+      setSpotPx(null)
       return
     }
     let cancelled = false
     ;(async () => {
-      const price = await fetchBtcUsdSpot()
+      const price = await fetchQuoteUsdSpot(spotPair)
       if (cancelled) return
       if (price == null) {
-        setBtcUsdStatus('error')
+        setSpotPxStatus('error')
         return
       }
-      setBtcUsd(price)
-      setBtcUsdStatus('ready')
+      setSpotPx(price)
+      setSpotPxStatus('ready')
     })()
     const t = window.setInterval(() => {
-      void fetchBtcUsdSpot({ force: true }).then((price) => {
+      void fetchQuoteUsdSpot(spotPair, { force: true }).then((price) => {
         if (cancelled || price == null) return
-        setBtcUsd(price)
-        setBtcUsdStatus('ready')
+        setSpotPx(price)
+        setSpotPxStatus('ready')
       })
     }, 60_000)
     return () => {
       cancelled = true
       window.clearInterval(t)
     }
-  }, [spotUsd])
+  }, [spotUsd, spotPair])
   const isReflection = launchType === 'reflection'
   const v4Ui = arcInstantV4UiEnabled()
   const v4Live = arcInstantV4Enabled()
@@ -485,7 +487,7 @@ export function ArcCreateForm({
       if (buyAtLaunch && firstBuy && Number(firstBuy) > 0) {
         if (spotUsd) {
           firstBuyUsdForErr = Number(firstBuy)
-          const spot = await refreshBtcUsd(true)
+          const spot = await refreshSpotPx(true)
           if (spot == null || !(spot > 0)) {
             throw new Error(`Could not fetch USD price for ${quoteSymbol}. Retry in a moment.`)
           }
@@ -628,7 +630,7 @@ export function ArcCreateForm({
           split: splitForCreate,
           launchVirtualQuote: rwaQuote
             ? defaultRwaVirtualQuoteRaw(rwaQuote, {
-                btcUsd: spotUsd ? await refreshBtcUsd(true) : undefined,
+                spotUsd: spotUsd ? await refreshSpotPx(true) : undefined,
               })
             : undefined,
         })
@@ -688,7 +690,7 @@ export function ArcCreateForm({
           split: splitForCreate,
           launchVirtualQuote: rwaQuote
             ? defaultRwaVirtualQuoteRaw(rwaQuote, {
-                btcUsd: spotUsd ? await refreshBtcUsd(true) : undefined,
+                spotUsd: spotUsd ? await refreshSpotPx(true) : undefined,
               })
             : undefined,
         })
@@ -874,21 +876,21 @@ export function ArcCreateForm({
       : 'Your wallet'
   const feeUsd = v4Live ? 0 : Number(arcCreationFeeWeiFor(address)) / 1e18
   const buyAmt = buyAtLaunch ? Number(firstBuy) || 0 : 0
-  const cirBtcApproxLabel = spotUsd ? formatCirBtcApprox(buyAmt, btcUsd) : null
+  const spotApproxLabel = spotUsd ? formatSpotQuoteApprox(buyAmt, spotPx) : null
   const virtualQuoteRaw = rwaQuote
-    ? defaultRwaVirtualQuoteRaw(rwaQuote, { btcUsd })
+    ? defaultRwaVirtualQuoteRaw(rwaQuote, { spotUsd: spotPx })
     : EVE_V4_DEFAULT_VIRTUAL_QUOTE
-  const usdPerQuote = spotUsd ? (btcUsd != null && btcUsd > 0 ? btcUsd : 0) : usdInput ? 1 : 0
+  const usdPerQuote = spotUsd ? (spotPx != null && spotPx > 0 ? spotPx : 0) : usdInput ? 1 : 0
   const listedMcUsd = instantListedMcUsd({
     virtualQuoteRaw,
     quoteDecimals: quoteDecimalsLive,
     usdPerQuote,
   })
   let firstBuyTokens = 0
-  if (buyAtLaunch && buyAmt > 0 && !(spotUsd && !(btcUsd != null && btcUsd > 0))) {
+  if (buyAtLaunch && buyAmt > 0 && !(spotUsd && !(spotPx != null && spotPx > 0))) {
     try {
-      const quoteHuman = spotUsd && btcUsd
-        ? usdToQuoteHuman(buyAmt, btcUsd, quoteDecimalsLive)
+      const quoteHuman = spotUsd && spotPx
+        ? usdToQuoteHuman(buyAmt, spotPx, quoteDecimalsLive)
         : firstBuy
       const quoteInRaw = parseArcQuote(quoteHuman, quoteDecimalsLive)
       firstBuyTokens = estimateInstantFirstBuyTokens({
@@ -905,15 +907,15 @@ export function ArcCreateForm({
   const firstBuyTokensLabel =
     firstBuyTokens > 0 ? `~${fmtCompact(firstBuyTokens)} ${ticker === 'tokens' ? 'tokens' : `$${ticker}`}` : null
   const firstBuyLabel = usdInput
-    ? spotUsd && cirBtcApproxLabel
-      ? `$${buyAmt.toFixed(2)} (≈ ${cirBtcApproxLabel} ${quoteSymbol})`
+    ? spotUsd && spotApproxLabel
+      ? `$${buyAmt.toFixed(2)} (≈ ${spotApproxLabel} ${quoteSymbol})`
       : `$${buyAmt.toFixed(2)}`
     : `${buyAmt} ${quoteSymbol}`
   const payLabel = usdInput
-    ? spotUsd && cirBtcApproxLabel
+    ? spotUsd && spotApproxLabel
       ? feeUsd > 0
-        ? `$${feeUsd.toFixed(2)} + $${buyAmt.toFixed(2)} (≈ ${cirBtcApproxLabel} ${quoteSymbol})`
-        : `$${buyAmt.toFixed(2)} (≈ ${cirBtcApproxLabel} ${quoteSymbol})`
+        ? `$${feeUsd.toFixed(2)} + $${buyAmt.toFixed(2)} (≈ ${spotApproxLabel} ${quoteSymbol})`
+        : `$${buyAmt.toFixed(2)} (≈ ${spotApproxLabel} ${quoteSymbol})`
       : `$${(feeUsd + buyAmt).toFixed(2)}`
     : feeUsd > 0
       ? `$${feeUsd.toFixed(2)} + ${buyAmt} ${quoteSymbol}`
@@ -1332,21 +1334,21 @@ export function ArcCreateForm({
                   <p className="mt-2 mb-0 text-[13px] font-medium tabular-nums text-white">
                     You receive (est.) {firstBuyTokensLabel}
                   </p>
-                ) : spotUsd && buyAmt > 0 && btcUsdStatus !== 'ready' ? (
+                ) : spotUsd && buyAmt > 0 && spotPxStatus !== 'ready' ? (
                   <p className="mt-2 mb-0 text-[12px] text-t3">You receive (est.) …</p>
                 ) : null}
                 <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
                   {spotUsd ? (
                     <>
                       Amount is in USDC (dollars), then converted to {quoteSymbol} at the live USD spot for the on-chain buy.
-                      {btcUsdStatus === 'ready' && btcUsd != null
-                        ? ` Spot ≈ $${btcUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}.`
-                        : btcUsdStatus === 'loading'
-                          ? ' Fetching BTC-USD…'
-                          : btcUsdStatus === 'error'
-                            ? ' BTC-USD unavailable — retry before creating.'
+                      {spotPxStatus === 'ready' && spotPx != null
+                        ? ` Spot ≈ $${spotPx.toLocaleString(undefined, { maximumFractionDigits: 0 })}.`
+                        : spotPxStatus === 'loading'
+                          ? ` Fetching ${spotPair || 'USD'}…`
+                          : spotPxStatus === 'error'
+                            ? ` ${spotPair || 'USD'} unavailable — retry before creating.`
                             : ''}
-                      {cirBtcApproxLabel ? ` ≈ ${cirBtcApproxLabel} ${quoteSymbol}.` : ''}
+                      {spotApproxLabel ? ` ≈ ${spotApproxLabel} ${quoteSymbol}.` : ''}
                       {' '}We swap your USDC to {quoteSymbol}, then the factory pulls {quoteSymbol} for the first buy.
                       {usdcBalQ.data != null
                         ? ` Wallet: ${Number(formatUnits(usdcBalQ.data, 6)).toFixed(2)} USDC`
@@ -1556,6 +1558,7 @@ function rwaMarkSrc(id: string): string | null {
   const k = id.toLowerCase()
   if (k === 'usyc') return '/marks/usyc.png'
   if (k === 'cirbtc') return '/marks/cirbtc.svg'
+  if (k === 'xaum') return '/marks/xaum.svg'
   if (k === 'buidl') return '/marks/buidl.png'
   if (k === 'crcl') return '/marks/crcl.svg'
   return null
