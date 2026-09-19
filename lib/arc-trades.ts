@@ -625,7 +625,12 @@ export async function fetchOnChain24hSwaps(token: Address): Promise<EvmTrade[] |
  * so only the newest cap ever need to land — chunked so a single command stays small. Candle
  * history still gets every new trade (separate store, never trimmed).
  */
-async function persistTrades(key: string, ascendingNew: EvmTrade[], newCursor: bigint): Promise<void> {
+async function persistTrades(
+  key: string,
+  ascendingNew: EvmTrade[],
+  newCursor: bigint,
+  opts?: { advanceCursor?: boolean },
+): Promise<void> {
   try {
     const fresh: EvmTrade[] = []
     for (const t of ascendingNew) {
@@ -650,7 +655,9 @@ async function persistTrades(key: string, ascendingNew: EvmTrade[], newCursor: b
       // deferred work window closes — same reasoning as the kv writes just above.
       await recordTrades1m(key as Address, fresh)
     }
-    await kv.set(cursorKvKey(key), newCursor.toString())
+    if (opts?.advanceCursor !== false) {
+      await kv.set(cursorKvKey(key), newCursor.toString())
+    }
   } catch (e) {
     console.warn('[arc-trades] kv persist', summarizeRpcError(e))
   }
@@ -722,7 +729,12 @@ async function maybeRewindStaleCursor(
 export type SyncTradesOpts = {
   /** Wall-clock deadline (Date.now() ms). When hit mid-scan, persist cursor and return. */
   deadline?: number
+  /** Ignore SYNC_FRESH_MS and scan the last FORCE_LOOKBACK blocks even if the cursor is at head. */
+  force?: boolean
 }
+
+/** Recent overlap scan for ?fresh=1 / post-swap. Two 50-block chunks. */
+const FORCE_LOOKBACK = 96n
 
 export type SyncTradesResult = {
   reachedHead: boolean
@@ -736,7 +748,7 @@ export async function syncTradesToHead(
   const key = token.toLowerCase()
   // Indexer passes a cycle deadline — never skip on SYNC_FRESH_MS or a lagged token
   // can be deferred forever while other work keeps refreshing the timer.
-  if (opts?.deadline == null) {
+  if (opts?.deadline == null && !opts?.force) {
     const last = lastSyncedAt.get(key)
     if (last != null && Date.now() - last < SYNC_FRESH_MS) {
       return { reachedHead: true, budgetHit: false }
@@ -784,14 +796,15 @@ export async function syncTradesToHead(
       from: bigint,
       found: { trades: EvmTrade[]; scannedTo: bigint; budgetHit: boolean },
       targetTo: bigint,
+      advanceCursor = true,
     ) => {
       if (found.budgetHit) budgetHit = true
       // Always save mid-token progress when the cycle budget cuts us off — otherwise the
       // next cycle restarts the same multi-chunk window. For normal completions keep the
       // stale-tape empty-getLogs guard (shouldPersistScanCursor).
-      const force = found.budgetHit && found.scannedTo >= from
+      const forcePersist = found.budgetHit && found.scannedTo >= from
       if (
-        force ||
+        forcePersist ||
         shouldPersistScanCursor({
           foundTrades: found.trades.length,
           scannedTo: found.scannedTo,
@@ -799,12 +812,24 @@ export async function syncTradesToHead(
           tapeIsStale: stale,
         })
       ) {
-        await persistTrades(key, found.trades, found.scannedTo)
+        await persistTrades(key, found.trades, found.scannedTo, { advanceCursor })
       }
       if (found.budgetHit || found.scannedTo < targetTo) reachedHead = false
     }
 
-    if (isColdStart) {
+    if (opts?.force && !isColdStart) {
+      // Post-swap / empty-tape retry: scan the last ~96 blocks even when the cursor
+      // already sits at head (SYNC_FRESH_MS would otherwise skip the fill you just mined).
+      const overlapFrom = head > FORCE_LOOKBACK ? head - FORCE_LOOKBACK : 0n
+      const contiguous = cursor != null && cursor + 1n <= head && cursor + 1n >= overlapFrom
+      const from = contiguous ? cursor! + 1n : overlapFrom
+      if (from <= head) {
+        const found = await scanSwapRange(
+          client, pool, tokenIs0, tokenDecimals, from, head, quoteDecimals, scanOpts,
+        )
+        await persistScan(from, found, head, contiguous || cursor == null)
+      }
+    } else if (isColdStart) {
       // First time this store has ever seen this token. Prefer the launch block from the
       // indexer (a 2-minute-old Instant is a handful of 50-block chunks). Falling back to
       // DEEP_BACKFILL_BLOCKS is thousands of getLogs and times out ohlcv on Vercel — Dexscreener
@@ -874,6 +899,8 @@ export interface FetchArcTradesOpts {
   limit?: number
   /** How many of the newest trades to skip — 0 is page 1, `limit` is page 2, etc. */
   offset?: number
+  /** Bypass mem cache and await a recent-block catch-up (post-swap / empty tape). */
+  fresh?: boolean
 }
 
 export async function fetchArcTrades(
@@ -885,7 +912,9 @@ export async function fetchArcTrades(
   const key = token.toLowerCase()
   const cacheKey = `${key}:${offset}:${limit}`
   const hit = mem.get(cacheKey)
-  if (hit && Date.now() - hit.at < FRESH_MS) return hit.result
+  if (!opts.fresh && hit && Date.now() - hit.at < FRESH_MS && hit.result.trades.length > 0) {
+    return hit.result
+  }
 
   try {
     // Block only on a token's genuine first-ever view — no cursor means nothing has ever been
@@ -895,9 +924,8 @@ export async function fetchArcTrades(
     // scheduleTradesSync, so the viewer isn't the one paying for the scan. This was the actual
     // remaining latency after the coalescing fix — coalescing stopped N concurrent requests from
     // each triggering their own scan, but the one scan that *did* run still blocked the response
-    // it was attached to. The client already polls every 20s (TokenPageClient / tv-datafeed), well
-    // past SYNC_FRESH_MS (6s), so a page that briefly shows stale/empty data self-heals on its
-    // own next poll without any client change.
+    // it was attached to. The token page polls the tape every 4s and uses ?fresh=1 after a
+    // swap or an empty first paint, so a brief stale read self-heals without blocking every view.
     let cursorExists = true
     let newestTs = 0
     try {
@@ -911,7 +939,9 @@ export async function fetchArcTrades(
     // Cold start has nothing to show. A stale tape (newest fill >20 min) used to
     // return immediately and refresh in after() — if that scan used a public RPC
     // that answered [], the page kept serving 3h-old trades forever (EVE 2026-09-01).
-    if (!cursorExists || tapeIsStaleTs(newestTs)) {
+    if (opts.fresh) {
+      await syncTradesToHead(token, { force: true })
+    } else if (!cursorExists || tapeIsStaleTs(newestTs)) {
       await syncTradesToHead(token)
     } else {
       scheduleTradesSync(token)
@@ -953,7 +983,7 @@ export async function fetchArcTrades(
       pricePoints,
       total,
     }
-    mem.set(cacheKey, { result, at: Date.now() })
+    if (result.trades.length > 0) mem.set(cacheKey, { result, at: Date.now() })
     return result
   } catch (e) {
     console.error('[arc-trades]', summarizeRpcError(e))

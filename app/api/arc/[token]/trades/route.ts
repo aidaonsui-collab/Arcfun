@@ -34,15 +34,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const fresh = req.nextUrl.searchParams.get('fresh') === '1'
   const limit = Number(req.nextUrl.searchParams.get('limit') || '') || undefined
   const offset = Number(req.nextUrl.searchParams.get('offset') || '') || undefined
-  const data = await fetchArcTrades(token as Address, { limit, offset })
-  // Match the token-page poll (20s in TokenPageClient / tv-datafeed). An 8s CDN TTL with a
-  // 20s poll still origin-hits every tick; 20s lets the edge absorb open-tab traffic.
-  // ?fresh=1 only bypasses the CDN layer, not fetchArcTrades's own freshness windows.
-  return NextResponse.json(data.trades.length || offset ? data : EMPTY, {
+  const data = await fetchArcTrades(token as Address, { limit, offset, fresh })
+  const payload = data.trades.length || offset ? data : EMPTY
+  const empty = !payload.trades.length && !offset
+  // Empty tapes must not sit on the CDN — that is how a first view of a live token
+  // stayed blank for 20s (or forever if the tab closed). Live pages poll ~4s; 4s
+  // s-maxage keeps those as edge hits once the tape has rows.
+  return NextResponse.json(payload, {
     headers: {
-      'Cache-Control': fresh
+      'Cache-Control': fresh || empty
         ? 'private, no-store'
-        : 'public, s-maxage=20, stale-while-revalidate=60',
+        : 'public, s-maxage=4, stale-while-revalidate=20',
     },
   })
 }
