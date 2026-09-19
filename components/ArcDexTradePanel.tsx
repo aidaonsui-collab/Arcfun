@@ -1,15 +1,15 @@
 'use client'
 
 /**
- * ArcDexTradePanel — buy/sell Instant tokens with USDC on Arc Uni V3.
- * Restyled to match redesign: sticky card, buy/sell pill, large amount, USDC chip.
+ * ArcDexTradePanel — buy/sell Instant tokens on Arc.
+ * V3 Instant is TOKEN/USDC. V4 Instant is TOKEN/{quote} (USDC, cirBTC, USYC, …).
  */
 import { useState, useEffect, useRef } from 'react'
 import { useAccount, useConnectorClient, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
-import { erc20Abi, formatUnits, type Address } from 'viem'
+import { erc20Abi, formatUnits, parseUnits, type Address } from 'viem'
 import { Loader2, AlertCircle, CheckCircle, ExternalLink, ArrowDownUp } from 'lucide-react'
 import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_MAX_APPROVAL, ARC_SWAP_GAS, arcPublicClient } from '@/lib/contracts-arc'
-import { buildEveV4Swap, readEveV4Pool, type EveV4PoolInfo } from '@/lib/arc-v4-swap'
+import { buildEveV4Swap, quoteEveV4ExactIn, readEveV4Pool, type EveV4PoolInfo } from '@/lib/arc-v4-swap'
 import {
   arcSwapConfigured,
   arcSwapSpender,
@@ -23,6 +23,8 @@ import {
   quoteArcSell,
   withRecipient,
 } from '@/lib/arc-swap'
+import { quoteDecimalsForToken, quotePolicy, quoteSymbolForQuote, rwaAssetByQuote, usdToQuoteHuman } from '@/lib/arc-rwa-assets'
+import { fetchQuoteUsdSpot, spotQuoteToUsd } from '@/lib/quote-usd-spot'
 import { formatToken, parseToken } from '@/lib/token-format'
 import { getIncomingReferralCode } from '@/lib/crucible'
 import { fmtPrice, fmtUsd, tileGradient } from '@/lib/ui-format'
@@ -31,7 +33,7 @@ import { WalletButton } from '@/components/WalletButton'
 import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 
 const SLIPPAGE_BPS = 500 // 5% — thin Instant single-sided ranges
-const BUY_PRESETS = [25, 100, 500]
+const BUY_PRESETS = [25, 100, 250, 500]
 /** Sell fraction of wallet balance (Max = 100). */
 const SELL_PCTS = [25, 50, 75, 100] as const
 
@@ -43,6 +45,52 @@ function fmtTok(v: bigint, decimals: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
   if (n >= 1_000) return n.toLocaleString(undefined, { maximumFractionDigits: 0 })
   return n.toLocaleString(undefined, { maximumFractionDigits: 4 })
+}
+
+/** Quote amounts (cirBTC 8dp especially) need more than 4 dp so $10 does not print as 0. */
+function fmtQuoteAmt(v: bigint, decimals: number): string {
+  const n = Number(formatUnits(v, decimals))
+  if (!Number.isFinite(n) || n === 0) return '0'
+  if (n < 1e-8) return n.toExponential(2)
+  if (n < 0.01) return n.toLocaleString(undefined, { maximumFractionDigits: Math.min(decimals, 8) })
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
+  if (n >= 1_000) return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  return n.toLocaleString(undefined, { maximumFractionDigits: Math.min(decimals, 6) })
+}
+
+function parseQuoteAmt(v: string, decimals: number): bigint {
+  try {
+    const s = String(v || '0').trim()
+    if (!s || Number(s) <= 0) return 0n
+    return parseUnits(s, decimals)
+  } catch {
+    return 0n
+  }
+}
+
+function quoteMarkSrc(quote: Address | undefined): string | null {
+  const id = rwaAssetByQuote(quote)?.id
+  if (id === 'cirbtc') return '/marks/cirbtc.svg'
+  if (id === 'xaum') return '/marks/xaum.svg'
+  if (id === 'usyc') return '/marks/usyc.png'
+  if (id === 'buidl') return '/marks/buidl.png'
+  if (id === 'crcl') return '/marks/crcl.svg'
+  return null
+}
+
+function quoteHumanToUsd(
+  human: number,
+  quote: Address | undefined,
+  spotPx: number | null,
+): number | null {
+  if (!(human > 0) || !Number.isFinite(human)) return null
+  const p = quotePolicy(rwaAssetByQuote(quote))
+  if (p.usd === 'peg') return human
+  if (p.usd === 'spot') {
+    const usd = spotQuoteToUsd(human, spotPx)
+    return usd > 0 ? usd : null
+  }
+  return null
 }
 
 function UsdcMark() {
@@ -83,36 +131,72 @@ export function ArcDexTradePanel({
   const [error, setError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>()
   const [v4Pool, setV4Pool] = useState<EveV4PoolInfo | null>(null)
+  const [v4Ready, setV4Ready] = useState(false)
+  const [spotPx, setSpotPx] = useState<number | null>(null)
   const submitLock = useRef(false)
 
   const { isSuccess: mined } = useWaitForTransactionReceipt({ hash: txHash })
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
   const isV4 = Boolean(v4Pool)
-  const swapOn = isV4
-    ? Boolean(ARC.INSTANT_V4_ROUTER && ARC.INSTANT_V4_ROUTER !== '0x0000000000000000000000000000000000000000')
-    : arcSwapConfigured()
+  const v4RouterOn = Boolean(
+    ARC.INSTANT_V4_ROUTER && ARC.INSTANT_V4_ROUTER !== '0x0000000000000000000000000000000000000000',
+  )
+  const swapOn = isV4 ? v4RouterOn : v4Ready ? arcSwapConfigured() : v4RouterOn || arcSwapConfigured()
   const spender = isV4 ? ARC.INSTANT_V4_ROUTER : arcSwapSpender(mode)
+  const quoteToken: Address = v4Pool?.quote ?? ARC.USDC
+  const quoteSym = quoteSymbolForQuote(quoteToken)
+  const quoteDec = quoteDecimalsForToken(quoteToken)
+  const quoteAsset = rwaAssetByQuote(quoteToken)
+  const spotPolicy = quotePolicy(quoteAsset)
+  const spotUsd = spotPolicy.usd === 'spot'
+  const spotPair = spotPolicy.usdSpot
 
   useEffect(() => {
     let cancelled = false
-    void readEveV4Pool(token, arcPublicClient()).then((info) => {
-      if (!cancelled) setV4Pool(info)
-    })
+    setV4Pool(null)
+    setV4Ready(false)
+    void readEveV4Pool(token, arcPublicClient())
+      .then((info) => {
+        if (!cancelled) {
+          setV4Pool(info)
+          setV4Ready(true)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setV4Pool(null)
+          setV4Ready(true)
+        }
+      })
     return () => {
       cancelled = true
     }
   }, [token])
+
+  useEffect(() => {
+    if (!spotUsd || !spotPair) {
+      setSpotPx(null)
+      return
+    }
+    let cancelled = false
+    void fetchQuoteUsdSpot(spotPair).then((px) => {
+      if (!cancelled) setSpotPx(px)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [spotUsd, spotPair])
   const refCode = mode === 'buy' ? getIncomingReferralCode() : ''
   const { tile, mono } = tileGradient(token)
   const initial = (symbol || '?').charAt(0).toUpperCase()
 
-  const usdcQ = useArcErc20Balance(ARC.USDC, address)
+  const quoteQ = useArcErc20Balance(quoteToken, address)
   const tokQ = useArcErc20Balance(token, address)
-  const usdcBal = usdcQ.data
+  const quoteBal = quoteQ.data
   const tokenBal = tokQ.data
-  const refetchUsdc = usdcQ.refetch
+  const refetchQuote = quoteQ.refetch
   const refetchTok = tokQ.refetch
-  const payBalPending = mode === 'buy' ? usdcQ.isPending : tokQ.isPending
+  const payBalPending = mode === 'buy' ? quoteQ.isPending : tokQ.isPending
 
   const { data: tokenDecimals } = useReadContract({
     address: token,
@@ -123,7 +207,7 @@ export function ArcDexTradePanel({
   })
   const tokDec = Number(tokenDecimals ?? ARC.TOKEN_DECIMALS) || ARC.TOKEN_DECIMALS
 
-  const approveToken: Address = mode === 'buy' ? ARC.USDC : token
+  const approveToken: Address = mode === 'buy' ? quoteToken : token
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: approveToken,
     abi: erc20Abi,
@@ -140,11 +224,11 @@ export function ArcDexTradePanel({
     submitLock.current = false
     setAmount('')
     setEstOut(null)
-    void refetchUsdc()
+    void refetchQuote()
     void refetchTok()
     void refetchAllowance()
     onTraded?.()
-  }, [mined, onTraded, refetchUsdc, refetchTok, refetchAllowance])
+  }, [mined, onTraded, refetchQuote, refetchTok, refetchAllowance])
 
   useEffect(() => {
     if (!amount || Number(amount) <= 0 || !swapOn) {
@@ -153,20 +237,47 @@ export function ArcDexTradePanel({
       setQuoting(false)
       return
     }
+    if (!v4Ready) {
+      setQuoting(true)
+      return
+    }
     let cancelled = false
     const run = async () => {
       setEstOut(null)
       setQuoting(true)
       try {
         const ref = mode === 'buy' ? getIncomingReferralCode() : ''
-        // Wallet-first, same as RadarDEX / MAX. Server Infura is often quota-dead.
-        if (isV4) {
+        if (isV4 && v4Pool) {
+          const inAmt =
+            mode === 'buy' ? parseQuoteAmt(amount, quoteDec) : parseToken(amount, tokDec)
+          if (inAmt <= 0n) {
+            if (!cancelled) {
+              setEstOut(null)
+              setError(null)
+            }
+            return
+          }
+          const zeroForOne = mode === 'buy' ? !v4Pool.tokenIsCurrency0 : v4Pool.tokenIsCurrency0
+          // Public client first: wagmi's wallet client has no readContract (V3 uses
+          // viem/actions; a connected wallet used to throw and print "Quote failed").
+          const clients = [arcPublicClient(), wallet].filter(Boolean)
+          let local: bigint | null = null
+          for (const c of clients) {
+            try {
+              local = await quoteEveV4ExactIn(v4Pool, inAmt, zeroForOne, c as Parameters<typeof quoteEveV4ExactIn>[3])
+              if (local != null && local > 0n) break
+            } catch {
+              /* try the next client / API */
+            }
+          }
           if (cancelled) return
-          setEstOut(1n)
-          setError(null)
-          return
+          if (local != null && local > 0n) {
+            setEstOut(local)
+            setError(null)
+            return
+          }
         }
-        if (wallet) {
+        if (!isV4 && wallet) {
           const local =
             mode === 'buy'
               ? await quoteArcBuy(token, parseUsdc(amount), ref, wallet)
@@ -216,11 +327,16 @@ export function ArcDexTradePanel({
       cancelled = true
       clearTimeout(t)
     }
-  }, [amount, mode, token, swapOn, wallet, tokDec, isV4])
+  }, [amount, mode, token, swapOn, wallet, tokDec, isV4, v4Pool, v4Ready, quoteDec])
 
   const needApprove = (() => {
     if (!amount || Number(amount) <= 0) return false
-    const need = mode === 'buy' ? parseUsdc(amount) : parseToken(amount, tokDec)
+    const need =
+      mode === 'buy'
+        ? isV4
+          ? parseQuoteAmt(amount, quoteDec)
+          : parseUsdc(amount)
+        : parseToken(amount, tokDec)
     return (allowance as bigint | undefined ?? 0n) < need
   })()
 
@@ -233,9 +349,9 @@ export function ArcDexTradePanel({
     setStatusMsg('')
     try {
       if (needApprove) {
-        setStatusMsg(mode === 'buy' ? 'Approve USDC…' : `Approve ${symbol}…`)
+        setStatusMsg(mode === 'buy' ? `Approve ${quoteSym}…` : `Approve ${symbol}…`)
         await writeContractAsync({
-          address: mode === 'buy' ? ARC.USDC : token,
+          address: approveToken,
           abi: erc20Abi,
           functionName: 'approve',
           args: [spender, ARC_MAX_APPROVAL],
@@ -243,20 +359,22 @@ export function ArcDexTradePanel({
           gas: ARC_ERC20_APPROVE_GAS,
         })
         void refetchAllowance()
-        if (!isV4 && (estOut == null || estOut <= 0n)) {
+        if (estOut == null || estOut <= 0n) {
           setStatusMsg('Approved. Waiting for a quote…')
           setBusy(false)
           submitLock.current = false
           return
         }
       }
-      if (!isV4 && (estOut == null || estOut <= 0n)) {
+      if (estOut == null || estOut <= 0n) {
         throw new Error('No quote yet. Wait a moment or try a smaller amount.')
       }
-      const quoted = estOut && estOut > 0n ? estOut : 1n
+      const quoted = estOut
       if (isV4 && v4Pool) {
-        const inAmt = mode === 'buy' ? parseUsdc(amount) : parseToken(amount, tokDec)
-        const minOut = 1n
+        const inAmt = mode === 'buy' ? parseQuoteAmt(amount, quoteDec) : parseToken(amount, tokDec)
+        if (inAmt <= 0n) throw new Error('Invalid amount.')
+        const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
+        if (minOut <= 0n) throw new Error('Quote too small for this size.')
         const zeroForOne = mode === 'buy' ? !v4Pool.tokenIsCurrency0 : v4Pool.tokenIsCurrency0
         setStatusMsg('Confirm in wallet…')
         const call = buildEveV4Swap({
@@ -330,8 +448,14 @@ export function ArcDexTradePanel({
   }
 
   const amtNum = Number(amount) || 0
-  const payBal = mode === 'buy' ? ((usdcBal as bigint | undefined) ?? 0n) : ((tokenBal as bigint | undefined) ?? 0n)
-  const payBalLabel = payBalPending ? '…' : mode === 'buy' ? formatUsdc(payBal) : fmtTok(payBal, tokDec)
+  const payBal = mode === 'buy' ? ((quoteBal as bigint | undefined) ?? 0n) : ((tokenBal as bigint | undefined) ?? 0n)
+  const payBalLabel = payBalPending
+    ? '…'
+    : mode === 'buy'
+      ? quoteSym === 'USDC'
+        ? formatUsdc(payBal)
+        : fmtQuoteAmt(payBal, quoteDec)
+      : fmtTok(payBal, tokDec)
   const receiveAmt =
     quoting && amtNum > 0
       ? '…'
@@ -339,13 +463,36 @@ export function ArcDexTradePanel({
         ? '0'
         : mode === 'buy'
           ? fmtTok(estOut, tokDec)
-          : formatUsdc(estOut)
-  const TokenChip = ({ kind }: { kind: 'usdc' | 'token' }) =>
-    kind === 'usdc' ? (
-      <span className="inline-flex items-center gap-2 h-10 pl-1.5 pr-3 rounded-full bg-[#111318] border border-white/10">
-        <UsdcMark />
-        <span className="text-[15px] font-semibold">USDC</span>
-      </span>
+          : isV4
+            ? fmtQuoteAmt(estOut, quoteDec)
+            : formatUsdc(estOut)
+  const receiveSym = mode === 'buy' ? symbol : isV4 ? quoteSym : 'USDC'
+  const receiveUsd =
+    mode === 'sell' && estOut != null && estOut > 0n
+      ? quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteToken : ARC.USDC, spotPx)
+      : mode === 'buy' && amtNum > 0
+        ? quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, spotPx)
+        : null
+  const TokenChip = ({ kind }: { kind: 'quote' | 'token' }) =>
+    kind === 'quote' ? (
+      quoteSym === 'USDC' ? (
+        <span className="inline-flex items-center gap-2 h-10 pl-1.5 pr-3 rounded-full bg-[#111318] border border-white/10">
+          <UsdcMark />
+          <span className="text-[15px] font-semibold">USDC</span>
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-2 h-10 pl-1.5 pr-3 rounded-full bg-[#111318] border border-white/10">
+          {quoteMarkSrc(quoteToken) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={quoteMarkSrc(quoteToken) || ''} alt="" className="w-7 h-7 rounded-full object-cover" />
+          ) : (
+            <span className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-white/10">
+              {quoteSym.charAt(0)}
+            </span>
+          )}
+          <span className="text-[15px] font-semibold">{quoteSym}</span>
+        </span>
+      )
     ) : (
       <span className="inline-flex items-center gap-2 h-10 pl-1.5 pr-3 rounded-full bg-[#111318] border border-white/10">
         {imageUrl ? (
@@ -363,22 +510,34 @@ export function ArcDexTradePanel({
       </span>
     )
 
+  const feeBps = isV4 ? v4Pool?.feeBps || 100 : 100
+  const inUsd = quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, spotPx)
+  const outUsd =
+    estOut != null && estOut > 0n
+      ? mode === 'buy'
+        ? null
+        : quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteToken : ARC.USDC, spotPx)
+      : null
   const feeUsd =
     mode === 'buy'
-      ? amtNum * 0.01
-      : estOut != null && estOut > 0n
-        ? Number(formatUnits(estOut, 6)) * (0.01 / 0.99)
+      ? (inUsd ?? 0) * (feeBps / 10_000)
+      : outUsd != null
+        ? outUsd * (feeBps / Math.max(1, 10_000 - feeBps))
         : 0
   const pricePer =
     amtNum > 0 && estOut != null && estOut > 0n
       ? mode === 'buy'
-        ? amtNum / Number(formatUnits(estOut, tokDec))
-        : Number(formatUnits(estOut, 6)) / amtNum
+        ? inUsd != null
+          ? inUsd / Number(formatUnits(estOut, tokDec))
+          : null
+        : outUsd != null
+          ? outUsd / amtNum
+          : null
       : null
 
   return (
-    <div className="rounded-[20px] bg-s1 border border-hair p-5">
-      <div className="flex rounded-full bg-s2 p-1">
+    <div className="rounded-2xl bg-s1 p-4 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
+      <div className="mb-3 grid grid-cols-2 gap-1 rounded-full bg-s2 p-1">
         {(['buy', 'sell'] as const).map((s) => (
           <button
             key={s}
@@ -389,8 +548,12 @@ export function ArcDexTradePanel({
               setEstOut(null)
               setError(null)
             }}
-            className={`h-9 flex-1 rounded-full text-sm font-medium capitalize transition-colors duration-150 ${
-              mode === s ? 'bg-lime text-white' : 'text-t3 hover:text-white'
+            className={`h-9 rounded-full text-sm font-medium capitalize transition-colors duration-150 ${
+              mode === s
+                ? s === 'buy'
+                  ? 'bg-up text-accent-fg'
+                  : 'bg-down text-white'
+                : 'text-t3 hover:text-white'
             }`}
           >
             {s}
@@ -399,7 +562,7 @@ export function ArcDexTradePanel({
       </div>
 
       <label className="mt-5 block text-xs text-t3">
-            {mode === 'buy' ? 'You pay · USDC' : `You sell · $${symbol}`}
+            {mode === 'buy' ? `You pay · ${isV4 ? quoteSym : 'USDC'}` : `You sell · $${symbol}`}
           </label>
           <div className="mt-2 flex items-center gap-2 h-12 rounded-xl bg-s2 border border-hair px-3">
             <input
@@ -409,17 +572,21 @@ export function ArcDexTradePanel({
               placeholder="0"
               className="flex-1 min-w-0 bg-transparent border-0 outline-none text-lg tabular-nums placeholder:text-t3"
             />
-            <TokenChip kind={mode === 'buy' ? 'usdc' : 'token'} />
+            <TokenChip kind={mode === 'buy' ? 'quote' : 'token'} />
           </div>
           <div className="mt-2 flex justify-between text-xs text-t3">
-            <span>Wallet {payBalLabel}</span>
+            <span>Wallet {payBalLabel}{mode === 'buy' && isV4 && quoteSym !== 'USDC' ? ` ${quoteSym}` : ''}</span>
             <button
               type="button"
               disabled={payBalPending || payBal === 0n}
               onClick={() => {
                 if (payBalPending || payBal <= 0n) return
                 setAmount(
-                  mode === 'buy' ? formatUsdc(payBal).replace(/,/g, '') : formatToken(payBal, tokDec),
+                  mode === 'buy'
+                    ? quoteSym === 'USDC'
+                      ? formatUsdc(payBal).replace(/,/g, '')
+                      : formatUnits(payBal, quoteDec)
+                    : formatToken(payBal, tokDec),
                 )
               }}
               className="text-white/80 hover:text-white disabled:opacity-40"
@@ -427,14 +594,25 @@ export function ArcDexTradePanel({
               Max
             </button>
           </div>
+          {mode === 'buy' && isV4 && spotUsd && amtNum > 0 && spotPx ? (
+            <p className="mt-1 mb-0 text-[11px] text-t3">≈ {fmtUsd(spotQuoteToUsd(amtNum, spotPx))}</p>
+          ) : null}
           {mode === 'buy' ? (
             <div className="mt-2 flex gap-1.5">
               {BUY_PRESETS.map((v) => (
                 <button
                   key={v}
                   type="button"
-                  onClick={() => setAmount(String(v))}
-                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold tabular-nums text-t3 bg-s2 hover:text-white"
+                  disabled={spotUsd && !(spotPx && spotPx > 0)}
+                  onClick={() => {
+                    if (spotUsd) {
+                      if (!spotPx) return
+                      setAmount(usdToQuoteHuman(v, spotPx, quoteDec))
+                    } else {
+                      setAmount(String(v))
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold tabular-nums text-t3 bg-s2 hover:text-white disabled:opacity-40"
                 >
                   ${v}
                 </button>
@@ -467,8 +645,11 @@ export function ArcDexTradePanel({
             <div className="text-xs text-t3">You receive</div>
             <div className="mt-1 text-lg font-medium tabular-nums">
               {receiveAmt}{' '}
-              <span className="text-sm text-t3">{mode === 'buy' ? symbol : 'USDC'}</span>
+              <span className="text-sm text-t3">{receiveSym}</span>
             </div>
+            {mode === 'sell' && receiveUsd != null ? (
+              <div className="mt-0.5 text-[12px] text-t3 tabular-nums">≈ {fmtUsd(receiveUsd)}</div>
+            ) : null}
           </div>
 
           <div className="mt-3 flex justify-between text-xs text-t3">
@@ -478,7 +659,7 @@ export function ArcDexTradePanel({
             </span>
           </div>
           <div className="mt-1 flex justify-between text-xs text-t3">
-            <span>1% fee</span>
+            <span>{feeBps === 100 ? '1% fee' : `${(feeBps / 100).toFixed(1)}% fee`}</span>
             <span className="tabular-nums">{amtNum > 0 ? fmtUsd(feeUsd) : '$0'}</span>
           </div>
 
@@ -513,11 +694,11 @@ export function ArcDexTradePanel({
                 quoting ||
                 !amount ||
                 Number(amount) <= 0 ||
-                (estOut == null && !needApprove)
+                estOut == null
               }
               onClick={() => void onSubmit()}
               className={`mt-5 w-full h-11 rounded-full text-sm font-semibold tracking-tightish disabled:opacity-40 transition-colors ${
-                mode === 'buy' ? 'bg-lime text-white hover:bg-lime-2' : 'bg-coral text-white'
+                mode === 'buy' ? 'bg-up text-accent-fg hover:brightness-110' : 'bg-down text-white hover:brightness-110'
               }`}
             >
               {busy ? (

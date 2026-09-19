@@ -69,6 +69,8 @@ export interface PoolToken {
     isRwaBacked?: boolean
     isMarginBacked?: boolean
     quote?: string
+    /** Quote ERC-20 address when known (v4 multi-quote factories). */
+    quoteToken?: string
     dexId?: 0 | 1
     poolId?: string
     feeBps?: number

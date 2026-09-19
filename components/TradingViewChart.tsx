@@ -45,10 +45,12 @@ function loadScript(onLoad: () => void, onError: () => void) {
 export default function TradingViewChart({
   token,
   symbol,
+  quote = 'USDC',
   height = 420,
 }: {
   token: string
   symbol: string
+  quote?: string
   height?: number
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -76,9 +78,9 @@ export default function TradingViewChart({
 
     const widget = new window.TradingView.widget({
       container: containerRef.current,
-      datafeed: createArcDatafeed(token, symbol),
+      datafeed: createArcDatafeed(token, symbol, quote),
       library_path: '/charting_library/charting_library/',
-      symbol: `${symbol}/USDC`,
+      symbol: `${symbol}/${quote}`,
       interval: '15',
       timezone: 'Etc/UTC',
       theme: 'Dark',
@@ -132,7 +134,7 @@ export default function TradingViewChart({
         widgetRef.current = null
       }
     }
-  }, [ready, token, symbol, height])
+  }, [ready, token, symbol, quote, height])
 
   if (missing) {
     return (

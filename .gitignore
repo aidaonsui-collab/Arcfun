@@ -22,3 +22,6 @@ subgraph/**/package-lock.json
 .owner.key
 .arc_rpc.txt
 .upgrade-origin-mint.log
+
+# Local one-off; needs @uniswap/liquidity-launcher-sdk
+scripts/launch-liquidity-launcher-token.ts

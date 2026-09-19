@@ -1,6 +1,6 @@
 /**
- * TradingView charting_library datafeed for ArcFun TOKEN/USDC.
- * Same shape as robinpad `lib/tvDatafeed.ts`. Bars are Unix ms.
+ * TradingView charting_library datafeed for ArcFun Instant pairs.
+ * Bars are Unix ms. Quote label is USDC / USD (cirBTC, via BTC spot) / USYC.
  */
 
 export interface TVBar {
@@ -14,7 +14,7 @@ export interface TVBar {
 
 const SUPPORTED_RESOLUTIONS = ['1', '5', '15', '60', '240', '1D']
 
-export function createArcDatafeed(token: string, symbol: string) {
+export function createArcDatafeed(token: string, symbol: string, quote = 'USDC') {
   const subscriptions = new Map<string, ReturnType<typeof setInterval>>()
   const CANDLE_CACHE_TTL_MS = 20_000
   const candleCache = new Map<string, { at: number; promise: Promise<TVBar[]> }>()
@@ -67,9 +67,9 @@ export function createArcDatafeed(token: string, symbol: string) {
           return
         }
         onResolve({
-          name: `${symbol}/USDC`,
-          ticker: `${symbol}/USDC`,
-          description: `${symbol} / USDC`,
+          name: `${symbol}/${quote}`,
+          ticker: `${symbol}/${quote}`,
+          description: `${symbol} / ${quote}`,
           type: 'crypto',
           session: '24x7',
           timezone: 'Etc/UTC',

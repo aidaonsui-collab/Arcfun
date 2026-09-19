@@ -1,14 +1,17 @@
 /**
  * GET /api/arc/quote?token=0x&side=buy|sell&amount=123
- * Server-side Uni V3 quote. The trade panel used to call the quoter from the
- * browser via public Arc RPCs; those hang or SSL-fail, the catch swallowed it,
- * and "You receive" stayed 0 while wallet balance (wagmi) still loaded.
+ * Server-side Uni V3 quote, plus Instant v4 slot0 estimate. The trade panel used
+ * to call the quoter from the browser via public Arc RPCs; those hang or SSL-fail,
+ * the catch swallowed it, and "You receive" stayed 0 while wallet balance (wagmi)
+ * still loaded. v4 buy `amount` is quote-token units (cirBTC 8dp, USDC 6dp).
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { isAddress } from 'viem'
+import { formatUnits, isAddress, parseUnits } from 'viem'
 import { quoteArcBuy, quoteArcSell, formatUsdc, parseUsdc } from '@/lib/arc-swap'
 import { formatToken, parseToken } from '@/lib/token-format'
-import { ARC } from '@/lib/contracts-arc'
+import { ARC, arcPublicClient } from '@/lib/contracts-arc'
+import { quoteDecimalsForToken, quoteSymbolForQuote } from '@/lib/arc-rwa-assets'
+import { quoteEveV4ExactIn, readEveV4Pool } from '@/lib/arc-v4-swap'
 import { limitOr429 } from '@/lib/rate-limit'
 import { summarizeRpcError } from '@/lib/rpc-error'
 import { jsonSafe } from '@/lib/json-safe'
@@ -33,6 +36,30 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const v4 = await readEveV4Pool(token as `0x${string}`, arcPublicClient())
+    if (v4) {
+      const qDec = quoteDecimalsForToken(v4.quote)
+      const qSym = quoteSymbolForQuote(v4.quote)
+      const inAmt =
+        side === 'buy' ? parseUnits(amount, qDec) : parseToken(amount, ARC.TOKEN_DECIMALS)
+      if (inAmt <= 0n) return NextResponse.json({ ok: false, error: 'invalid amount' }, { status: 400 })
+      const zeroForOne = side === 'buy' ? !v4.tokenIsCurrency0 : v4.tokenIsCurrency0
+      const out = await quoteEveV4ExactIn(v4, inAmt, zeroForOne, arcPublicClient())
+      if (out == null || out <= 0n) {
+        return NextResponse.json({
+          ok: false,
+          error: 'No quote for this size. Try a smaller amount.',
+        })
+      }
+      return jsonSafe({
+        ok: true,
+        out: out.toString(),
+        quote: qSym,
+        formatted:
+          side === 'buy' ? formatToken(out, ARC.TOKEN_DECIMALS) : formatUnits(out, qDec),
+      })
+    }
+
     if (side === 'buy') {
       const inAmt = parseUsdc(amount)
       if (inAmt <= 0n) return NextResponse.json({ ok: false, error: 'invalid amount' }, { status: 400 })

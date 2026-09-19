@@ -6,7 +6,10 @@ import { ARC, ARC_CHAIN_ID, arcInstantV4Enabled } from './contracts-arc'
 import type { FeeSplit } from './eve-fee-split'
 
 export const EVE_V4_TICK_SPACING = 200
-export const EVE_V4_DEFAULT_VIRTUAL_QUOTE = 5_500_000_000n // 5500e6, same FDV encoding as Instant V3
+/** Listed Instant meme FDV target. MC = VQ * 1e9 / VIRTUAL_TOKEN_INIT. */
+export const INSTANT_MEME_TARGET_FDV_USD = 1500
+/** USDC 6dp virtual quote so listed MC is $1,500 (1600e6 / 1.066…e9 * 1e9). RWA seeds stay at $5500. */
+export const EVE_V4_DEFAULT_VIRTUAL_QUOTE = 1_600_000_000n
 
 export const EVE_FEE_HOOK_SPLIT_COMPONENTS = [
   { name: 'feeBps', type: 'uint16' },
@@ -105,6 +108,30 @@ export const EVE_V4_POOL_MANAGER_STATE_ABI = [
     stateMutability: 'view',
     inputs: [{ name: 'slot', type: 'bytes32' }],
     outputs: [{ type: 'bytes32' }],
+  },
+] as const
+
+/** EveFeeHook.configs(poolId) — feeBps is levied on swap output. */
+export const EVE_FEE_HOOK_CONFIGS_ABI = [
+  {
+    type: 'function',
+    name: 'configs',
+    stateMutability: 'view',
+    inputs: [{ name: 'id', type: 'bytes32' }],
+    outputs: [
+      { name: 'registered', type: 'bool' },
+      { name: 'creator', type: 'address' },
+      { name: 'holders', type: 'address' },
+      { name: 'autoLp', type: 'address' },
+      { name: 'platformWallet', type: 'address' },
+      { name: 'launch', type: 'address' },
+      { name: 'feeBps', type: 'uint16' },
+      { name: 'creatorBps', type: 'uint16' },
+      { name: 'burnBps', type: 'uint16' },
+      { name: 'holdersBps', type: 'uint16' },
+      { name: 'autoLpBps', type: 'uint16' },
+      { name: 'platformBps', type: 'uint16' },
+    ],
   },
 ] as const
 

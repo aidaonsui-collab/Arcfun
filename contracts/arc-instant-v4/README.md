@@ -31,21 +31,12 @@ Create UI: `/create` shows the fee chooser unless `NEXT_PUBLIC_ARC_INSTANT_V4=0`
 and reflect creates hit `EveInstantV4Factory`. The V3 Instant factory stays for tokens already
 on that path.
 
-## Live on Arc 5042 (2026-09-14)
+## Live on Arc 5042 (2026-09-16)
 
 Deployed with `script/DeployEveInstantV4.s.sol` through Arachnid's CREATE2 deployer
 (`0x4e59b44847b379578588920cA78FbF26c0B4956C`) so the hook address carries
 `AFTER_SWAP | AFTER_SWAP_RETURNS_DELTA` (flags 68). Owner is passed into the hook constructor
 so the CREATE2 factory is not locked as owner.
-
-Redeployed 2026-09-16 onto a fresh `EveFeeHook` carrying the `flushQuoteBurn`/`flushAutoLp`
-price-manipulation bound (commit 300cd1d) — the previous hook never had that fix live. Since
-a pool's hook address is part of its Uniswap v4 pool identity, every pool created before this
-redeploy stays permanently on the old hook; only new launches route through the fixed one.
-`InstantAutoLpHelper` and `BundleSinkDeployer` are deployed fresh inside the factory
-constructors every time, so they're new addresses too even though the router carried over
-unchanged. Old addresses are kept as `ARC_INSTANT_V4_*_PREV` in `lib/contracts-arc.ts` so
-pre-redeploy tokens stay in the catalog.
 
 | Contract | Address |
 | --- | --- |
@@ -53,17 +44,12 @@ pre-redeploy tokens stay in the catalog.
 | `EveFeeHook` | `0x8fa4B88e4052302FBd9E8419eeC6E9FdAC210044` |
 | `EveInstantV4Factory` | `0xCfC8287Fd6331A826565B2ACBc69CB3E083602Ea` |
 | `InstantAutoLpHelper` | `0xEbe049aF3725660A42736297d1fE82Ca21EB0cf3` |
-| `EveV4Router` | `0x494715a3923392Dd0fD312B0CC40055679Feaad2` (reused, unaffected by the hook fix) |
+| `EveV4Router` | `0x494715a3923392Dd0fD312B0CC40055679Feaad2` |
 | `BundleSinkDeployer` | `0xf775493CE7E16a94e175C1C984bcdF2F689895fc` |
 | `RwaInstantV4Factory` | `0x3489E76510238ef57Ee9d18005a6Fb110f17912D` |
 
-Previous generation (permanently in use by tokens launched before 2026-09-16):
-
-| Contract | Address |
-| --- | --- |
-| `EveFeeHook` (old) | `0xd8F5790094711747ae4083651dDDfcE73699C044` |
-| `EveInstantV4Factory` (old) | `0x0421a4c784ADCD0BB51bF0d108FF76E37bdB1297` |
-| `RwaInstantV4Factory` (old) | `0x7f4D81281492D3EBc2629826721223451c20a5Ca` |
+Give terminals **`RwaInstantV4Factory` `0x3489…912D`**. Quote is per-create (`TokenLaunched`).
+New Instant creates only. Already-launched tokens stay on the previous hook.
 
 PoolManager is Uniswap's official Arc address (`Uniswap/contracts` `deployments/json/5042.json`).
 Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
@@ -73,11 +59,10 @@ Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
 allowed). BundleSink creation code lives on `BundleSinkDeployer` so the factory stays under
 EIP-170.
 
-CREATE2-redeployed 2026-09-14 so auto-LP mint (`flushAutoLp`) and quote-burn swap
-(`flushQuoteBurn`) are on this hook. Factories above are a second deploy onto that hook
-with a 365-day platform LP reclaim (`unlockLiquidity`). Previous factories `0x32a0…` and
-`0x66Ca…` stay in the catalog (permanent LP, no timer). Router `0x4947…` was reused.
-Flush is permissionless, not automated.
+CREATE2-redeployed 2026-09-16 so flushQuoteBurn / flushAutoLp price-anchor checks are on
+this hook. Router `0x4947…` was reused. Previous 365-day factories `0x0421…` / `0x7f4D…`
+and permanent-LP factories `0x32a0…` / `0x66Ca…` stay in the catalog. Flush is
+permissionless, not automated.
 
 Quote is per-create. Issuer token addresses (USYC / BUIDL / CRCL) are still unset on
 mainnet, so those create cards stay Soon until `NEXT_PUBLIC_ARC_RWA_<ID>` is set.
@@ -153,7 +138,7 @@ retired `RwaFeeHook`, with its own off-chain keeper computing holder balances an
 - **Starting valuation is optional.** `createToken(..., launchVirtualQuote, firstBuyQuoteAmount)`
   uses the same raw-unit encoding as Instant V3 (`VIRTUAL_TOKEN_INIT` vs quote raw). 0 falls
   back to the factory default (`setLaunchVirtualQuote`); if that is also 0 the pool still opens
-  at the usable-tick edge. Pass `5500e6` on a 6dp quote for the ~$5.2k FDV Instant uses on USDC.
+  at the usable-tick edge. eve.fun USDC memes pass `1600e6` (~$1.5k listed FDV). RWA creates still encode $5500.
 - **First buy is in the create tx.** Nonzero `firstBuyQuoteAmount` is pulled from the caller
   (approve the factory) and swapped quote→token inside the same `unlock()` as the LP mint. The
   hook taxes that swap like any other. 0 skips the swap. The original 4-arg `createToken` is

@@ -345,7 +345,7 @@ export function BlitzDesk() {
             <h2 className="m-0 mt-4 text-[20px] font-semibold tracking-tightish">Pick a post</h2>
             <p className="mt-2 mb-0 text-[14px] text-t2 leading-relaxed">
               Instant create opens here with name, ticker, art, and the tweet as the website
-              field. Still one confirm. Pair stays TOKEN/USDC.
+              field. Still one confirm. Pick USDC, cirBTC, or USYC as the quote.
             </p>
           </div>
         )}

@@ -477,12 +477,7 @@ export const ARC = {
     process.env.NEXT_PUBLIC_ARC_INSTANT_LOCKER,
     '0xE522907807CdDF006b433a103356d2c30ac39209',
   ),
-  /**
-   * Uniswap v4 Instant (DeployEveInstantV4 on 5042). Redeployed 2026-09-16 onto a fresh
-   * EveFeeHook carrying the flushQuoteBurn/flushAutoLp price-manipulation bound (fix
-   * merged in commit 300cd1d, never live on the previous hook — see ARC_INSTANT_V4_HOOK_PREV).
-   * Router is unaffected by the hook fix and was reused, not redeployed.
-   */
+  /** Uniswap v4 Instant (DeployEveInstantV4 on 5042, price-anchor hook). */
   INSTANT_V4_FACTORY: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY,
     '0xCfC8287Fd6331A826565B2ACBc69CB3E083602Ea',
@@ -495,8 +490,7 @@ export const ARC = {
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_ROUTER,
     '0x494715a3923392Dd0fD312B0CC40055679Feaad2',
   ),
-  /** RWA Instant v4 (DeployRwaInstantV4 on 5042). Quote is per-create. Redeployed 2026-09-16
-   * alongside INSTANT_V4_FACTORY, onto the same new hook. */
+  /** RWA Instant v4 (DeployRwaInstantV4 on 5042). Quote is per-create. Give this to terminals. */
   INSTANT_V4_RWA_FACTORY: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_RWA_FACTORY,
     '0x3489E76510238ef57Ee9d18005a6Fb110f17912D',
@@ -571,18 +565,15 @@ export const ARC_INSTANT_FACTORY_PREV = '0xd51E6217bb3bC7586866713854Ea75B7BefF1
 export const ARC_INSTANT_LOCKER_MONLOCK = '0x84F486d7254aEDc89986bce392771D88bf5828EA' as Address
 /** Instant factory.lpLocker for the Crucible factory. Collect on CrucibleLock, not here. */
 export const ARC_INSTANT_LOCKER_ADAPTER = '0x9deBd8d2CFa7dA789257146D325Af4094B1c1c5f' as Address
-/** v4 Instant USDC factory before 365-day unlock. Permanent LP. Keep in catalog. */
-export const ARC_INSTANT_V4_FACTORY_LEGACY = '0x32a0AF0B4c423f3485E6eaABE8DA64e631d411E2' as Address
-/** v4 Instant RWA factory before 365-day unlock. Permanent LP. Keep in catalog. */
-export const ARC_INSTANT_V4_RWA_FACTORY_LEGACY = '0x66Ca5b85C31AEBD2082eF12D7f61af37bD4892fc' as Address
-/** v4 Instant USDC factory before the 2026-09-16 EveFeeHook price-manipulation-fix redeploy. */
+/** v4 Instant USDC factory on the pre-anchor hook (365-day lock). Keep in catalog. */
 export const ARC_INSTANT_V4_FACTORY_PREV = '0x0421a4c784ADCD0BB51bF0d108FF76E37bdB1297' as Address
-/** v4 Instant RWA factory before the 2026-09-16 EveFeeHook price-manipulation-fix redeploy. */
+/** v4 Instant RWA factory on the pre-anchor hook (365-day lock). Keep in catalog. */
 export const ARC_INSTANT_V4_RWA_FACTORY_PREV = '0x7f4D81281492D3EBc2629826721223451c20a5Ca' as Address
-/** EveFeeHook before the 2026-09-16 redeploy. Missing the flushQuoteBurn/flushAutoLp
- *  price-manipulation bound (commit 300cd1d). Every pool created before that date is
- *  permanently bound to this hook — Uniswap v4 pool identity includes the hook address,
- *  so there is no way to migrate an existing pool onto the new hook. */
+/** v4 Instant USDC factory before 365-day unlock. Permanent LP. Keep in catalog. */
+export const ARC_INSTANT_V4_FACTORY_PERM = '0x32a0AF0B4c423f3485E6eaABE8DA64e631d411E2' as Address
+/** v4 Instant RWA factory before 365-day unlock. Permanent LP. Keep in catalog. */
+export const ARC_INSTANT_V4_RWA_FACTORY_PERM = '0x66Ca5b85C31AEBD2082eF12D7f61af37bD4892fc' as Address
+/** Pre-anchor EveFeeHook. Existing launches stay on it. */
 export const ARC_INSTANT_V4_HOOK_PREV = '0xd8F5790094711747ae4083651dDDfcE73699C044' as Address
 
 function uniqAddrs(addrs: readonly (Address | string | undefined | null)[]): Address[] {
@@ -617,8 +608,8 @@ export function instantV4CatalogFactories(): Address[] {
     ARC.INSTANT_V4_RWA_FACTORY,
     ARC_INSTANT_V4_FACTORY_PREV,
     ARC_INSTANT_V4_RWA_FACTORY_PREV,
-    ARC_INSTANT_V4_FACTORY_LEGACY,
-    ARC_INSTANT_V4_RWA_FACTORY_LEGACY,
+    ARC_INSTANT_V4_FACTORY_PERM,
+    ARC_INSTANT_V4_RWA_FACTORY_PERM,
   ])
 }
 
@@ -664,8 +655,8 @@ export function instantProtocolAddresses(): Address[] {
     ARC.INSTANT_V4_RWA_FACTORY,
     ARC_INSTANT_V4_FACTORY_PREV,
     ARC_INSTANT_V4_RWA_FACTORY_PREV,
-    ARC_INSTANT_V4_FACTORY_LEGACY,
-    ARC_INSTANT_V4_RWA_FACTORY_LEGACY,
+    ARC_INSTANT_V4_FACTORY_PERM,
+    ARC_INSTANT_V4_RWA_FACTORY_PERM,
     ARC.INSTANT_V4_HOOK,
     ARC_INSTANT_V4_HOOK_PREV,
     ARC.INSTANT_V4_ROUTER,

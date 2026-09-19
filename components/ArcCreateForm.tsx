@@ -3,16 +3,18 @@
 /**
  * Launch on Arc — Instant or Instant Reflection (both TOKEN/USDC + holder rewards path).
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount, useConnect, useSwitchChain, useWriteContract, useSignMessage } from 'wagmi'
 import { erc20Abi, formatUnits, getAddress, isAddress, type Address } from 'viem'
 import { prepareTokenRegisterAuth } from '@/lib/arc-auth'
-import { Loader2, AlertCircle, CheckCircle, ImagePlus } from 'lucide-react'
+import { Loader2, AlertCircle, CheckCircle, ImagePlus, ChevronDown } from 'lucide-react'
 import {
   ARC,
   ARC_CHAIN_ID,
   ARC_INSTANT_CREATE_GAS,
+  ARC_ERC20_APPROVE_GAS,
+  ARC_SWAP_GAS,
   ARC_MAX_APPROVAL,
   arcInstantEnabled,
   arcReflectionEnabled,
@@ -26,8 +28,19 @@ import {
   buildCreateTokenMemeInstantArc,
   parseArcQuote,
 } from '@/lib/arc-instant-launchpad'
-import { buildCreateTokenEveV4 } from '@/lib/eve-instant-v4-launchpad'
-import { liveRwaQuoteAssets, pendingRwaQuoteAssets, rwaAssetById } from '@/lib/arc-rwa-assets'
+import { buildCreateTokenEveV4, EVE_V4_DEFAULT_VIRTUAL_QUOTE } from '@/lib/eve-instant-v4-launchpad'
+import { estimateInstantFirstBuyTokens, instantListedMcUsd } from '@/lib/instant-first-buy'
+import {
+  liveRwaQuoteAssets,
+  pendingRwaQuoteAssets,
+  rwaAssetById,
+  defaultRwaVirtualQuoteRaw,
+  quotePayUsdcSwap,
+  quotePolicy,
+  quoteUsesUsdInput,
+  usdToQuoteHuman,
+  type ArcRwaAsset,
+} from '@/lib/arc-rwa-assets'
 import { BundleBasketCard } from '@/components/BundleBasketCard'
 import {
   RWA_V4_FACTORY_ABI,
@@ -55,7 +68,7 @@ import {
   computeHandlePayVault,
 } from '@/lib/handle-pay'
 import { uploadImage } from '@/lib/upload-image'
-import { fmtUsd } from '@/lib/ui-format'
+import { fmtCompact, fmtUsd } from '@/lib/ui-format'
 import { TokenCard } from '@/components/TokenCard'
 import { FeeSplitCard } from '@/components/FeeSplitCard'
 import {
@@ -68,12 +81,15 @@ import {
 import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 import type { PoolToken } from '@/lib/tokens'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
+import { fetchQuoteUsdSpot, formatSpotQuoteApprox } from '@/lib/quote-usd-spot'
+import { parseUsdc, planUsdcBuyOfToken } from '@/lib/arc-swap'
 
 type Step =
   | 'idle'
   | 'uploading'
   | 'vault'
   | 'approving'
+  | 'swapping'
   | 'creating'
   | 'confirming'
   | 'basket'
@@ -116,7 +132,20 @@ const LAUNCH_TYPES_V4: {
   },
 ]
 
-const FIRST_BUY_PRESETS = ['100', '250', '1000']
+/** Dollar chips for peg/spot quotes; other quotes use token units (never fake $). */
+function firstBuyPresets(quoteId: string, asset: ArcRwaAsset | null): string[] {
+  if (quoteUsesUsdInput(asset, quoteId)) {
+    return quotePolicy(asset).usd === 'spot' ? ['10', '100', '1000'] : ['100', '250', '1000']
+  }
+  const decimals = asset?.decimals || 6
+  if (decimals === 8) return ['0.0001', '0.001', '0.01']
+  if (decimals >= 18) return ['1', '10', '50']
+  return ['1', '10', '50']
+}
+
+function defaultFirstBuy(quoteId: string, asset: ArcRwaAsset | null): string {
+  return firstBuyPresets(quoteId, asset)[1] || '0'
+}
 
 export function ArcCreateForm({
   initial,
@@ -156,7 +185,10 @@ export function ArcCreateForm({
   /** Holder reward ERC-20 — default Arc USDC (6dp). Pool quote is always USDC. */
   const [rewardToken, setRewardToken] = useState<string>(ARC.USDC)
   const [buyAtLaunch, setBuyAtLaunch] = useState(false)
-  const [firstBuy, setFirstBuy] = useState('250')
+  const [firstBuy, setFirstBuy] = useState(() => defaultFirstBuy('usdc', null))
+  /** Live USD spot (BTC-USD / XAU-USD) for spot-quoted first-buy / virtual quote. */
+  const [spotPx, setSpotPx] = useState<number | null>(null)
+  const [spotPxStatus, setSpotPxStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
 
   const [step, setStep] = useState<Step>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -176,7 +208,6 @@ export function ArcCreateForm({
   const [registerError, setRegisterError] = useState<string | null>(null)
   const [registering, setRegistering] = useState(false)
 
-  const usdcQ = useArcErc20Balance(ARC.USDC, isConnected && chainId === ARC_CHAIN_ID ? address : undefined)
   const wrongChain = isConnected && chainId !== ARC_CHAIN_ID
   const configured = arcInstantEnabled()
   const reflectionLive = arcReflectionEnabled()
@@ -185,8 +216,80 @@ export function ArcCreateForm({
   const busy = step !== 'idle' && step !== 'done'
   const liveRwas = liveRwaQuoteAssets()
   const pendingRwas = pendingRwaQuoteAssets()
+  // Create-ready quotes (incl. permissioned USYC) are selectable — first-buy UI is quote-aware.
+  // True pending (no issuer CA / factory) stay Soon in the picker.
+  const openRwas = liveRwas.filter((a) => !a.permissioned)
+  const readyGatedRwas = liveRwas.filter((a) => a.permissioned)
+  const selectableRwas = [...openRwas, ...readyGatedRwas]
+  const soonRwas = pendingRwas
   const rwaQuote = quoteId !== 'usdc' ? rwaAssetById(quoteId) : null
+  const usdInput = quoteUsesUsdInput(rwaQuote, quoteId)
+  const payUsdcSwap = quotePayUsdcSwap(rwaQuote)
+  const spotPolicy = quotePolicy(rwaQuote)
+  const spotUsd = spotPolicy.usd === 'spot'
+  const spotPair = spotPolicy.usdSpot
+
+  const quoteDecimalsLive = rwaQuote?.decimals || 6
+  const quoteTokenLive = (rwaQuote?.address as Address | undefined) || ARC.USDC
+  const quoteBalQ = useArcErc20Balance(
+    quoteTokenLive,
+    isConnected && chainId === ARC_CHAIN_ID ? address : undefined,
+  )
+  const usdcBalQ = useArcErc20Balance(
+    ARC.USDC,
+    isConnected && chainId === ARC_CHAIN_ID && payUsdcSwap ? address : undefined,
+  )
+
+  // Keep first-buy amount in the active quote's units when the pair changes.
+  // Spot quotes keep USD string state (converted to quote raw only at submit).
+  useEffect(() => {
+    setFirstBuy(defaultFirstBuy(quoteId, rwaQuote))
+  }, [quoteId, quoteDecimalsLive, rwaQuote])
+
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
+
+  const refreshSpotPx = useCallback(async (force = false) => {
+    if (!spotUsd || !spotPair) return null
+    setSpotPxStatus((s) => (s === 'ready' && !force ? s : 'loading'))
+    const price = await fetchQuoteUsdSpot(spotPair, { force })
+    if (price == null) {
+      setSpotPxStatus('error')
+      return null
+    }
+    setSpotPx(price)
+    setSpotPxStatus('ready')
+    return price
+  }, [spotUsd, spotPair])
+
+  useEffect(() => {
+    if (!spotUsd || !spotPair) {
+      setSpotPxStatus('idle')
+      setSpotPx(null)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const price = await fetchQuoteUsdSpot(spotPair)
+      if (cancelled) return
+      if (price == null) {
+        setSpotPxStatus('error')
+        return
+      }
+      setSpotPx(price)
+      setSpotPxStatus('ready')
+    })()
+    const t = window.setInterval(() => {
+      void fetchQuoteUsdSpot(spotPair, { force: true }).then((price) => {
+        if (cancelled || price == null) return
+        setSpotPx(price)
+        setSpotPxStatus('ready')
+      })
+    }, 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(t)
+    }
+  }, [spotUsd, spotPair])
   const isReflection = launchType === 'reflection'
   const v4Ui = arcInstantV4UiEnabled()
   const v4Live = arcInstantV4Enabled()
@@ -211,6 +314,11 @@ export function ArcCreateForm({
     : bundleOn
       ? 100
       : 0
+  // RWA factory reverts HoldersNotOnRwa unless Bundle is on — fold any leftover holders slice.
+  useEffect(() => {
+    if (!hideHolders || feeSplit.holdersBps === 0) return
+    setFeeSplit((s) => foldHoldersIntoCreator(s))
+  }, [hideHolders, feeSplit.holdersBps])
   const feeOk = !v4Ui || splitValid(feeSplit, { hideHolders, minHoldersBps }).ok
   const basketCheck = bundleOn
     ? basketValid(basketRows, {
@@ -374,8 +482,27 @@ export function ArcCreateForm({
       let pool: Address | undefined
 
       const quoteDecimals = rwaQuote?.decimals || 6
-      const firstBuyQuote =
-        buyAtLaunch && firstBuy && Number(firstBuy) > 0 ? parseArcQuote(firstBuy, quoteDecimals) : 0n
+      let firstBuyQuote = 0n
+      let firstBuyUsdForErr: number | null = null
+      if (buyAtLaunch && firstBuy && Number(firstBuy) > 0) {
+        if (spotUsd) {
+          firstBuyUsdForErr = Number(firstBuy)
+          const spot = await refreshSpotPx(true)
+          if (spot == null || !(spot > 0)) {
+            throw new Error(`Could not fetch USD price for ${quoteSymbol}. Retry in a moment.`)
+          }
+          const quoteAmt = usdToQuoteHuman(firstBuyUsdForErr, spot, quoteDecimals)
+          if (!(Number(quoteAmt) > 0)) {
+            throw new Error('First buy amount is too small after USD conversion.')
+          }
+          firstBuyQuote = parseArcQuote(quoteAmt, quoteDecimals)
+        } else {
+          firstBuyQuote = parseArcQuote(firstBuy, quoteDecimals)
+        }
+      }
+      // Belt-and-suspenders: never send holdersBps to plain RWA createToken.
+      const splitForCreate =
+        Boolean(rwaQuote) && !bundleOn ? foldHoldersIntoCreator(feeSplit) : feeSplit
       const factory =
         rwaV4Live && rwaFactoryAddr
           ? rwaFactoryAddr
@@ -389,7 +516,89 @@ export function ArcCreateForm({
       const quoteToken = (rwaQuote?.address as Address) || ARC.USDC
 
       if (firstBuyQuote > 0n) {
-        const allowed = (await arcPublicClient().readContract({
+        const client = arcPublicClient()
+        let bal = (await client.readContract({
+          address: quoteToken,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [address],
+        })) as bigint
+
+        // Instant still pulls the quote token. USD input → swap USDC to quote first.
+        if (payUsdcSwap && bal < firstBuyQuote && firstBuyUsdForErr != null) {
+          const usdcIn = parseUsdc(firstBuyUsdForErr)
+          if (usdcIn <= 0n) {
+            throw new Error('First buy amount is too small.')
+          }
+          const usdcBal = (await client.readContract({
+            address: ARC.USDC,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [address],
+          })) as bigint
+          if (usdcBal < usdcIn) {
+            throw new Error(
+              `First buy needs $${firstBuyUsdForErr.toFixed(2)} USDC to swap into ${quoteSymbol} (wallet has $${Number(formatUnits(usdcBal, 6)).toFixed(2)}).`,
+            )
+          }
+          const plan = await planUsdcBuyOfToken(quoteToken, usdcIn, address, 100)
+          if (!plan) {
+            throw new Error(`Could not quote USDC → ${quoteSymbol}. The ${quoteSymbol}/USDC pool may be unavailable.`)
+          }
+          const usdcAllow = (await client.readContract({
+            address: ARC.USDC,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [address, plan.spender],
+          })) as bigint
+          if (usdcAllow < usdcIn) {
+            setStep('approving')
+            await writeContractAsync({
+              address: ARC.USDC,
+              abi: erc20Abi,
+              functionName: 'approve',
+              args: [plan.spender, ARC_MAX_APPROVAL],
+              chainId: ARC_CHAIN_ID,
+              gas: ARC_ERC20_APPROVE_GAS,
+            })
+          }
+          setStep('swapping')
+          const swapHash = await writeContractAsync({
+            address: plan.call.address,
+            abi: plan.call.abi as never,
+            functionName: plan.call.functionName as never,
+            args: plan.call.args as never,
+            chainId: plan.call.chainId,
+            gas: ARC_SWAP_GAS,
+          })
+          await waitArcTxConfirmed(swapHash)
+          const cirAfter = (await client.readContract({
+            address: quoteToken,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [address],
+          })) as bigint
+          const received = cirAfter > bal ? cirAfter - bal : cirAfter
+          if (received <= 0n) {
+            throw new Error(`USDC → ${quoteSymbol} swap returned no ${quoteSymbol}.`)
+          }
+          firstBuyQuote = received
+          bal = cirAfter
+        }
+
+        if (bal < firstBuyQuote) {
+          const need = formatUnits(firstBuyQuote, quoteDecimals)
+          const have = formatUnits(bal, quoteDecimals)
+          if (payUsdcSwap && firstBuyUsdForErr != null) {
+            throw new Error(
+              `First buy needs ${need} ${quoteSymbol} (≈ $${firstBuyUsdForErr.toFixed(2)}; wallet has ${have} ${quoteSymbol}). Swap USDC → ${quoteSymbol} failed or was short.`,
+            )
+          }
+          throw new Error(
+            `First buy needs ${need} ${rwaQuote?.symbol || 'USDC'} (wallet has ${have}). This field is in ${rwaQuote?.symbol || 'USDC'}, not USD.`,
+          )
+        }
+        const allowed = (await client.readContract({
           address: quoteToken,
           abi: erc20Abi,
           functionName: 'allowance',
@@ -403,6 +612,7 @@ export function ArcCreateForm({
             functionName: 'approve',
             args: [factory, ARC_MAX_APPROVAL],
             chainId: ARC_CHAIN_ID,
+            gas: ARC_ERC20_APPROVE_GAS,
           })
         }
       }
@@ -417,7 +627,12 @@ export function ArcCreateForm({
           quote: quoteToken,
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
-          split: feeSplit,
+          split: splitForCreate,
+          launchVirtualQuote: rwaQuote
+            ? defaultRwaVirtualQuoteRaw(rwaQuote, {
+                spotUsd: spotUsd ? await refreshSpotPx(true) : undefined,
+              })
+            : undefined,
         })
         hash = await writeContractAsync({
           address: call.address,
@@ -472,7 +687,12 @@ export function ArcCreateForm({
           quote: quoteToken,
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
-          split: feeSplit,
+          split: splitForCreate,
+          launchVirtualQuote: rwaQuote
+            ? defaultRwaVirtualQuoteRaw(rwaQuote, {
+                spotUsd: spotUsd ? await refreshSpotPx(true) : undefined,
+              })
+            : undefined,
         })
         hash = await writeContractAsync({
           address: call.address,
@@ -495,7 +715,7 @@ export function ArcCreateForm({
           quote: quoteToken,
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
-          split: feeSplit,
+          split: splitForCreate,
         })
         hash = await writeContractAsync({
           address: call.address,
@@ -655,10 +875,61 @@ export function ArcCreateForm({
       ? `${rewardsWallet.trim().slice(0, 6)}…${rewardsWallet.trim().slice(-4)}`
       : 'Your wallet'
   const feeUsd = v4Live ? 0 : Number(arcCreationFeeWeiFor(address)) / 1e18
-  const buyUsd = buyAtLaunch ? Number(firstBuy) || 0 : 0
-  const payUsd = feeUsd + buyUsd
-  const walletUsd =
-    usdcQ.data != null ? Number(formatUnits(usdcQ.data, 6)) : null
+  const buyAmt = buyAtLaunch ? Number(firstBuy) || 0 : 0
+  const spotApproxLabel = spotUsd ? formatSpotQuoteApprox(buyAmt, spotPx) : null
+  const virtualQuoteRaw = rwaQuote
+    ? defaultRwaVirtualQuoteRaw(rwaQuote, { spotUsd: spotPx })
+    : EVE_V4_DEFAULT_VIRTUAL_QUOTE
+  const usdPerQuote = spotUsd ? (spotPx != null && spotPx > 0 ? spotPx : 0) : usdInput ? 1 : 0
+  const listedMcUsd = instantListedMcUsd({
+    virtualQuoteRaw,
+    quoteDecimals: quoteDecimalsLive,
+    usdPerQuote,
+  })
+  let firstBuyTokens = 0
+  if (buyAtLaunch && buyAmt > 0 && !(spotUsd && !(spotPx != null && spotPx > 0))) {
+    try {
+      const quoteHuman = spotUsd && spotPx
+        ? usdToQuoteHuman(buyAmt, spotPx, quoteDecimalsLive)
+        : firstBuy
+      const quoteInRaw = parseArcQuote(quoteHuman, quoteDecimalsLive)
+      firstBuyTokens = estimateInstantFirstBuyTokens({
+        quoteInRaw,
+        virtualQuoteRaw,
+        tokenDecimals: 18,
+        feeBps: v4Ui ? feeSplit.feeBps : 100,
+      })
+    } catch {
+      firstBuyTokens = 0
+    }
+  }
+  const ticker = (symbol || '').trim().toUpperCase() || 'tokens'
+  const firstBuyTokensLabel =
+    firstBuyTokens > 0 ? `~${fmtCompact(firstBuyTokens)} ${ticker === 'tokens' ? 'tokens' : `$${ticker}`}` : null
+  const firstBuyLabel = usdInput
+    ? spotUsd && spotApproxLabel
+      ? `$${buyAmt.toFixed(2)} (≈ ${spotApproxLabel} ${quoteSymbol})`
+      : `$${buyAmt.toFixed(2)}`
+    : `${buyAmt} ${quoteSymbol}`
+  const payLabel = usdInput
+    ? spotUsd && spotApproxLabel
+      ? feeUsd > 0
+        ? `$${feeUsd.toFixed(2)} + $${buyAmt.toFixed(2)} (≈ ${spotApproxLabel} ${quoteSymbol})`
+        : `$${buyAmt.toFixed(2)} (≈ ${spotApproxLabel} ${quoteSymbol})`
+      : `$${(feeUsd + buyAmt).toFixed(2)}`
+    : feeUsd > 0
+      ? `$${feeUsd.toFixed(2)} + ${buyAmt} ${quoteSymbol}`
+      : `${buyAmt} ${quoteSymbol}`
+  const walletLabel =
+    !isConnected
+      ? 'Not connected'
+      : quoteBalQ.data == null
+        ? quoteBalQ.isPending
+          ? '…'
+          : '—'
+        : quoteId === 'usdc'
+          ? fmtUsd(Number(formatUnits(quoteBalQ.data, quoteDecimalsLive)))
+          : `${formatUnits(quoteBalQ.data, quoteDecimalsLive)} ${quoteSymbol}`
   const previewToken: PoolToken = {
     id: 'preview',
     poolId: '',
@@ -675,7 +946,7 @@ export function ArcCreateForm({
     creatorShort: '',
     creatorFull: address || '',
     rewardsHandle: handleMode && handleNorm ? handleNorm : undefined,
-    currentPrice: 0,
+    currentPrice: listedMcUsd > 0 ? listedMcUsd / 1_000_000_000 : 0,
     realSuiRaised: 0,
     threshold: 0,
     progress: 100,
@@ -683,7 +954,7 @@ export function ArcCreateForm({
     volume1h: 0,
     priceChange24h: 0,
     age: '0s',
-    marketCap: buyUsd,
+    marketCap: listedMcUsd,
     totalSupply: 1_000_000_000,
     bondingProgress: 100,
     createdAt: Date.now(),
@@ -721,7 +992,7 @@ export function ArcCreateForm({
   }
 
   const typePicker = (
-    <div className={compact ? 'hidden' : ''}>
+    <div>
       <div className="mb-2 text-xs text-t3">Type</div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       {(v4Ui ? LAUNCH_TYPES_V4 : LAUNCH_TYPES).map((lt) => (
@@ -745,32 +1016,20 @@ export function ArcCreateForm({
           }
         />
       ))}
-      {liveRwas.map((a) => (
-        <TypeCard
-          key={a.id}
-          active={launchType === 'instant' && quoteId === a.id}
-          title={`${a.symbol} paired`}
-          body={
-            a.permissioned
-              ? `Instant TOKEN/${a.symbol}. Permissioned — wallet must be allowlisted.`
-              : v4Ui
-                ? `Same Instant mint + LP lock, quoted in ${a.symbol}. Optional holder basket.`
-                : `Same Instant mint + LP lock, quoted in ${a.symbol}.`
-          }
-          onClick={() => {
+      {selectableRwas.length > 0 || soonRwas.length > 0 ? (
+        <RwaPairedPicker
+          open={selectableRwas}
+          gated={soonRwas}
+          active={launchType === 'instant' && quoteId !== 'usdc' && Boolean(selectableRwas.some((a) => a.id === quoteId))}
+          selectedId={selectableRwas.some((a) => a.id === quoteId) ? quoteId : null}
+          v4Ui={v4Ui}
+          disabled={!launchesLive}
+          onSelect={(id) => {
             setLaunchType('instant')
-            setQuoteId(a.id)
+            setQuoteId(id)
             setBundleOn(false)
             setFeeSplit(foldHoldersIntoCreator(feeSplit))
           }}
-        />
-      ))}
-      {pendingRwas.length > 0 && liveRwas.length === 0 ? (
-        <TypeCard
-          soon
-          disabled
-          title="RWA paired tokens"
-          body={`${pendingRwas.map((a) => a.symbol).join(' · ')} — waiting on issuer + Instant factory.`}
         />
       ) : null}
       </div>
@@ -784,6 +1043,17 @@ export function ArcCreateForm({
         ) : null}
 
         {typePicker}
+
+        {rwaQuote?.permissioned ? (
+          <p className="mt-2 mb-0 text-[12px] text-amber-200/90 leading-snug">
+            {quoteSymbol} is permissioned — Instant create works when the issuer has allowlisted the factory.
+            {spotUsd
+              ? `Enter first buy in USDC; it converts to ${quoteSymbol} at the live USD spot.`
+              : usdInput
+                ? `First buy is in ${quoteSymbol} (≈ USD).`
+                : `First buy is in ${quoteSymbol} units, not USD.`}
+          </p>
+        ) : null}
 
         {v4Ui && launchesLive ? (
           <div className="mt-3 space-y-3">
@@ -1026,14 +1296,16 @@ export function ArcCreateForm({
               <div className="flex flex-col gap-0.5 pr-5">
                 <span className="text-[15px] font-semibold tracking-tightish">Buy at launch</span>
                 <span className="text-[13px] text-t3 leading-snug">
-                  Bundle a {quoteSymbol} first buy into the create transaction.
+                  {spotUsd
+                    ? `Bundle a first buy into create — enter USDC, settle in ${quoteSymbol}.`
+                    : `Bundle a ${quoteSymbol} first buy into the create transaction.`}
                 </span>
               </div>
               <Toggle on={buyAtLaunch} onToggle={() => setBuyAtLaunch((v) => !v)} />
             </div>
 
             {buyAtLaunch && (
-              <Field label={`Buy at launch · ${quoteSymbol}`}>
+              <Field label={spotUsd || usdInput ? (spotUsd ? 'Buy at launch · USDC' : `Buy at launch · ${quoteSymbol}`) : `Buy at launch · ${quoteSymbol}`}>
                 <div className="flex items-center gap-3">
                   <input
                     value={firstBuy}
@@ -1042,18 +1314,61 @@ export function ArcCreateForm({
                     className={FIELD}
                   />
                   <div className="flex gap-1.5 shrink-0">
-                    {FIRST_BUY_PRESETS.map((p) => (
+                    {firstBuyPresets(quoteId, rwaQuote).map((p) => (
                       <button
                         key={p}
                         type="button"
                         onClick={() => setFirstBuy(p)}
                         className="px-3 py-1.5 rounded-full bg-s1 border border-hair text-[13px] font-semibold tabular-nums text-t2 hover:text-white"
                       >
-                        ${p === '1000' ? '1K' : p}
+                        {usdInput
+                          ? p === '1000'
+                            ? '$1K'
+                            : `$${p}`
+                          : p}
                       </button>
                     ))}
                   </div>
                 </div>
+                {firstBuyTokensLabel ? (
+                  <p className="mt-2 mb-0 text-[13px] font-medium tabular-nums text-white">
+                    You receive (est.) {firstBuyTokensLabel}
+                  </p>
+                ) : spotUsd && buyAmt > 0 && spotPxStatus !== 'ready' ? (
+                  <p className="mt-2 mb-0 text-[12px] text-t3">You receive (est.) …</p>
+                ) : null}
+                <p className="mt-2 mb-0 text-[12px] text-t3 leading-snug">
+                  {spotUsd ? (
+                    <>
+                      Amount is in USDC (dollars), then converted to {quoteSymbol} at the live USD spot for the on-chain buy.
+                      {spotPxStatus === 'ready' && spotPx != null
+                        ? ` Spot ≈ $${spotPx.toLocaleString(undefined, { maximumFractionDigits: 0 })}.`
+                        : spotPxStatus === 'loading'
+                          ? ` Fetching ${spotPair || 'USD'}…`
+                          : spotPxStatus === 'error'
+                            ? ` ${spotPair || 'USD'} unavailable — retry before creating.`
+                            : ''}
+                      {spotApproxLabel ? ` ≈ ${spotApproxLabel} ${quoteSymbol}.` : ''}
+                      {' '}We swap your USDC to {quoteSymbol}, then the factory pulls {quoteSymbol} for the first buy.
+                      {usdcBalQ.data != null
+                        ? ` Wallet: ${Number(formatUnits(usdcBalQ.data, 6)).toFixed(2)} USDC`
+                        : ''}
+                      {quoteBalQ.data != null
+                        ? `${usdcBalQ.data != null ? ',' : ' Wallet:'} ${formatUnits(quoteBalQ.data, quoteDecimalsLive)} ${quoteSymbol}.`
+                        : usdcBalQ.data != null
+                          ? '.'
+                          : ''}
+                    </>
+                  ) : (
+                    <>
+                      Amount is in {quoteSymbol}
+                      {quoteId === 'usdc' ? ' (USD)' : ', not USD'}.
+                      {quoteBalQ.data != null
+                        ? ` Wallet: ${formatUnits(quoteBalQ.data, quoteDecimalsLive)} ${quoteSymbol}.`
+                        : ''}
+                    </>
+                  )}
+                </p>
               </Field>
             )}
 
@@ -1163,7 +1478,7 @@ export function ArcCreateForm({
       }
       onClick={onCta}
       className={`w-full h-12 rounded-full text-[15px] font-semibold tracking-tightish disabled:opacity-40 flex items-center justify-center gap-2 ${
-        isConnected && wrongChain ? 'bg-amber-500 text-black' : 'bg-lime text-white hover:bg-lime-2'
+        isConnected && wrongChain ? 'bg-amber-500 text-black' : 'bg-lime text-accent-fg hover:bg-lime-2'
       }`}
     >
       {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : step === 'done' ? <CheckCircle className="w-4 h-4" /> : null}
@@ -1176,7 +1491,7 @@ export function ArcCreateForm({
       <div>
         <h1 className="m-0 text-[30px] font-semibold tracking-[-0.03em]">Launch this</h1>
         <p className="mt-2.5 mb-5 text-[15px] text-t2 leading-relaxed">
-          Instant TOKEN/USDC. 1B supply,{' '}
+          Instant TOKEN/{quoteSymbol}. 1B supply,{' '}
           {v4Live
             ? 'LP locked for 365 days, then platform-reclaimable.'
             : 'LP locked.'}{' '}
@@ -1205,20 +1520,10 @@ export function ArcCreateForm({
             <TokenCard token={previewToken} preview />
             <div className="rounded-2xl bg-s1 p-5 text-sm border border-hair">
               <FeeRow k="Creation fee" v={`$${feeUsd.toFixed(2)}`} />
-              <FeeRow k="First buy" v={`$${buyUsd.toFixed(2)}`} />
-              <FeeRow k="You pay" v={`$${payUsd.toFixed(2)}`} />
-              <FeeRow
-                k="Wallet"
-                v={
-                  !isConnected
-                    ? 'Not connected'
-                    : walletUsd == null
-                      ? usdcQ.isPending
-                        ? '…'
-                        : '—'
-                      : fmtUsd(walletUsd)
-                }
-              />
+              <FeeRow k="First buy" v={firstBuyLabel} />
+              {firstBuyTokensLabel ? <FeeRow k="You receive (est.)" v={firstBuyTokensLabel} /> : null}
+              <FeeRow k="You pay" v={payLabel} />
+              <FeeRow k="Wallet" v={walletLabel} />
               <div className="mt-4">{cta}</div>
               <p className="mt-3 mb-0 text-xs text-t3 leading-relaxed">
                 Gas on Arc · launch-token LP fees auto-burn · pair {quoteSymbol}
@@ -1245,6 +1550,181 @@ function FeeRow({ k, v }: { k: string; v: string }) {
     <div className="flex items-center justify-between py-1.5 text-sm">
       <span className="text-t2">{k}</span>
       <span className="tabular-nums">{v}</span>
+    </div>
+  )
+}
+
+function rwaMarkSrc(id: string): string | null {
+  const k = id.toLowerCase()
+  if (k === 'usyc') return '/marks/usyc.png'
+  if (k === 'cirbtc') return '/marks/cirbtc.svg'
+  if (k === 'xaum') return '/marks/xaum.svg'
+  if (k === 'buidl') return '/marks/buidl.png'
+  if (k === 'crcl') return '/marks/crcl.svg'
+  return null
+}
+
+function RwaPairedPicker({
+  open: openAssets,
+  gated,
+  active,
+  selectedId,
+  v4Ui,
+  disabled,
+  onSelect,
+}: {
+  open: ReturnType<typeof liveRwaQuoteAssets>
+  gated: ReturnType<typeof pendingRwaQuoteAssets>
+  active?: boolean
+  selectedId: string | null
+  v4Ui: boolean
+  disabled?: boolean
+  onSelect: (id: string) => void
+}) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const selected = openAssets.find((a) => a.id === selectedId) || null
+  const canPick = openAssets.length > 0 && !disabled
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [menuOpen])
+
+  const gatedLabel = gated.map((a) => a.symbol).join(' · ')
+  const body = selected
+    ? selected.permissioned
+      ? `Quoted in ${selected.symbol} (permissioned). First buy is in ${selected.symbol}, not USD.`
+      : v4Ui
+        ? `Same Instant mint + LP lock, quoted in ${selected.symbol}. Optional holder basket.`
+        : `Same Instant mint + LP lock, quoted in ${selected.symbol}.`
+    : canPick
+      ? gatedLabel
+        ? `Pick a quote. ${gatedLabel} stay Soon until the issuer publishes an Arc address.`
+        : 'Pick a quote.'
+      : gatedLabel
+        ? `${gatedLabel} — waiting on issuer address + Instant factory.`
+        : 'Waiting on issuer + Instant factory.'
+
+  const cls = `relative rounded-2xl bg-s1 p-4 text-left border transition-colors duration-150 sm:col-span-2 ${
+    !canPick
+      ? 'border-hair opacity-60'
+      : active
+        ? 'border-lime-line'
+        : 'border-hair hover:border-lime-line'
+  }`
+
+  return (
+    <div className={cls} ref={rootRef}>
+      {!canPick ? (
+        <span className="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide text-t3 bg-white/5">
+          Soon
+        </span>
+      ) : null}
+      <div className="text-sm font-medium">RWA paired</div>
+      <p className="mt-1 mb-3 text-xs leading-relaxed text-t2">{body}</p>
+      {canPick ? (
+        <div className="relative">
+          <button
+            type="button"
+            aria-expanded={menuOpen}
+            aria-haspopup="listbox"
+            onClick={() => setMenuOpen((v) => !v)}
+            className="w-full h-11 rounded-2xl bg-s2 px-3 text-sm text-white outline-none border border-hair focus:border-lime-line flex items-center gap-2.5"
+          >
+            {selected && rwaMarkSrc(selected.id) ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={rwaMarkSrc(selected.id)!}
+                alt=""
+                className="size-5 rounded-full object-cover bg-white/5 shrink-0"
+              />
+            ) : (
+              <span className="size-5 rounded-full bg-white/10 shrink-0" />
+            )}
+            <span className="flex-1 text-left font-medium">
+              {selected ? selected.symbol : 'Select RWA quote…'}
+            </span>
+            <ChevronDown className={`size-4 text-t3 shrink-0 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {menuOpen ? (
+            <ul
+              role="listbox"
+              className="absolute z-20 mt-1.5 w-full rounded-2xl border border-hair bg-s1 p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
+            >
+              {openAssets.map((a) => {
+                const on = selected?.id === a.id
+                const mark = rwaMarkSrc(a.id)
+                return (
+                  <li key={a.id} role="option" aria-selected={on}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelect(a.id)
+                        setMenuOpen(false)
+                      }}
+                      className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 h-10 text-left text-sm transition-colors ${
+                        on ? 'bg-lime/15 text-white' : 'text-t1 hover:bg-white/[0.04]'
+                      }`}
+                    >
+                      {mark ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={mark} alt="" className="size-5 rounded-full object-cover shrink-0" />
+                      ) : (
+                        <span className="size-5 rounded-full bg-white/10 shrink-0" />
+                      )}
+                      <span className="font-medium">{a.symbol}</span>
+                      {a.permissioned ? (
+                        <span className="ml-auto text-[10px] uppercase tracking-wide text-amber-200/80 font-semibold">Gated</span>
+                      ) : null}
+                    </button>
+                  </li>
+                )
+              })}
+              {gated.map((a) => {
+                const mark = rwaMarkSrc(a.id)
+                return (
+                  <li key={`gated-${a.id}`} role="option" aria-disabled="true">
+                    <div className="w-full flex items-center gap-2.5 rounded-xl px-2.5 h-10 text-left text-sm opacity-45 cursor-not-allowed">
+                      {mark ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={mark} alt="" className="size-5 rounded-full object-cover shrink-0" />
+                      ) : (
+                        <span className="size-5 rounded-full bg-white/10 shrink-0" />
+                      )}
+                      <span className="font-medium">{a.symbol}</span>
+                      <span className="ml-auto text-[10px] uppercase tracking-wide text-t3 font-semibold">Soon</span>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : null}
+        </div>
+      ) : gated.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {gated.map((a) => {
+            const mark = rwaMarkSrc(a.id)
+            return (
+              <span
+                key={a.id}
+                className="inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold border border-hair text-t3 bg-white/[0.03]"
+              >
+                {mark ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={mark} alt="" className="size-4 rounded-full object-cover" />
+                ) : null}
+                {a.symbol}
+                <span className="text-[10px] uppercase tracking-wide">Soon</span>
+              </span>
+            )
+          })}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1317,7 +1797,9 @@ function stepLabel(step: Step): string {
     case 'vault':
       return 'Creating handle vault…'
     case 'approving':
-      return 'Approve USDC…'
+      return 'Approve token…'
+    case 'swapping':
+      return `Swapping USDC → quote…`
     case 'creating':
       return 'Confirm in wallet…'
     case 'confirming':

@@ -1,5 +1,6 @@
 /**
- * Arc Instant trade tape — Uniswap V3 Swap events on TOKEN/USDC pools.
+ * Arc Instant trade tape — Uniswap V3 Swap events on TOKEN/USDC pools, plus Uniswap V4
+ * PoolManager Swap events (bytes32 pool id) for Instant V4 tokens.
  * Arc RPCs often cap eth_getLogs to 10_000 blocks — scan newest→oldest in chunks.
  *
  * Persisted to Vercel KV (same arcfun: namespace as lib/arc-followers.ts / arc-token-meta.ts) so a
@@ -12,7 +13,7 @@
  */
 import { after } from 'next/server'
 import { kv } from '@vercel/kv'
-import { createPublicClient, erc20Abi, formatUnits, http, parseAbiItem, type Address, type Log } from 'viem'
+import { createPublicClient, erc20Abi, formatUnits, http, parseAbiItem, type Address, type Hex, type Log } from 'viem'
 import {
   ARC,
   arcChain,
@@ -22,6 +23,7 @@ import {
   isArcRpcInfraError,
 } from './contracts-arc'
 import { fetchArcPoolToken } from './arc-instant-tokens'
+import { readEveV4Pool } from './arc-v4-swap'
 import { getToken } from './arc-indexer/store'
 import { coalesceAsync } from './coalesce'
 import {
@@ -32,7 +34,7 @@ import {
 } from './evm-trades'
 import { summarizeRpcError } from './rpc-error'
 import { staleTapeRewindFrom, shouldPersistScanCursor, tapeIsStaleTs } from './arc-trades-cursor'
-import { quoteDecimalsForToken, quoteTokenForFactory } from './arc-rwa-assets'
+import { quoteDecimalsForToken, quoteTokenForFactory, quoteUsdMultiplier } from './arc-rwa-assets'
 import { recordTrades1m } from './arc-candle-store'
 import { KV_LIST_CHUNK, cappedNewest, chunkArray, tradeTapePageRange } from './arc-kv-bounded'
 
@@ -64,6 +66,12 @@ const V3_SWAP = parseAbiItem(
   'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)',
 )
 type V3SwapLog = Log<bigint, number, false, typeof V3_SWAP, true>
+
+/** Uniswap v4 PoolManager Swap — pool id is indexed bytes32; amounts are int128. */
+const V4_SWAP = parseAbiItem(
+  'event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)',
+)
+type V4SwapLog = Log<bigint, number, false, typeof V4_SWAP, true>
 
 const CHUNK = 50n
 /**
@@ -135,42 +143,117 @@ const SYNC_FRESH_MS = 6_000
 const lastSyncedAt = new Map<string, number>()
 
 /**
- * Resolve the Uni V3 pool for any Arc pool type (Instant, Reflection, or graduated bonding-curve)
- * via the shared fetchArcPoolToken lookup instead of hardcoding the Instant factory — the old
- * Instant-only resolvePool silently returned "no trades" for Reflection/curve tokens even when
- * they had a live, tradeable pool.
+ * Resolve the Uni V3 pool (or V4 PoolManager + poolId) for any Arc pool type (Instant,
+ * Instant V4, Reflection, or graduated bonding-curve) via the shared fetchArcPoolToken lookup
+ * instead of hardcoding the Instant factory — the old Instant-only resolvePool silently returned
+ * "no trades" for Reflection/curve tokens even when they had a live, tradeable pool.
  */
 /** Exported for scripts/backfill-candles.ts — the deep, one-time historical scan reuses the same
  *  pool-orientation resolution and chunked log scan as the live sync path so backfilled candles
  *  can never disagree with what a live cycle would have computed for the same blocks. */
-export async function resolvePool(
-  token: Address,
-): Promise<{ pool: Address; tokenIs0: boolean; tokenDecimals: number; quoteDecimals: number } | null> {
+export type ResolvedPool = {
+  pool: Address
+  tokenIs0: boolean
+  tokenDecimals: number
+  quoteDecimals: number
+  venue: 'v3' | 'v4'
+  /** Uniswap v4 PoolManager pool id (bytes32). Required when venue is `v4`. */
+  poolId?: Hex
+  /** USD per 1 whole quote token (1 for USDC, BTC-USD for cirBTC). */
+  quoteUsdMult: number
+  createdBlock?: bigint
+}
+
+export async function resolvePool(token: Address): Promise<ResolvedPool | null> {
   try {
     let pool: Address | undefined
     let factory = ''
     // KV first — no eth_call. Infura quota on getPool/token0 used to make
     // resolvePool return null and skip the whole tape sync.
+    let indexedQuote = ''
+    let dexVenue: 'v3' | 'v4' | undefined
+    let poolId: Hex | undefined
+    let createdBlock: bigint | undefined
     try {
       const row = await getToken(token)
       if (row?.pool && row.pool !== ZERO) pool = row.pool as Address
       factory = row?.factory || ''
+      indexedQuote = (row?.quote || '').toLowerCase()
+      if (row?.dexVenue === 'v4' || row?.dexVenue === 'v3') dexVenue = row.dexVenue
+      if (row?.poolId) poolId = row.poolId
+      if (row?.createdBlock && row.createdBlock > 0) createdBlock = BigInt(row.createdBlock)
     } catch {
       /* fall through to on-chain */
     }
-    if (!pool) {
-      const t = await fetchArcPoolToken(token)
-      pool = t?.instantMeta?.uniPool as Address | undefined
-      factory = t?.moonbagsPackageId || factory
+
+    let live: Awaited<ReturnType<typeof fetchArcPoolToken>> | null = null
+    // V4 must not go through fetchArcPoolToken — that walks V3 InstantQuoteTokenCreated
+    // getLogs (attachLaunchCreatedAt) and times out the tape/ohlcv on a fresh launch.
+    const needsV4Live = dexVenue === 'v4' ? !poolId || !indexedQuote : !pool && !poolId
+    if (needsV4Live || (!pool && !poolId)) {
+      const v4 = await readEveV4Pool(token, arcPublicClient())
+      if (v4) {
+        dexVenue = 'v4'
+        poolId = v4.poolId
+        indexedQuote = v4.quote.toLowerCase()
+      } else if (!pool) {
+        live = await fetchArcPoolToken(token)
+        if (live?.dexVenue === 'v4' || live?.instantMeta?.poolId) {
+          dexVenue = 'v4'
+          if (!poolId && live.instantMeta?.poolId) poolId = live.instantMeta.poolId as Hex
+          if (!factory && live.moonbagsPackageId) factory = live.moonbagsPackageId
+          if (!indexedQuote && live.instantMeta?.quoteToken) {
+            indexedQuote = live.instantMeta.quoteToken.toLowerCase()
+          }
+        } else {
+          pool = live?.instantMeta?.uniPool as Address | undefined
+          factory = live?.moonbagsPackageId || factory
+          if (!indexedQuote && live?.instantMeta?.quoteToken) {
+            indexedQuote = live.instantMeta.quoteToken.toLowerCase()
+          }
+        }
+      }
     }
+
+    if (dexVenue === 'v4' || poolId) {
+      if (!poolId) return null
+      const quote = (
+        indexedQuote ||
+        quoteTokenForFactory(factory) ||
+        ARC.USDC_ERC20 ||
+        ARC.USDC
+      ).toLowerCase()
+      const tokenIs0 = token.toLowerCase() < quote
+      const quoteUsdMult = await quoteUsdMultiplier(quote)
+      return {
+        pool: ARC.POOL_MANAGER,
+        poolId,
+        venue: 'v4',
+        tokenIs0,
+        tokenDecimals: await tokenDecimalsOf(token),
+        quoteDecimals: quoteDecimalsForToken(quote),
+        quoteUsdMult: quoteUsdMult > 0 ? quoteUsdMult : 1,
+        createdBlock,
+      }
+    }
+
     if (!pool || pool === ZERO) return null
-    const quote = (quoteTokenForFactory(factory) || ARC.USDC_ERC20 || ARC.USDC).toLowerCase()
+    const quote = (
+      indexedQuote ||
+      quoteTokenForFactory(factory) ||
+      ARC.USDC_ERC20 ||
+      ARC.USDC
+    ).toLowerCase()
     const tokenIs0 = token.toLowerCase() < quote
+    const quoteUsdMult = await quoteUsdMultiplier(quote)
     return {
       pool,
       tokenIs0,
       tokenDecimals: await tokenDecimalsOf(token),
       quoteDecimals: quoteDecimalsForToken(quote),
+      venue: 'v3',
+      quoteUsdMult: quoteUsdMult > 0 ? quoteUsdMult : 1,
+      createdBlock,
     }
   } catch {
     return null
@@ -262,7 +345,46 @@ async function getSwapLogs(pool: Address, fromBlock: bigint, toBlock: bigint): P
   throw lastErr
 }
 
+/** V4 PoolManager Swap logs filtered by pool id — same multi-URL resilience as getSwapLogs. */
+async function getV4SwapLogs(poolId: Hex, fromBlock: bigint, toBlock: bigint): Promise<V4SwapLog[]> {
+  const urls = arcLogsRpcUrls()
+  let lastEmpty: V4SwapLog[] = []
+  let gotSuccess = false
+  let lastErr: unknown
+  for (let i = 0; i < urls.length; i++) {
+    const client = createPublicClient({
+      chain: arcChain,
+      transport: http(urls[i], { retryCount: 0, timeout: 4_000 }),
+    })
+    try {
+      const logs = (await client.getLogs({
+        address: ARC.POOL_MANAGER,
+        event: V4_SWAP,
+        args: { id: poolId },
+        fromBlock,
+        toBlock,
+      })) as V4SwapLog[]
+      if (logs.length > 0) return logs
+      lastEmpty = logs
+      gotSuccess = true
+      continue
+    } catch (e) {
+      lastErr = e
+      if (!isArcRpcInfraError(e) && i === urls.length - 1) throw e
+    }
+  }
+  if (gotSuccess) return lastEmpty
+  throw lastErr
+}
+
 /** Exported for scripts/backfill-candles.ts — see resolvePool's export note above. */
+export type ScanSwapOpts = {
+  deadline?: number
+  venue?: 'v3' | 'v4'
+  poolId?: Hex
+  quoteUsdMult?: number
+}
+
 export async function scanSwapRange(
   client: ReturnType<typeof arcLogsClient>,
   pool: Address,
@@ -271,8 +393,10 @@ export async function scanSwapRange(
   fromBlock: bigint,
   toBlock: bigint,
   quoteDecimals = 6,
-  opts?: { deadline?: number },
+  opts?: ScanSwapOpts,
 ): Promise<{ trades: EvmTrade[]; scannedTo: bigint; budgetHit: boolean }> {
+  const venue = opts?.venue ?? 'v3'
+  const poolId = opts?.poolId
   const out: EvmTrade[] = []
   let cursor = fromBlock
   let scannedTo = fromBlock > 0n ? fromBlock - 1n : 0n
@@ -285,9 +409,14 @@ export async function scanSwapRange(
       break
     }
     const chunkEnd = cursor + CHUNK - 1n > toBlock ? toBlock : cursor + CHUNK - 1n
-    let logs: V3SwapLog[] = []
+    let logs: Array<V3SwapLog | V4SwapLog> = []
     try {
-      logs = await getSwapLogs(pool, cursor, chunkEnd)
+      if (venue === 'v4') {
+        if (!poolId) throw new Error('v4 scan requires poolId')
+        logs = await getV4SwapLogs(poolId, cursor, chunkEnd)
+      } else {
+        logs = await getSwapLogs(pool, cursor, chunkEnd)
+      }
     } catch (e) {
       console.warn('[arc-trades] getLogs', summarizeRpcError(e))
       // Do not advance past a failed chunk — persisting `to` used to skip the gap
@@ -310,8 +439,9 @@ export async function scanSwapRange(
       )
 
       for (const log of logs) {
-        const a0 = log.args.amount0 as bigint
-        const a1 = log.args.amount1 as bigint
+        // V4 amounts are int128 — coerce via BigInt() so viem number/bigint variants both work.
+        const a0 = BigInt(log.args.amount0 as bigint | number | string)
+        const a1 = BigInt(log.args.amount1 as bigint | number | string)
         // Token positive amount0/1 means pool received token → sell; negative → buy
         const tokenDelta = tokenIs0 ? a0 : a1
         const usdcDelta = tokenIs0 ? a1 : a0
@@ -322,9 +452,14 @@ export async function scanSwapRange(
 
         const tokenHuman = Number(formatUnits(tokenAmt, tokenDecimals))
         const usdcHuman = Number(formatUnits(usdcAmt, quoteDecimals))
-        const price = tokenHuman > 0 ? usdcHuman / tokenHuman : 0
+        const usdMult = opts?.quoteUsdMult && opts.quoteUsdMult > 0 ? opts.quoteUsdMult : 1
+        const price = tokenHuman > 0 ? (usdcHuman / tokenHuman) * usdMult : 0
+        const valueUsd = usdcHuman * usdMult
         const ts = tsMap.get((log.blockNumber ?? 0n).toString()) ?? 0
-        const trader = (log.args.recipient as Address) || (log.args.sender as Address) || ZERO
+        // V4 Swap has no recipient — use sender as trader.
+        const args = log.args as { sender?: Address; recipient?: Address }
+        const trader =
+          venue === 'v4' ? args.sender || ZERO : args.recipient || args.sender || ZERO
 
         out.push({
           txHash: log.transactionHash! as `0x${string}`,
@@ -335,7 +470,7 @@ export async function scanSwapRange(
           trader,
           tokenAmount: tokenHuman,
           nativeAmount: usdcHuman,
-          valueUsd: usdcHuman, // USDC ≈ $1
+          valueUsd,
           price,
           priceUsd: price,
         })
@@ -366,6 +501,7 @@ export async function sumSwapUsd(
     fromBlock,
     toBlock,
     orient.quoteDecimals,
+    { venue: orient.venue, poolId: orient.poolId, quoteUsdMult: orient.quoteUsdMult },
   )
   let usd = 0
   for (const t of trades) usd += t.valueUsd || 0
@@ -421,9 +557,14 @@ export async function fetchOnChain24hSwaps(token: Address): Promise<EvmTrade[] |
   let cursor = fromBlock
   while (cursor <= head) {
     const chunkEnd = cursor + CHUNK - 1n > head ? head : cursor + CHUNK - 1n
-    let logs: V3SwapLog[]
+    let logs: Array<V3SwapLog | V4SwapLog>
     try {
-      logs = await getSwapLogs(orient.pool, cursor, chunkEnd)
+      if (orient.venue === 'v4') {
+        if (!orient.poolId) return null
+        logs = await getV4SwapLogs(orient.poolId, cursor, chunkEnd)
+      } else {
+        logs = await getSwapLogs(orient.pool, cursor, chunkEnd)
+      }
       anyChunkOk = true
     } catch (e) {
       console.warn('[arc-trades] on-chain window getLogs', summarizeRpcError(e))
@@ -431,8 +572,8 @@ export async function fetchOnChain24hSwaps(token: Address): Promise<EvmTrade[] |
       continue
     }
     for (const log of logs) {
-      const a0 = log.args.amount0 as bigint
-      const a1 = log.args.amount1 as bigint
+      const a0 = BigInt(log.args.amount0 as bigint | number | string)
+      const a1 = BigInt(log.args.amount1 as bigint | number | string)
       const tokenDelta = orient.tokenIs0 ? a0 : a1
       const quoteDelta = orient.tokenIs0 ? a1 : a0
       const tokenAmt = abs(tokenDelta)
@@ -442,17 +583,21 @@ export async function fetchOnChain24hSwaps(token: Address): Promise<EvmTrade[] |
       const ts = Math.round(headTs - Number(head - blk) * blockTimeSec)
       const tokenHuman = Number(formatUnits(tokenAmt, orient.tokenDecimals))
       const quoteHuman = Number(formatUnits(quoteAmt, orient.quoteDecimals))
-      const price = tokenHuman > 0 ? quoteHuman / tokenHuman : 0
+      const usdMult = orient.quoteUsdMult > 0 ? orient.quoteUsdMult : 1
+      const price = tokenHuman > 0 ? (quoteHuman / tokenHuman) * usdMult : 0
+      const args = log.args as { sender?: Address; recipient?: Address }
+      const trader =
+        orient.venue === 'v4' ? args.sender || ZERO : args.recipient || args.sender || ZERO
       out.push({
         txHash: (log.transactionHash ?? ZERO) as `0x${string}`,
         logIndex: Number(log.logIndex ?? 0),
         blockNumber: Number(blk),
         ts,
         isBuy: tokenDelta < 0n,
-        trader: (log.args.recipient as Address) || (log.args.sender as Address) || ZERO,
+        trader,
         tokenAmount: tokenHuman,
         nativeAmount: quoteHuman,
-        valueUsd: quoteHuman, // quote ≈ USD (USDC pools; RWA-quote pools inherit the same approximation as scanSwapRange)
+        valueUsd: quoteHuman * usdMult,
         price,
         priceUsd: price,
       })
@@ -530,11 +675,8 @@ const lastRewindAt = new Map<string, number>()
 async function maybeRewindStaleCursor(
   client: ReturnType<typeof arcLogsClient>,
   key: string,
-  pool: Address,
-  tokenIs0: boolean,
-  tokenDecimals: number,
+  orient: ResolvedPool,
   head: bigint,
-  quoteDecimals = 6,
 ): Promise<void> {
   const prev = lastRewindAt.get(key)
   if (prev != null && Date.now() - prev < 60_000) return
@@ -554,7 +696,17 @@ async function maybeRewindStaleCursor(
   })
   if (from == null) return
   lastRewindAt.set(key, Date.now())
-  const found = await scanSwapRange(client, pool, tokenIs0, tokenDecimals, from, head, quoteDecimals)
+  const { pool, tokenIs0, tokenDecimals, quoteDecimals, venue, poolId, quoteUsdMult } = orient
+  const found = await scanSwapRange(
+    client,
+    pool,
+    tokenIs0,
+    tokenDecimals,
+    from,
+    head,
+    quoteDecimals,
+    { venue, poolId, quoteUsdMult },
+  )
   if (
     shouldPersistScanCursor({
       foundTrades: found.trades.length,
@@ -598,7 +750,7 @@ export async function syncTradesToHead(
     const orient = await resolvePool(token)
     if (!orient) return
     didWork = true
-    const { pool, tokenIs0, tokenDecimals, quoteDecimals } = orient
+    const { pool, tokenIs0, tokenDecimals, quoteDecimals, venue, poolId, quoteUsdMult, createdBlock } = orient
     const client = arcLogsClient()
     const head = await client.getBlockNumber()
 
@@ -621,7 +773,12 @@ export async function syncTradesToHead(
     }
     const stale = tapeIsStaleTs(newestTs)
 
-    const scanOpts = opts?.deadline != null ? { deadline: opts.deadline } : undefined
+    const scanOpts: ScanSwapOpts = {
+      venue,
+      poolId,
+      quoteUsdMult,
+      ...(opts?.deadline != null ? { deadline: opts.deadline } : {}),
+    }
 
     const persistScan = async (
       from: bigint,
@@ -648,17 +805,18 @@ export async function syncTradesToHead(
     }
 
     if (isColdStart) {
-      // First time this store has ever seen this token — scan the FULL DEEP_BACKFILL_BLOCKS
-      // window in one shot, all the way to `head`, not just a CATCHUP_MAX_BLOCKS-bounded slice of
-      // it. This used to seed the cursor 300k back and then only scan 200k forward from there —
-      // which left the most recent 100k blocks (DEEP_BACKFILL_BLOCKS - CATCHUP_MAX_BLOCKS)
-      // completely unscanned on a token's very first view. A brand-new, actively-traded token
-      // (all its history within the last 100k blocks) would show zero trades on its first ever
-      // page load, self-healing only on a second visit once the cursor caught up. One-time cost —
-      // ~34 chunked eth_getLogs calls worst case — is worth paying once per token to never miss
-      // recent activity on a cold view. With LOG_CHUNK=50 that one-shot can be thousands of
-      // RPCs; the indexer passes `deadline` so we yield mid-token instead of burning the cycle.
-      const from = head >= DEEP_BACKFILL_BLOCKS ? head - DEEP_BACKFILL_BLOCKS + 1n : 0n
+      // First time this store has ever seen this token. Prefer the launch block from the
+      // indexer (a 2-minute-old Instant is a handful of 50-block chunks). Falling back to
+      // DEEP_BACKFILL_BLOCKS is thousands of getLogs and times out ohlcv on Vercel — Dexscreener
+      // indexes PoolManager live and does not have this window.
+      const from =
+        createdBlock && createdBlock > 0n && createdBlock <= head
+          ? (createdBlock > 32n ? createdBlock - 32n : 0n)
+          : venue === 'v4' && head > 8_000n
+            ? head - 8_000n
+            : head >= DEEP_BACKFILL_BLOCKS
+              ? head - DEEP_BACKFILL_BLOCKS + 1n
+              : 0n
       const found = await scanSwapRange(
         client, pool, tokenIs0, tokenDecimals, from, head, quoteDecimals, scanOpts,
       )
@@ -678,7 +836,7 @@ export async function syncTradesToHead(
     // Rewind from the last persisted fill, not a fixed 12k-block window.
     // Skip when the cycle budget already fired — rewind is another multi-chunk scan.
     if (!budgetHit && (opts?.deadline == null || Date.now() < opts.deadline)) {
-      await maybeRewindStaleCursor(client, key, pool, tokenIs0, tokenDecimals, head, quoteDecimals)
+      await maybeRewindStaleCursor(client, key, orient, head)
     } else if (budgetHit) {
       reachedHead = false
     }

@@ -13,10 +13,10 @@
  *
  *   NEXT_PUBLIC_ARC_RWA_ASSETS=[{"id":"usyc","symbol":"USYC","address":"0x…","factory":"0x…","decimals":6}]
  *
- * Create is ready only when address + factory are both set. Token-only (Circle
- * published USYC / a tokenized CRCL share, we have not deployed Instant against
- * it) stays Soon.
- * Permissioned MMFs still need Circle to allowlist the factory / NFPM / locker.
+ * Create is ready only when address + factory are both set. Mainnet USYC + cirBTC + XAUM
+ * token CAs are baked in; Instant-create against the shared RwaInstantV4Factory
+ * by default (Arc 2026-09-16 live assets post; XAUM 2026-09-18). BUIDL / JAAA / JTRSY stay Soon until
+ * issuers publish Arc addresses. Permissioned MMFs still need Circle to allowlist the factory / NFPM / locker.
  */
 import { isAddress, type Address } from 'viem'
 
@@ -24,9 +24,7 @@ const ZERO = '0x0000000000000000000000000000000000000000'
 const ARC_CHAIN_ID = Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID) || 5042
 const ARC_IS_TESTNET = ARC_CHAIN_ID === 5042002
 
-/** Shared RwaInstantV4Factory. Quote is per-create; one factory serves USYC/BUIDL/CRCL.
- *  Redeployed 2026-09-16 onto a fixed EveFeeHook — see ARC_INSTANT_V4_RWA_FACTORY_PREV
- *  in lib/contracts-arc.ts for the address this replaced. */
+/** Shared RwaInstantV4Factory. Quote is per-create; one factory serves USYC/BUIDL/CRCL. */
 const V4_RWA_FACTORY_DEFAULT = '0x3489E76510238ef57Ee9d18005a6Fb110f17912D'
 
 /** Official Circle USYC on Arc Testnet (docs.arc.io / developers.circle.com). */
@@ -37,7 +35,33 @@ const USYC_TESTNET = {
   teller: '0x9fdF14c5B14173D74C08Af27AebFf39240dC105A',
 } as const
 
+/** Official Circle USYC on Arc Mainnet (developers.circle.com / docs.arc.io, 2026-09-16). */
+const USYC_MAINNET = {
+  address: '0x8a5D989Bbb96929F689B0200f435f53dA42bF490',
+  entitlements: '0xb69ecb156Dc0028198028c501340d5367845ca72',
+  oracle: '0x4BC8d5aCD3d040d2903dD9C5B7048520c6ff537A',
+  teller: '0x51A8CE47dC08ba5CD19c7aa84EA6fD6664f60f9b',
+} as const
+
+/** Circle Wrapped Bitcoin on Arc Mainnet (developers.circle.com/assets/cirbtc-contract-addresses). */
+const CIRBTC_MAINNET = {
+  address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0',
+  decimals: 8,
+} as const
+
+/** Matrixdock Gold (XAUM) on Arc Mainnet — 1 XAUM ≈ 1 troy oz gold. */
+const XAUM_MAINNET = {
+  address: '0x178b01f61CBeA1D2a5581Fe1621Be607835EC349',
+  decimals: 18,
+} as const
+
 export type RwaAssetKind = 'mmf' | 'equity' | 'commodity'
+
+/** USD source for FDV, tape, and first-buy. Required on every catalog row. */
+export type QuoteUsdMode = 'peg' | 'spot' | 'none'
+export type QuoteUsdSpot = 'BTC-USD' | 'XAU-USD'
+
+export const QUOTE_USD_SPOTS: readonly QuoteUsdSpot[] = ['BTC-USD', 'XAU-USD']
 
 export interface ArcRwaAsset {
   id: string
@@ -56,6 +80,20 @@ export interface ArcRwaAsset {
   chainId: number
   /** Extra kill. Default on once address+factory are set. */
   enabled: boolean
+  /**
+   * How this quote maps to USD. Never infer from decimals (that is how cirBTC
+   * inherited 5500e6 and launched at ~$4M FDV).
+   * - peg: 1 token ≈ $1. Virtual quote = 5500 * 10^decimals. First-buy UI is dollars.
+   * - spot: USD from `usdSpot`. Virtual quote = 5500/spot * 10^decimals. First-buy UI is dollars.
+   * - none: quote units only. Never label the field as USD.
+   */
+  usd: QuoteUsdMode
+  usdSpot?: QuoteUsdSpot
+  /**
+   * Create first-buy may pay USDC and swap into this quote when the wallet is short.
+   * Instant still pulls the quote token. Only for permissionless quotes with a USDC book.
+   */
+  payUsdcSwap?: boolean
 }
 
 function envAddr(key: string): Address | '' {
@@ -107,6 +145,9 @@ function mergeAsset(base: ArcRwaAsset, over?: Partial<ArcRwaAsset>): ArcRwaAsset
     decimals: Number(over.decimals) > 0 ? Number(over.decimals) : base.decimals,
     enabled,
     chainId: base.chainId,
+    usd: over.usd || base.usd,
+    usdSpot: over.usdSpot !== undefined ? over.usdSpot : base.usdSpot,
+    payUsdcSwap: typeof over.payUsdcSwap === 'boolean' ? over.payUsdcSwap : base.payUsdcSwap,
   }
 }
 
@@ -118,7 +159,7 @@ function builtinCatalog(): ArcRwaAsset[] {
   const sharedFactory = sharedRwaV4Factory()
   const usycAddr =
     envAddr('NEXT_PUBLIC_ARC_RWA_USYC') ||
-    (ARC_IS_TESTNET ? (USYC_TESTNET.address as Address) : '')
+    (ARC_IS_TESTNET ? (USYC_TESTNET.address as Address) : (USYC_MAINNET.address as Address))
   const usycFactory = envAddr('NEXT_PUBLIC_ARC_RWA_USYC_FACTORY') || sharedFactory
   const usycEnabled = envFlag('NEXT_PUBLIC_ARC_RWA_USYC_ENABLED')
   const buidlAddr = envAddr('NEXT_PUBLIC_ARC_RWA_BUIDL')
@@ -139,12 +180,13 @@ function builtinCatalog(): ArcRwaAsset[] {
       factory: usycFactory,
       locker: envAddr('NEXT_PUBLIC_ARC_RWA_USYC_LOCKER'),
       permissioned: true,
-      navOracle: envAddr('NEXT_PUBLIC_ARC_RWA_USYC_ORACLE') || (ARC_IS_TESTNET ? USYC_TESTNET.oracle : ''),
+      navOracle: envAddr('NEXT_PUBLIC_ARC_RWA_USYC_ORACLE') || (ARC_IS_TESTNET ? USYC_TESTNET.oracle : USYC_MAINNET.oracle),
       entitlements:
         envAddr('NEXT_PUBLIC_ARC_RWA_USYC_ENTITLEMENTS') ||
-        (ARC_IS_TESTNET ? USYC_TESTNET.entitlements : ''),
+        (ARC_IS_TESTNET ? USYC_TESTNET.entitlements : USYC_MAINNET.entitlements),
       chainId: ARC_CHAIN_ID,
       enabled: usycEnabled ?? Boolean(usycAddr && usycFactory),
+      usd: 'peg',
     },
     {
       id: 'buidl',
@@ -158,6 +200,7 @@ function builtinCatalog(): ArcRwaAsset[] {
       permissioned: true,
       chainId: ARC_CHAIN_ID,
       enabled: buidlEnabled ?? Boolean(buidlAddr && buidlFactory),
+      usd: 'peg',
     },
     {
       id: 'crcl',
@@ -174,6 +217,84 @@ function builtinCatalog(): ArcRwaAsset[] {
       permissioned: true,
       chainId: ARC_CHAIN_ID,
       enabled: crclEnabled ?? Boolean(crclAddr && crclFactory),
+      usd: 'none',
+    },
+    {
+      id: 'cirbtc',
+      symbol: 'cirBTC',
+      name: 'Circle Wrapped Bitcoin',
+      kind: 'commodity',
+      address:
+        envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC') ||
+        (ARC_IS_TESTNET ? '' : (CIRBTC_MAINNET.address as Address)),
+      decimals: CIRBTC_MAINNET.decimals,
+      // Same shared RwaInstantV4Factory as USYC (quote is per-create). Override with env if needed.
+      factory: envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_FACTORY') || sharedFactory,
+      locker: envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_LOCKER'),
+      permissioned: false,
+      chainId: ARC_CHAIN_ID,
+      enabled: envFlag('NEXT_PUBLIC_ARC_RWA_CIRBTC_ENABLED') ?? Boolean(
+        (envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC') || (!ARC_IS_TESTNET && CIRBTC_MAINNET.address)) &&
+          (envAddr('NEXT_PUBLIC_ARC_RWA_CIRBTC_FACTORY') || sharedFactory),
+      ),
+      usd: 'spot',
+      usdSpot: 'BTC-USD',
+      payUsdcSwap: true,
+    },
+    {
+      id: 'xaum',
+      symbol: 'XAUM',
+      name: 'Matrixdock Gold',
+      kind: 'commodity',
+      address:
+        envAddr('NEXT_PUBLIC_ARC_RWA_XAUM') ||
+        (ARC_IS_TESTNET ? '' : (XAUM_MAINNET.address as Address)),
+      decimals: XAUM_MAINNET.decimals,
+      factory: envAddr('NEXT_PUBLIC_ARC_RWA_XAUM_FACTORY') || sharedFactory,
+      locker: envAddr('NEXT_PUBLIC_ARC_RWA_XAUM_LOCKER'),
+      permissioned: false,
+      chainId: ARC_CHAIN_ID,
+      enabled: envFlag('NEXT_PUBLIC_ARC_RWA_XAUM_ENABLED') ?? Boolean(
+        (envAddr('NEXT_PUBLIC_ARC_RWA_XAUM') || (!ARC_IS_TESTNET && XAUM_MAINNET.address)) &&
+          (envAddr('NEXT_PUBLIC_ARC_RWA_XAUM_FACTORY') || sharedFactory),
+      ),
+      usd: 'spot',
+      usdSpot: 'XAU-USD',
+      payUsdcSwap: true,
+    },
+    {
+      id: 'jaaa',
+      symbol: 'JAAA',
+      name: 'Janus Henderson Anemoy AAA CLO Fund',
+      kind: 'mmf',
+      address: envAddr('NEXT_PUBLIC_ARC_RWA_JAAA'),
+      decimals: 6,
+      factory: envAddr('NEXT_PUBLIC_ARC_RWA_JAAA_FACTORY') || sharedFactory,
+      locker: envAddr('NEXT_PUBLIC_ARC_RWA_JAAA_LOCKER'),
+      permissioned: true,
+      chainId: ARC_CHAIN_ID,
+      enabled: envFlag('NEXT_PUBLIC_ARC_RWA_JAAA_ENABLED') ?? Boolean(
+        envAddr('NEXT_PUBLIC_ARC_RWA_JAAA') &&
+          (envAddr('NEXT_PUBLIC_ARC_RWA_JAAA_FACTORY') || sharedFactory),
+      ),
+      usd: 'peg',
+    },
+    {
+      id: 'jtrsy',
+      symbol: 'JTRSY',
+      name: 'Janus Henderson Anemoy Treasury Fund',
+      kind: 'mmf',
+      address: envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY'),
+      decimals: 6,
+      factory: envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY_FACTORY') || sharedFactory,
+      locker: envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY_LOCKER'),
+      permissioned: true,
+      chainId: ARC_CHAIN_ID,
+      enabled: envFlag('NEXT_PUBLIC_ARC_RWA_JTRSY_ENABLED') ?? Boolean(
+        envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY') &&
+          (envAddr('NEXT_PUBLIC_ARC_RWA_JTRSY_FACTORY') || sharedFactory),
+      ),
+      usd: 'peg',
     },
   ]
 }
@@ -207,6 +328,9 @@ export function listRwaAssets(): ArcRwaAsset[] {
         entitlements: o.entitlements,
         chainId: ARC_CHAIN_ID,
         enabled: typeof o.enabled === 'boolean' ? o.enabled : Boolean(factory),
+        usd: o.usd === 'spot' || o.usd === 'peg' || o.usd === 'none' ? o.usd : 'none',
+        usdSpot: o.usdSpot,
+        payUsdcSwap: o.payUsdcSwap,
       })
     }
   }
@@ -231,15 +355,32 @@ export function pendingRwaQuoteAssets(): ArcRwaAsset[] {
 }
 
 export function rwaInstantFactories(): Address[] {
-  return liveRwaQuoteAssets()
-    .map((a) => a.factory)
-    .filter((f): f is Address => Boolean(asAddr(f)))
+  const seen = new Set<string>()
+  const out: Address[] = []
+  for (const a of liveRwaQuoteAssets()) {
+    const f = asAddr(a.factory)
+    if (!f) continue
+    const k = f.toLowerCase()
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(f)
+  }
+  return out
 }
 
 export function rwaAssetByFactory(factory: string | null | undefined): ArcRwaAsset | null {
   const f = (factory || '').toLowerCase()
   if (!f || f === ZERO) return null
-  return listRwaAssets().find((a) => a.factory && a.factory.toLowerCase() === f) || null
+  const matches = listRwaAssets().filter((a) => a.factory && a.factory.toLowerCase() === f)
+  // Shared RwaInstantV4Factory serves multiple quotes — factory alone is ambiguous.
+  if (matches.length === 1) return matches[0]
+  return null
+}
+
+export function rwaAssetByQuote(quote: string | null | undefined): ArcRwaAsset | null {
+  const q = (quote || '').toLowerCase()
+  if (!q || q === ZERO) return null
+  return listRwaAssets().find((a) => a.address && a.address.toLowerCase() === q) || null
 }
 
 export function rwaAssetById(id: string | null | undefined): ArcRwaAsset | null {
@@ -279,4 +420,115 @@ export function quoteDecimalsForFactory(factory: string | null | undefined): num
 
 export function quoteSymbolForFactory(factory: string | null | undefined): string {
   return rwaAssetByFactory(factory)?.symbol || 'USDC'
+}
+
+/** Prefer when the indexer/row knows the per-launch quote (shared RWA factory). */
+export function quoteSymbolForQuote(quote: string | null | undefined): string {
+  const q = (quote || '').toLowerCase()
+  if (!q || q === ZERO) return 'USDC'
+  if (q === USDC.toLowerCase()) return 'USDC'
+  return rwaAssetByQuote(q)?.symbol || 'USDC'
+}
+
+export type QuotePolicy = {
+  usd: QuoteUsdMode
+  usdSpot: QuoteUsdSpot | null
+  payUsdcSwap: boolean
+}
+
+/** USDC (no catalog row) is a $1 peg. Catalog rows must set `usd` explicitly. */
+export function quotePolicy(asset: Pick<ArcRwaAsset, 'usd' | 'usdSpot' | 'payUsdcSwap' | 'permissioned'> | null | undefined): QuotePolicy {
+  if (!asset) return { usd: 'peg', usdSpot: null, payUsdcSwap: false }
+  const usd: QuoteUsdMode = asset.usd === 'spot' || asset.usd === 'none' || asset.usd === 'peg' ? asset.usd : 'none'
+  const usdSpot = usd === 'spot' ? asset.usdSpot || null : null
+  const payUsdcSwap = Boolean(asset.payUsdcSwap) && !asset.permissioned && usd !== 'none'
+  return { usd, usdSpot, payUsdcSwap }
+}
+
+/** Catalog invariant: no silent USDC 6dp inheritance. */
+export function quotePolicyOk(asset: ArcRwaAsset): { ok: true } | { ok: false; reason: string } {
+  if (asset.usd !== 'peg' && asset.usd !== 'spot' && asset.usd !== 'none') {
+    return { ok: false, reason: `${asset.id}: set usd to peg | spot | none` }
+  }
+  if (asset.usd === 'spot' && !(asset.usdSpot && QUOTE_USD_SPOTS.includes(asset.usdSpot))) {
+    return { ok: false, reason: `${asset.id}: usd=spot requires usdSpot (BTC-USD | XAU-USD)` }
+  }
+  if (asset.usd !== 'spot' && asset.usdSpot) {
+    return { ok: false, reason: `${asset.id}: usdSpot only valid with usd=spot` }
+  }
+  if (asset.payUsdcSwap && (asset.permissioned || asset.usd === 'none')) {
+    return { ok: false, reason: `${asset.id}: payUsdcSwap is for permissionless USD-input quotes` }
+  }
+  return { ok: true }
+}
+
+export function quoteUsesUsdInput(asset: ArcRwaAsset | null | undefined, quoteId?: string): boolean {
+  if ((quoteId || '') === 'usdc') return true
+  const p = quotePolicy(asset)
+  return p.usd === 'peg' || p.usd === 'spot'
+}
+
+export function quotePayUsdcSwap(asset: ArcRwaAsset | null | undefined): boolean {
+  return quotePolicy(asset).payUsdcSwap
+}
+
+export function quoteChartLabel(symbol: string, asset: ArcRwaAsset | null | undefined): string {
+  if (symbol === 'USDC') return 'USDC'
+  const p = quotePolicy(asset)
+  if (p.usd === 'spot') return 'USD'
+  if (p.usd === 'peg') return symbol
+  return symbol
+}
+
+/** USD per 1 whole quote token. Peg = 1. Spot = live USD. none = 0 (do not fake $). */
+export async function quoteUsdMultiplier(quote: string | null | undefined): Promise<number> {
+  const q = (quote || '').toLowerCase()
+  if (!q || q === ZERO || q === USDC.toLowerCase()) return 1
+  const asset = rwaAssetByQuote(q)
+  const p = quotePolicy(asset)
+  if (p.usd === 'peg') return 1
+  if (p.usd === 'spot' && p.usdSpot) {
+    const { fetchQuoteUsdSpot } = await import('./quote-usd-spot')
+    const px = await fetchQuoteUsdSpot(p.usdSpot)
+    return px && px > 0 ? px : 0
+  }
+  return 0
+}
+
+export function usdToQuoteHuman(usd: number, usdPerQuote: number, decimals: number): string {
+  if (!(usd > 0) || !(usdPerQuote > 0) || !(decimals > 0)) return '0'
+  const q = usd / usdPerQuote
+  const dp = Math.min(Math.max(0, Math.floor(decimals)), 18)
+  const fixed = q.toFixed(dp)
+  return fixed.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '') || '0'
+}
+
+/** Instant USDC starting FDV. Spot quotes encode the same dollars in native decimals. */
+export const INSTANT_TARGET_FDV_USD = 5500
+
+/**
+ * Raw launchVirtualQuote for Instant RWA creates.
+ * Peg: 5500 * 10^decimals. Spot: 5500/usdPerQuote * 10^decimals.
+ * Never use 5500e6 for an 8dp non-peg (that is 55 BTC, ~$4M FDV).
+ */
+export function defaultRwaVirtualQuoteRaw(
+  asset: Pick<ArcRwaAsset, 'id' | 'decimals' | 'usd' | 'usdSpot' | 'payUsdcSwap' | 'permissioned'>,
+  opts?: { spotUsd?: number | null; btcUsd?: number | null },
+): bigint {
+  const envKey = `NEXT_PUBLIC_ARC_RWA_${asset.id.toUpperCase()}_VIRTUAL_QUOTE`
+  const raw = (process.env[envKey] || '').trim()
+  if (/^\d+$/.test(raw)) return BigInt(raw)
+  const dec = asset.decimals > 0 ? asset.decimals : 6
+  const p = quotePolicy(asset)
+  if (p.usd === 'spot' && p.usdSpot) {
+    const spot = opts?.spotUsd ?? opts?.btcUsd
+    if (spot && spot > 0) {
+      const rawN = Math.round((INSTANT_TARGET_FDV_USD / spot) * 10 ** dec)
+      if (rawN > 0) return BigInt(rawN)
+    }
+    // Fallbacks: $5500 at $100k BTC / $4k XAU. Never 5500e6 for non-6dp.
+    const fb = p.usdSpot === 'XAU-USD' ? 4_000n : 100_000n
+    return (5500n * 10n ** BigInt(dec)) / fb
+  }
+  return 5500n * 10n ** BigInt(dec)
 }

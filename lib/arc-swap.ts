@@ -285,6 +285,26 @@ export function minOutFromSlippage(amountOut: bigint, slippageBps: number): bigi
   return (amountOut * BigInt(10_000 - slippageBps)) / 10_000n
 }
 
+/**
+ * Quote + encode a V3 USDC → token buy (cirBTC first-buy, etc.).
+ * Uses the deepest TOKEN/USDC fee tier. Caller approves `spender` then writes `call`.
+ */
+export async function planUsdcBuyOfToken(
+  token: Address,
+  usdcIn: bigint,
+  recipient: Address,
+  slippageBps = 100,
+): Promise<{ fee: number; quoted: bigint; minOut: bigint; spender: Address; call: ArcSwapWrite } | null> {
+  if (usdcIn <= 0n || !arcSwapConfigured()) return null
+  const c = rpc()
+  const fee = (await findArcPoolFee(token, c)) ?? POOL_FEE
+  const quoted = await quoteArcBuy(token, usdcIn, '', c)
+  if (quoted == null || quoted <= 0n) return null
+  const minOut = minOutFromSlippage(quoted, slippageBps)
+  const call = withRecipient(buildArcBuy(token, usdcIn, minOut, fee), recipient)
+  return { fee, quoted, minOut, spender: arcSwapSpender('buy'), call }
+}
+
 async function feeBps(client?: Client): Promise<number> {
   if (!useFeeRouter()) return 0
   // Wallet quotes skip the extra round-trip — live FeeRouter is 100 bps.
