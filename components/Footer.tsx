@@ -30,7 +30,7 @@ export function Footer() {
             X
           </a>
           <a
-            href="https://t.me/ArcFun_pad"
+            href="https://t.me/evedotfun"
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Telegram"
