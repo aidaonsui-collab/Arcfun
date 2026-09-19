@@ -223,6 +223,7 @@
   .crucible-bar,
   .live-dot,
   .eve-trail-dash,
+  .eve-runner,
   .quote-orbit,
   .quote-orbit-rev,
   .vault-orbit-spin,
@@ -252,6 +253,37 @@
 @keyframes eve-dash {
   to {
     stroke-dashoffset: -36;
+  }
+}
+
+.eve-runner {
+  width: 64px;
+  height: 64px;
+  background-image: url('/eve-run/sheet.png');
+  background-size: 256px 64px;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  animation:
+    eve-run-steps 0.36s steps(4) infinite,
+    eve-run-bob 0.36s ease-in-out infinite;
+  filter: drop-shadow(0 3px 5px rgb(0 0 0 / 0.5));
+}
+.eve-runner-still {
+  animation: none;
+  background-position: 0 0;
+}
+@keyframes eve-run-steps {
+  to {
+    background-position: -256px 0;
+  }
+}
+@keyframes eve-run-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
   }
 }
 
