@@ -8,7 +8,7 @@ import type { FeeSplit } from './eve-fee-split'
 import type { ArcRwaAsset } from './arc-rwa-assets'
 
 const ARC_CHAIN_ID = Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID) || 5042
-const DEFAULT_VIRTUAL_QUOTE = 5_500_000_000n
+const DEFAULT_VIRTUAL_QUOTE = 3_000_000_000n
 
 const SPLIT_COMPONENTS = [
   { name: 'feeBps', type: 'uint16' },

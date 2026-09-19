@@ -7,9 +7,9 @@ import type { FeeSplit } from './eve-fee-split'
 
 export const EVE_V4_TICK_SPACING = 200
 /** Listed Instant meme FDV target. MC = VQ * 1e9 / VIRTUAL_TOKEN_INIT. */
-export const INSTANT_MEME_TARGET_FDV_USD = 1500
-/** USDC 6dp virtual quote so listed MC is $1,500 (1600e6 / 1.066…e9 * 1e9). RWA seeds stay at $5500. */
-export const EVE_V4_DEFAULT_VIRTUAL_QUOTE = 1_600_000_000n
+export const INSTANT_MEME_TARGET_FDV_USD = 3000
+/** USDC 6dp virtual quote so listed MC is $3,000 (3200e6 / 1.066…e9 * 1e9). RWA seeds also target $3000. */
+export const EVE_V4_DEFAULT_VIRTUAL_QUOTE = 3_200_000_000n
 
 export const EVE_FEE_HOOK_SPLIT_COMPONENTS = [
   { name: 'feeBps', type: 'uint16' },

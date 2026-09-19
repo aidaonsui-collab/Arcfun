@@ -83,8 +83,8 @@ export interface ArcRwaAsset {
   /**
    * How this quote maps to USD. Never infer from decimals (that is how cirBTC
    * inherited 5500e6 and launched at ~$4M FDV).
-   * - peg: 1 token ≈ $1. Virtual quote = 5500 * 10^decimals. First-buy UI is dollars.
-   * - spot: USD from `usdSpot`. Virtual quote = 5500/spot * 10^decimals. First-buy UI is dollars.
+   * - peg: 1 token ≈ $1. Virtual quote = 3000 * 10^decimals. First-buy UI is dollars.
+   * - spot: USD from `usdSpot`. Virtual quote = 3000/spot * 10^decimals. First-buy UI is dollars.
    * - none: quote units only. Never label the field as USD.
    */
   usd: QuoteUsdMode
@@ -504,12 +504,12 @@ export function usdToQuoteHuman(usd: number, usdPerQuote: number, decimals: numb
 }
 
 /** Instant USDC starting FDV. Spot quotes encode the same dollars in native decimals. */
-export const INSTANT_TARGET_FDV_USD = 5500
+export const INSTANT_TARGET_FDV_USD = 3000
 
 /**
  * Raw launchVirtualQuote for Instant RWA creates.
- * Peg: 5500 * 10^decimals. Spot: 5500/usdPerQuote * 10^decimals.
- * Never use 5500e6 for an 8dp non-peg (that is 55 BTC, ~$4M FDV).
+ * Peg: 3000 * 10^decimals. Spot: 3000/usdPerQuote * 10^decimals.
+ * Never use 3000e6 for an 8dp non-peg (that is 30 BTC, ~$3M FDV).
  */
 export function defaultRwaVirtualQuoteRaw(
   asset: Pick<ArcRwaAsset, 'id' | 'decimals' | 'usd' | 'usdSpot' | 'payUsdcSwap' | 'permissioned'>,
@@ -526,9 +526,9 @@ export function defaultRwaVirtualQuoteRaw(
       const rawN = Math.round((INSTANT_TARGET_FDV_USD / spot) * 10 ** dec)
       if (rawN > 0) return BigInt(rawN)
     }
-    // Fallbacks: $5500 at $100k BTC / $4k XAU. Never 5500e6 for non-6dp.
+    // Fallbacks: $3000 at $100k BTC / $4k XAU. Never 3000e6 for non-6dp.
     const fb = p.usdSpot === 'XAU-USD' ? 4_000n : 100_000n
-    return (5500n * 10n ** BigInt(dec)) / fb
+    return (3000n * 10n ** BigInt(dec)) / fb
   }
-  return 5500n * 10n ** BigInt(dec)
+  return 3000n * 10n ** BigInt(dec)
 }
