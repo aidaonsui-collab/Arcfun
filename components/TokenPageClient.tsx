@@ -82,6 +82,7 @@ export function TokenPageClient({
   const [holdersLoading, setHoldersLoading] = useState(false)
   const [chartReady, setChartReady] = useState(false)
   const listingEpoch = useRef(0)
+  const emptyTapeRetryFor = useRef('')
 
   const copyAddress = useCallback(() => {
     if (!token) return
@@ -138,22 +139,27 @@ export function TokenPageClient({
     }
   }, [token, mergePool])
 
-  const loadTrades = useCallback(async () => {
+  const loadTrades = useCallback(async (opts?: { fresh?: boolean }) => {
     if (!token) return
     try {
-      const res = await fetch(
-        `/api/arc/${token}/trades?limit=${ACT_PAGE_SIZE}&offset=${actPage * ACT_PAGE_SIZE}`,
-      )
+      const qs = new URLSearchParams({
+        limit: String(ACT_PAGE_SIZE),
+        offset: String(actPage * ACT_PAGE_SIZE),
+      })
+      if (opts?.fresh) qs.set('fresh', '1')
+      const res = await fetch(`/api/arc/${token}/trades?${qs}`)
       if (res.ok) setTrades((await res.json()) as EvmTradesResult)
     } catch {
       /* keep prior */
     }
   }, [token, actPage])
 
-  const loadChartTape = useCallback(async () => {
+  const loadChartTape = useCallback(async (opts?: { fresh?: boolean }) => {
     if (!token) return
     try {
-      const res = await fetch(`/api/arc/${token}/trades?limit=400`)
+      const res = await fetch(
+        `/api/arc/${token}/trades?limit=400${opts?.fresh ? '&fresh=1' : ''}`,
+      )
       if (!res.ok) return
       const data = (await res.json()) as EvmTradesResult
       setChartTape(data.trades ?? [])
@@ -178,8 +184,8 @@ export function TokenPageClient({
   const refreshAfterTrade = useCallback(() => {
     load()
     void loadStats()
-    void loadTrades()
-    if (chartReady) void loadChartTape()
+    void loadTrades({ fresh: true })
+    if (chartReady) void loadChartTape({ fresh: true })
     if (tab === 'holders') void loadHolders()
   }, [load, loadStats, loadTrades, loadChartTape, loadHolders, chartReady, tab])
 
@@ -205,15 +211,36 @@ export function TokenPageClient({
   }, [holders, loadHolders])
 
   useEffect(() => {
-    // 20s matches /trades and /ohlcv s-maxage so an open tab is a CDN hit, not a
-    // Fluid origin call. 8s was the Sep 14 Pro spike (3 APIs × every 8s per tab).
+    // Token snapshot stays 20s. Tape polls 4s to match /trades s-maxage — KV read,
+    // not a 50-block getLogs, so this is not the Sep 14 Fluid CPU spike.
     const id = setInterval(() => {
       if (document.visibilityState !== 'visible') return
       load()
-      void loadTrades()
     }, 20_000)
     return () => clearInterval(id)
-  }, [load, loadTrades])
+  }, [load])
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      void loadTrades()
+    }, 4_000)
+    return () => clearInterval(id)
+  }, [loadTrades])
+
+  useEffect(() => {
+    emptyTapeRetryFor.current = ''
+  }, [token])
+
+  useEffect(() => {
+    if (actPage !== 0) return
+    if (!trades || trades.trades.length > 0) return
+    if (emptyTapeRetryFor.current === token) return
+    emptyTapeRetryFor.current = token
+    const delays = [800, 2000, 4000]
+    const ids = delays.map((ms) => window.setTimeout(() => void loadTrades({ fresh: true }), ms))
+    return () => ids.forEach(clearTimeout)
+  }, [token, actPage, trades, loadTrades])
 
   useEffect(() => {
     const id = setInterval(() => {
