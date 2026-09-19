@@ -7,6 +7,7 @@ import { Loader2, Search, SlidersHorizontal } from 'lucide-react'
 import type { PoolToken } from '@/lib/tokens'
 import { isReflectionToken, volumeForWindow } from '@/lib/tokens'
 import { TokenCard } from '@/components/TokenCard'
+import { EveClimbTrail } from '@/components/EveClimbTrail'
 import { coalescedFetch } from '@/lib/coalesced-fetch'
 import { ageLabel, fmtUsd } from '@/lib/ui-format'
 import { quoteAsset, quoteKind, type QuoteKind } from '@/lib/quote-assets'
@@ -155,15 +156,11 @@ export function HomeClient({
       <div className="relative z-10 mx-auto max-w-6xl px-4 sm:px-6">
         <section className="flex flex-col gap-5 pt-6 sm:flex-row sm:items-end sm:justify-between md:pt-8">
           <div className="max-w-xl">
-            <p className="text-xs font-medium uppercase tracking-widest text-lime-t">Instant on Arc</p>
-            <h1 className="mt-2 m-0 text-3xl font-semibold tracking-tight">
+            <h1 className="m-0 text-3xl font-semibold tracking-tight">
               Launch on Arc.
               <br />
-              Pair it to money.
+              Pair it to anything on Arc.
             </h1>
-            <p className="mt-3 mb-0 max-w-md text-sm text-t2">
-              Full float onto Uniswap from block one. Quoted in USDC and tokenized funds, not a bonding curve.
-            </p>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:min-w-64">
             <HomeStat label="24h volume" value={fmtUsd(padVolume.volume24h)} />
@@ -258,31 +255,36 @@ function FeaturedLaunch({ token }: { token: PoolToken }) {
   const img = token.imageUrl || token.logoUrl
   const vol = volumeForWindow(token, '24H')
   const hrefOk = /^0x[a-fA-F0-9]{40}$/.test(address)
+  const isEve = address.toLowerCase() === EVE_TOKEN.toLowerCase()
 
   const body = (
-    <div className="token-tile relative overflow-hidden rounded-2xl p-5 sm:p-6">
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-1/2 pair-watermark" aria-hidden>
-        <div
-          className="absolute inset-0"
-          style={{
-            background: `radial-gradient(ellipse 80% 70% at 80% 50%, rgb(${quote.tint} / 0.22), transparent 72%)`,
-          }}
-        />
-        {quote.mark ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={quote.mark}
-            alt=""
-            className="absolute right-6 top-1/2 size-36 -translate-y-1/2 rounded-full object-cover opacity-80"
+    <div className={`token-tile relative overflow-hidden rounded-2xl p-5 sm:p-6 ${isEve ? 'min-h-[200px] sm:min-h-[228px]' : ''}`}>
+      {isEve ? (
+        <EveClimbTrail src="/eve-star.png" />
+      ) : (
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-1/2 pair-watermark" aria-hidden>
+          <div
+            className="absolute inset-0"
+            style={{
+              background: `radial-gradient(ellipse 80% 70% at 80% 50%, rgb(${quote.tint} / 0.22), transparent 72%)`,
+            }}
           />
-        ) : img ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={cdnImage(img, 320)} alt="" className="absolute inset-0 size-full object-cover opacity-20" />
-        ) : null}
-      </div>
+          {quote.mark ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={quote.mark}
+              alt=""
+              className="absolute right-6 top-1/2 size-36 -translate-y-1/2 rounded-full object-cover opacity-80"
+            />
+          ) : img ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={cdnImage(img, 320)} alt="" className="absolute inset-0 size-full object-cover opacity-20" />
+          ) : null}
+        </div>
+      )}
 
-      <p className="relative m-0 text-xs font-medium uppercase tracking-widest text-lime-t">Featured on Arc</p>
-      <div className="relative mt-4 flex items-start gap-4">
+      <p className="relative z-10 m-0 text-xs font-medium uppercase tracking-widest text-lime-t">Featured on Arc</p>
+      <div className="relative z-10 mt-4 flex items-start gap-4">
         <span className="size-14 shrink-0 overflow-hidden rounded-full shadow-[0_0_0_1px_rgb(255_255_255_/_0.12)]">
           {img ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -295,7 +297,7 @@ function FeaturedLaunch({ token }: { token: PoolToken }) {
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="m-0 truncate text-2xl font-semibold tracking-tight">${token.symbol}</h2>
             <span className="truncate text-t2">{token.name}</span>
-            {address.toLowerCase() === EVE_TOKEN.toLowerCase() ? (
+            {isEve ? (
               <span className="rounded-full bg-lime/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-lime-t">
                 Platform
               </span>
