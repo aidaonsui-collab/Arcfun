@@ -22,7 +22,7 @@ export function Footer() {
             Launch
           </Link>
           <a
-            href="https://x.com/Arcfun_pad"
+            href="https://x.com/eve_dot_fun"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-white"
