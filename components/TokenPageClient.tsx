@@ -83,6 +83,7 @@ export function TokenPageClient({
   const [chartReady, setChartReady] = useState(false)
   const listingEpoch = useRef(0)
   const emptyTapeRetryFor = useRef('')
+  const [tapeHot, setTapeHot] = useState(false)
 
   const copyAddress = useCallback(() => {
     if (!token) return
@@ -148,7 +149,11 @@ export function TokenPageClient({
       })
       if (opts?.fresh) qs.set('fresh', '1')
       const res = await fetch(`/api/arc/${token}/trades?${qs}`)
-      if (res.ok) setTrades((await res.json()) as EvmTradesResult)
+      if (res.ok) {
+        const data = (await res.json()) as EvmTradesResult
+        setTrades(data)
+        if ((data.trades?.length ?? 0) > 0) setTapeHot(true)
+      }
     } catch {
       /* keep prior */
     }
@@ -163,6 +168,7 @@ export function TokenPageClient({
       if (!res.ok) return
       const data = (await res.json()) as EvmTradesResult
       setChartTape(data.trades ?? [])
+      if ((data.trades?.length ?? 0) > 0) setTapeHot(true)
     } catch {
       /* keep prior */
     }
@@ -182,6 +188,7 @@ export function TokenPageClient({
   }, [token])
 
   const refreshAfterTrade = useCallback(() => {
+    setTapeHot(true)
     load()
     void loadStats()
     void loadTrades({ fresh: true })
@@ -211,8 +218,7 @@ export function TokenPageClient({
   }, [holders, loadHolders])
 
   useEffect(() => {
-    // Token snapshot stays 20s. Tape polls 4s to match /trades s-maxage — KV read,
-    // not a 50-block getLogs, so this is not the Sep 14 Fluid CPU spike.
+    // Token snapshot stays 20s. Tape interval is 4s once hot, 20s while empty.
     const id = setInterval(() => {
       if (document.visibilityState !== 'visible') return
       load()
@@ -221,15 +227,19 @@ export function TokenPageClient({
   }, [load])
 
   useEffect(() => {
+    // 4s only once the tape has a fill (or the user just swapped). Empty
+    // tokens stay on 20s so open tabs don't origin-hit no-store every 4s.
+    const ms = tapeHot ? 4_000 : 20_000
     const id = setInterval(() => {
       if (document.visibilityState !== 'visible') return
       void loadTrades()
-    }, 4_000)
+    }, ms)
     return () => clearInterval(id)
-  }, [loadTrades])
+  }, [loadTrades, tapeHot])
 
   useEffect(() => {
     emptyTapeRetryFor.current = ''
+    setTapeHot(false)
   }, [token])
 
   useEffect(() => {
