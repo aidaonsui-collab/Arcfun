@@ -260,7 +260,7 @@ function FeaturedLaunch({ token }: { token: PoolToken }) {
   const body = (
     <div className={`token-tile relative overflow-hidden rounded-2xl p-5 sm:p-6 ${isEve ? 'min-h-[200px] sm:min-h-[228px]' : ''}`}>
       {isEve ? (
-        <EveClimbTrail src="/eve-star.png" />
+        <EveClimbTrail />
       ) : (
         <div className="pointer-events-none absolute inset-y-0 right-0 w-1/2 pair-watermark" aria-hidden>
           <div
