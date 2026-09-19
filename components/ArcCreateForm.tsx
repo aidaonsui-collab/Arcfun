@@ -1478,7 +1478,7 @@ export function ArcCreateForm({
       }
       onClick={onCta}
       className={`w-full h-12 rounded-full text-[15px] font-semibold tracking-tightish disabled:opacity-40 flex items-center justify-center gap-2 ${
-        isConnected && wrongChain ? 'bg-amber-500 text-black' : 'bg-lime text-white hover:bg-lime-2'
+        isConnected && wrongChain ? 'bg-amber-500 text-black' : 'bg-lime text-accent-fg hover:bg-lime-2'
       }`}
     >
       {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : step === 'done' ? <CheckCircle className="w-4 h-4" /> : null}

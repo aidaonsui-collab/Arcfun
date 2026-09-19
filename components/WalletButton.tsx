@@ -133,7 +133,7 @@ export function WalletButton({
             type="button"
             disabled={isPending}
             onClick={() => (wallets.length > 1 ? setOpen((o) => !o) : connectToArc(connect, wallets))}
-            className="flex h-14 w-full items-center justify-center rounded-full bg-lime text-[15px] font-semibold text-white disabled:opacity-50"
+            className="flex h-14 w-full items-center justify-center rounded-full bg-lime text-[15px] font-semibold text-accent-fg disabled:opacity-50"
           >
             {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Connect wallet'}
           </button>
@@ -178,7 +178,7 @@ export function WalletButton({
           type="button"
           disabled={isPending}
           onClick={() => (wallets.length > 1 ? setOpen((o) => !o) : connectToArc(connect, wallets))}
-          className="h-9 px-4 rounded-full bg-lime text-white text-sm font-semibold hover:bg-lime-2 disabled:opacity-50 transition-colors"
+          className="h-9 px-4 rounded-full bg-s2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)] hover:bg-s3 disabled:opacity-50 transition-colors"
         >
           {isPending ? '…' : 'Connect'}
         </button>

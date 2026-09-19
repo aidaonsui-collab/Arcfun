@@ -6,7 +6,7 @@
  */
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useAccount, useConnect } from 'wagmi'
 import {
   BookOpen,
@@ -15,6 +15,8 @@ import {
   LayoutGrid,
   Menu,
   PlusCircle,
+  Search,
+  Sparkles,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -22,6 +24,7 @@ import { BrandMark } from '@/components/BrandMark'
 import { WalletButton } from '@/components/WalletButton'
 import { connectToArc } from '@/lib/arc-wallet'
 import { ARC } from '@/lib/contracts-arc'
+import { EVE_TOKEN } from '@/lib/eve'
 
 export function SiteHeader() {
   const router = useRouter()
@@ -30,11 +33,23 @@ export function SiteHeader() {
   const { connect, connectors, isPending } = useConnect()
   const [q, setQ] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
 
   // Close sheet on route change
   useEffect(() => {
     setMenuOpen(false)
   }, [pathname])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        searchRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Lock body scroll while open, and publish the REAL visible height as --vvh.
   //
@@ -64,6 +79,9 @@ export function SiteHeader() {
     }
   }, [menuOpen])
 
+  const onEve = pathname.toLowerCase().includes(EVE_TOKEN.toLowerCase())
+  const onDocs = pathname.startsWith('/docs')
+  const onCreate = pathname.startsWith('/create')
   const onStudio = pathname.startsWith('/studio')
   const onProfile =
     pathname.startsWith('/creator') ||
@@ -124,31 +142,58 @@ export function SiteHeader() {
           </span>
         </Link>
 
-        <nav className="ml-4 hidden items-center gap-1 md:flex">
-          {(
-            [
-              ['/studio', 'Studio', onStudio],
-              [profileHref, 'Profile', onProfile],
-            ] as const
-          ).map(([href, label, on]) => (
-            <Link
-              key={href}
-              href={href}
-              className={`rounded-full px-3 py-1.5 text-sm transition-colors duration-150 ${
-                on ? 'text-white' : 'text-t2 hover:text-white'
-              }`}
-            >
-              {label}
-            </Link>
-          ))}
+        <nav className="ml-3 hidden items-center gap-1 md:flex">
+          <Link
+            href={`/token/${EVE_TOKEN}`}
+            className={`rounded-full px-3 py-1.5 text-sm transition-colors ${onEve ? 'text-white' : 'text-t2 hover:text-white'}`}
+          >
+            $EVE
+          </Link>
+          <Link
+            href="/docs"
+            className={`rounded-full px-3 py-1.5 text-sm transition-colors ${onDocs ? 'text-white' : 'text-t2 hover:text-white'}`}
+          >
+            Docs
+          </Link>
+          <Link
+            href="/studio"
+            className={`rounded-full px-3 py-1.5 text-sm transition-colors ${onStudio ? 'text-white' : 'text-t2 hover:text-white'}`}
+          >
+            Studio
+          </Link>
+          <Link
+            href={profileHref}
+            className={`rounded-full px-3 py-1.5 text-sm transition-colors ${onProfile ? 'text-white' : 'text-t2 hover:text-white'}`}
+          >
+            Profile
+          </Link>
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
-          <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-s2 px-3 py-1.5 text-xs text-t2 border border-hair">
-            <span className="size-1.5 rounded-full bg-lime-t live-dot" />
+          <form onSubmit={onSearch} className="hidden sm:block">
+            <label className="flex h-9 w-full max-w-xs min-w-44 items-center gap-2 rounded-full bg-s2 px-3 text-xs text-t3 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)] focus-within:text-white">
+              <Search className="size-3.5 shrink-0" />
+              <input
+                ref={searchRef}
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search tokens"
+                className="min-w-0 flex-1 bg-transparent text-xs text-white outline-none placeholder:text-t3"
+              />
+              <kbd className="hidden rounded-md bg-s1 px-1.5 py-0.5 font-mono text-[10px] text-t3 lg:inline">⌘K</kbd>
+            </label>
+          </form>
+          <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-s2 px-3 py-1.5 text-xs text-t2 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
+            <span className="live-dot size-1.5 rounded-full bg-fun" />
             Arc
           </span>
           <WalletButton />
+          <Link
+            href="/create"
+            className={`hidden h-9 items-center rounded-full bg-lime px-4 text-sm font-semibold text-accent-fg hover:bg-lime-2 sm:inline-flex ${onCreate ? 'ring-1 ring-white/20' : ''}`}
+          >
+            Launch token
+          </Link>
         </div>
 
         <span className="hidden" aria-hidden>
@@ -208,6 +253,8 @@ export function SiteHeader() {
               </form>
 
               {navRow('/', 'Home', Home)}
+              {navRow(`/token/${EVE_TOKEN}`, '$EVE', Sparkles)}
+              {navRow('/create', 'Launch token', PlusCircle)}
               {navRow('/studio', 'Studio', LayoutGrid)}
               {navRow('/studio/create', 'Create collection', PlusCircle)}
 

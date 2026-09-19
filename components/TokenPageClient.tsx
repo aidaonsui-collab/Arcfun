@@ -21,6 +21,7 @@ import { arcMarketCapUsd } from '@/lib/arc-instant-tokens'
 import { priceChangeFromTrades } from '@/lib/candles'
 import { telegramHref, twitterHref, websiteHref } from '@/lib/social-href'
 import { cdnImage } from '@/lib/cdn-image'
+import { quoteAsset } from '@/lib/quote-assets'
 import { TokenListingEdit } from '@/components/TokenListingEdit'
 import { DexScreenerChart } from '@/components/DexScreenerChart'
 import {
@@ -347,7 +348,7 @@ export function TokenPageClient({
   const webUrl = pool.website ? websiteHref(pool.website) : ''
   const hasSocials = !!(xUrl || tgUrl || webUrl)
 
-  const quote = pool.instantMeta?.quote || 'USDC'
+  const quote = quoteAsset(pool.instantMeta?.quote)
   const pct24 = chartTape.length >= 2 ? tapeChange : pool.priceChange24h
   const pctUp = (pct24 ?? 0) >= 0
   const pctLabel = `${pctUp ? '+' : ''}${(pct24 ?? 0).toFixed(1)}% 24h`
@@ -372,23 +373,27 @@ export function TokenPageClient({
                   <h1 className="m-0 text-xl font-semibold tracking-tight truncate">{pool.name}</h1>
                   <span className="text-t2">${pool.symbol}</span>
                   {isReflectionToken(pool) ? (
-                    <span className="px-2 py-0.5 rounded-full bg-s2 border border-hair text-lime-t text-[10px] font-semibold uppercase tracking-wide">
+                    <span className="px-2 py-0.5 rounded-full bg-fun/10 text-fun text-[10px] font-semibold uppercase tracking-wide">
                       Reflect
                     </span>
                   ) : (
-                    <span className="px-2 py-0.5 rounded-full bg-s2 border border-hair text-t2 text-[10px] font-semibold uppercase tracking-wide">
+                    <span className="px-2 py-0.5 rounded-full bg-s2 text-t2 text-[10px] font-semibold uppercase tracking-wide">
                       Meme
                     </span>
                   )}
+                  <span className="inline-flex items-center gap-1 rounded-full bg-s2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-t2">
+                    {quote.mark ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={quote.mark} alt="" className="size-3 rounded-full object-cover" />
+                    ) : null}
+                    {quote.symbol}
+                  </span>
                 </div>
                 <div className="mt-2 flex flex-wrap items-end gap-3">
                   <div className="text-4xl font-semibold tracking-tight tabular-nums">
                     {fmtUsd(pool.marketCap)}
                   </div>
-                  <div
-                    className="mb-1 text-sm tabular-nums"
-                    style={{ color: pctUp ? 'var(--limeT)' : 'var(--coral)' }}
-                  >
+                  <div className={`mb-1 text-sm tabular-nums ${pctUp ? 'text-up' : 'text-down'}`}>
                     {pctLabel}
                   </div>
                 </div>
@@ -482,11 +487,23 @@ export function TokenPageClient({
           }}
         />
 
-        <div className="mt-8 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_22rem] gap-6 items-start">
-          <div className="flex flex-col gap-5 min-w-0">
-            <div className="h-[420px] sm:h-[480px] rounded-[20px] bg-s1 border border-hair overflow-hidden">
+        <div className="mt-6 grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="min-w-0 lg:col-start-1 lg:row-start-1">
+            <div className="h-[420px] overflow-hidden rounded-2xl bg-s1 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)] sm:h-[480px]">
               <DexScreenerChart pool={pool} symbol={pool.symbol} />
             </div>
+          </div>
+
+          <div className="lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-20">
+            <ArcDexTradePanel
+              token={token}
+              symbol={pool.symbol}
+              imageUrl={pool.imageUrl || pool.logoUrl}
+              onTraded={refreshAfterTrade}
+            />
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-5 lg:col-start-1 lg:row-start-2">
 
             <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <TokenStat label="Price" value={fmtPrice(pool.currentPrice)} />
@@ -495,7 +512,7 @@ export function TokenPageClient({
               <TokenStat label="Age" value={ageLabel(pool.createdAt)} />
             </dl>
 
-            <div className="rounded-[20px] bg-s1 border border-hair p-5">
+            <div className="rounded-2xl bg-s1 p-5 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
               <h2 className="m-0 text-sm font-medium">About</h2>
               {pool.description ? (
                 <p className="mt-2 mb-0 text-sm leading-relaxed text-t2 text-pretty">{pool.description}</p>
@@ -505,10 +522,15 @@ export function TokenPageClient({
               <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-t3">
                 <span className="inline-flex items-center gap-1.5">
                   Paired with
-                  <span className="inline-flex size-3.5 items-center justify-center rounded-full bg-lime-t text-[8px] font-bold text-[var(--bg)]">
-                    $
-                  </span>
-                  {quote}
+                  {quote.mark ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={quote.mark} alt="" className="size-3.5 rounded-full object-cover" />
+                  ) : (
+                    <span className="inline-flex size-3.5 items-center justify-center rounded-full bg-lime-t text-[8px] font-bold text-[var(--bg)]">
+                      $
+                    </span>
+                  )}
+                  {quote.symbol}
                 </span>
                 <span>·</span>
                 <span>Supply {fmtCompact(pool.totalSupply)}</span>
@@ -537,7 +559,7 @@ export function TokenPageClient({
             </div>
 
             {/* Activity / holders */}
-            <div id="activity" className="rounded-[20px] bg-s1 border border-hair overflow-hidden">
+            <div id="activity" className="overflow-hidden rounded-2xl bg-s1 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
               <div className="px-5 pt-5 flex items-center gap-5 overflow-x-auto">
                 {actTabs.map((a) => (
                   <button
@@ -834,15 +856,6 @@ export function TokenPageClient({
 
             </div>
           </div>
-
-          <div className="lg:sticky lg:top-20 lg:self-start">
-            <ArcDexTradePanel
-              token={token}
-              symbol={pool.symbol}
-              imageUrl={pool.imageUrl || pool.logoUrl}
-              onTraded={refreshAfterTrade}
-            />
-          </div>
         </div>
       </div>
     </main>
@@ -851,7 +864,7 @@ export function TokenPageClient({
 
 function TokenStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl bg-s1 border border-hair px-4 py-3">
+    <div className="rounded-xl bg-s1 px-4 py-3 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
       <div className="text-[11px] text-t3">{label}</div>
       <div className="mt-1 text-sm font-medium tabular-nums">{value}</div>
     </div>

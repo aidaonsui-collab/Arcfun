@@ -33,7 +33,7 @@ import { WalletButton } from '@/components/WalletButton'
 import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 
 const SLIPPAGE_BPS = 500 // 5% — thin Instant single-sided ranges
-const BUY_PRESETS = [25, 100, 500]
+const BUY_PRESETS = [25, 100, 250, 500]
 /** Sell fraction of wallet balance (Max = 100). */
 const SELL_PCTS = [25, 50, 75, 100] as const
 
@@ -536,8 +536,8 @@ export function ArcDexTradePanel({
       : null
 
   return (
-    <div className="rounded-[20px] bg-s1 border border-hair p-5">
-      <div className="flex rounded-full bg-s2 p-1">
+    <div className="rounded-2xl bg-s1 p-4 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
+      <div className="mb-3 grid grid-cols-2 gap-1 rounded-full bg-s2 p-1">
         {(['buy', 'sell'] as const).map((s) => (
           <button
             key={s}
@@ -548,8 +548,12 @@ export function ArcDexTradePanel({
               setEstOut(null)
               setError(null)
             }}
-            className={`h-9 flex-1 rounded-full text-sm font-medium capitalize transition-colors duration-150 ${
-              mode === s ? 'bg-lime text-white' : 'text-t3 hover:text-white'
+            className={`h-9 rounded-full text-sm font-medium capitalize transition-colors duration-150 ${
+              mode === s
+                ? s === 'buy'
+                  ? 'bg-up text-accent-fg'
+                  : 'bg-down text-white'
+                : 'text-t3 hover:text-white'
             }`}
           >
             {s}
@@ -694,7 +698,7 @@ export function ArcDexTradePanel({
               }
               onClick={() => void onSubmit()}
               className={`mt-5 w-full h-11 rounded-full text-sm font-semibold tracking-tightish disabled:opacity-40 transition-colors ${
-                mode === 'buy' ? 'bg-lime text-white hover:bg-lime-2' : 'bg-coral text-white'
+                mode === 'buy' ? 'bg-up text-accent-fg hover:brightness-110' : 'bg-down text-white hover:brightness-110'
               }`}
             >
               {busy ? (
