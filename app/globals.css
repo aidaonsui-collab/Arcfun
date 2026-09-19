@@ -222,6 +222,7 @@
   .tape-row,
   .crucible-bar,
   .live-dot,
+  .eve-trail-dash,
   .quote-orbit,
   .quote-orbit-rev,
   .vault-orbit-spin,
@@ -242,6 +243,15 @@
   .crucible-title::after {
     animation: none;
     background-image: url('/crucible-flames.png');
+  }
+}
+
+.eve-trail-dash {
+  animation: eve-dash 1.15s linear infinite;
+}
+@keyframes eve-dash {
+  to {
+    stroke-dashoffset: -36;
   }
 }
 
