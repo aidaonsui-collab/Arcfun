@@ -1,10 +1,17 @@
 import './globals.css'
 import type { Metadata } from 'next'
+import { Outfit } from 'next/font/google'
 import { Providers } from './providers'
 import { SiteHeader } from '@/components/SiteHeader'
 import { Footer } from '@/components/Footer'
 import { Atmosphere } from '@/components/Atmosphere'
 import { Analytics } from '@vercel/analytics/next'
+
+const outfit = Outfit({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-outfit',
+})
 
 const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL ||
@@ -55,8 +62,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="page-wash text-white antialiased">
+    <html lang="en" className={outfit.variable}>
+      <body className={`${outfit.className} page-wash text-white antialiased`}>
         <Atmosphere />
         <Providers>
           <SiteHeader />

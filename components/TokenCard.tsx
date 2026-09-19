@@ -8,39 +8,11 @@ import { isReflectionToken, volumeForWindow } from '@/lib/tokens'
 import { LaunchKindBadge } from '@/components/LaunchKindBadge'
 import { ageLabel, changeParts, fmtUsd, sparkPathFromValues, tileGradient } from '@/lib/ui-format'
 import { cdnImage } from '@/lib/cdn-image'
-
-const EVE = '0x19209e55049bc613c5cc8b66b7df7824096e78cf'
-const MMF = new Set(['usyc', 'buidl', 'jaaa', 'jtrsy'])
-const COMMODITY = new Set(['cirbtc', 'xaum'])
-const EQUITY = new Set(['crcl'])
-
-const QUOTE_TINT: Record<string, string> = {
-  usdc: '59 142 239',
-  usyc: '125 211 252',
-  buidl: '226 232 240',
-  crcl: '110 231 183',
-  cirbtc: '247 147 26',
-  xaum: '212 175 55',
-}
-
-const COMMODITY_LABEL: Record<string, string> = {
-  cirbtc: 'BTC',
-  xaum: 'Gold',
-}
-
-function quoteMarkSrc(quote: string): string | null {
-  const id = quote.toLowerCase()
-  if (id === 'usdc') return '/marks/usdc.png'
-  if (id === 'usyc') return '/marks/usyc.png'
-  if (id === 'buidl') return '/marks/buidl.png'
-  if (id === 'crcl') return '/marks/crcl.svg'
-  if (id === 'cirbtc') return '/marks/cirbtc.svg'
-  if (id === 'xaum') return '/marks/xaum.svg'
-  return null
-}
+import { quoteAsset } from '@/lib/quote-assets'
+import { EVE_TOKEN } from '@/lib/eve'
 
 function isPlatformToken(token: PoolToken): boolean {
-  return (token.coinType || '').toLowerCase() === EVE
+  return (token.coinType || '').toLowerCase() === EVE_TOKEN.toLowerCase()
 }
 
 export function TokenCard({
@@ -54,14 +26,10 @@ export function TokenCard({
   const address = token.coinType || token.poolId
   const seed = address || token.symbol || token.name
   const { tile, mono } = tileGradient(seed)
-  const chg = changeParts(token.priceChange24h)
   const initial = (token.symbol || token.name || '?').charAt(0).toUpperCase()
   const img = token.imageUrl || token.logoUrl
   const age = ageLabel(token.createdAt)
-  const quote = token.instantMeta?.quote || 'USDC'
-  const quoteKey = quote.toLowerCase()
-  const tint = QUOTE_TINT[quoteKey] || '59 142 239'
-  const mark = quoteMarkSrc(quote)
+  const quote = quoteAsset(token.instantMeta?.quote)
   const vol = volumeForWindow(token, '24H')
   const spark = sparkPathFromValues(token.sparkCloses ?? [])
   const up = (token.priceChange24h ?? 0) >= 0
@@ -83,14 +51,21 @@ export function TokenCard({
 
   const body = (
     <>
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-[46%]" aria-hidden>
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-2/5 pair-watermark" aria-hidden>
         <div
           className="absolute inset-0"
           style={{
-            background: `radial-gradient(ellipse 80% 70% at 80% 50%, rgb(${tint} / 0.16), transparent 70%)`,
+            background: `radial-gradient(ellipse 80% 70% at 80% 50%, rgb(${quote.tint} / 0.18), transparent 72%)`,
           }}
         />
-        {img ? (
+        {quote.mark ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={quote.mark}
+            alt=""
+            className="absolute right-3 top-1/2 size-24 -translate-y-1/2 rounded-full object-cover opacity-80"
+          />
+        ) : img ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={`${address}-wm`}
@@ -100,7 +75,7 @@ export function TokenCard({
           />
         ) : (
           <span
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-[6.5rem] font-bold leading-none opacity-[0.12]"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-7xl font-bold leading-none opacity-10"
             style={{ color: mono }}
           >
             {initial}
@@ -129,19 +104,19 @@ export function TokenCard({
             )}
           </span>
           <div className="min-w-0">
-            <div className="truncate text-xs font-medium uppercase tracking-wide text-t3">
+            <div className="truncate text-base font-semibold tracking-tight">
               ${token.symbol || 'TOKEN'}
             </div>
-            <div className="truncate text-[13px] text-t3">{token.name || 'Unnamed'}</div>
+            <div className="truncate text-xs text-t2">{token.name || 'Unnamed'}</div>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {platform ? (
-            <span className="rounded-full bg-lime/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-lime-t shadow-[0_0_0_1px_rgb(59_142_239_/_0.35)]">
-              Platform token
+            <span className="rounded-full bg-lime/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-lime-t">
+              Platform
             </span>
           ) : reflect ? (
-            <span className="rounded-full bg-[rgb(124_255_58_/_0.1)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fun shadow-[0_0_0_1px_rgb(124_255_58_/_0.25)]">
+            <span className="rounded-full bg-fun/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fun">
               Reflect
             </span>
           ) : null}
@@ -166,48 +141,30 @@ export function TokenCard({
 
       <div className="relative mt-3 flex flex-wrap items-center gap-1.5 text-xs text-t2">
         <span>Paired with</span>
-        <span className="inline-flex items-center gap-1 rounded-full bg-white/[0.04] py-0.5 pl-1 pr-2 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
-          {mark ? (
+        <span className="inline-flex items-center gap-1 rounded-full bg-s2 py-0.5 pl-1 pr-2 shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
+          {quote.mark ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={mark} alt="" className="size-3.5 rounded-full object-cover" />
+            <img src={quote.mark} alt="" className="size-3.5 rounded-full object-cover" />
           ) : (
             <QuoteMark />
           )}
-          <span className="text-white/90">{quote}</span>
+          <span className="text-white">{quote.symbol}</span>
         </span>
-        {MMF.has(quoteKey) ? (
+        {quote.kind !== 'usdc' ? (
           <span
             className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
             style={{
-              background: `rgb(${tint} / 0.14)`,
-              color: `rgb(${tint})`,
+              background: `rgb(${quote.tint} / 0.14)`,
+              color: `rgb(${quote.tint})`,
             }}
           >
-            MMF
+            {quote.label}
           </span>
-        ) : null}
-        {COMMODITY.has(quoteKey) ? (
-          <span
-            className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-            style={{
-              background: `rgb(${tint} / 0.14)`,
-              color: `rgb(${tint})`,
-            }}
-          >
-            {COMMODITY_LABEL[quoteKey] || 'Commodity'}
+        ) : (
+          <span className="rounded-full bg-s2 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-t2">
+            USDC
           </span>
-        ) : null}
-        {EQUITY.has(quoteKey) ? (
-          <span
-            className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-            style={{
-              background: `rgb(${tint} / 0.14)`,
-              color: `rgb(${tint})`,
-            }}
-          >
-            Equity
-          </span>
-        ) : null}
+        )}
         {token.rewardsHandle ? (
           <span className="rounded-full bg-s2 px-2 py-0.5 text-[10px] font-semibold text-lime-t shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
             @{token.rewardsHandle}
@@ -218,10 +175,7 @@ export function TokenCard({
       <div className="relative mt-3 flex items-end justify-between gap-2">
         <div className="text-[11px] text-t3">
           Vol 24h <span className="tabular-nums text-t2">{fmtUsd(vol)}</span>
-          <span
-            className="ml-1.5 font-semibold tabular-nums"
-            style={{ color: chg.stroke }}
-          >
+          <span className={`ml-1.5 font-semibold tabular-nums ${up ? 'text-up' : 'text-down'}`}>
             {pctLabel}
           </span>
         </div>
@@ -231,7 +185,7 @@ export function TokenCard({
               <path
                 d={spark}
                 fill="none"
-                stroke={up ? 'var(--limeT)' : 'var(--coral)'}
+                stroke={up ? 'var(--up)' : 'var(--down)'}
                 strokeWidth="1.6"
                 strokeLinejoin="round"
                 strokeLinecap="round"
@@ -244,7 +198,7 @@ export function TokenCard({
     </>
   )
 
-  const frame = 'token-tile group relative block overflow-hidden rounded-[22px] p-4'
+  const frame = 'token-tile group relative block overflow-hidden rounded-2xl p-4'
 
   if (preview || !address) {
     return <div className={frame}>{body}</div>
