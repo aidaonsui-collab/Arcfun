@@ -5,10 +5,11 @@
  * V3 Instant is TOKEN/USDC. V4 Instant is TOKEN/{quote} (USDC, cirBTC, USYC, …).
  */
 import { useState, useEffect, useRef } from 'react'
-import { useAccount, useConnectorClient, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi, formatUnits, parseUnits, type Address } from 'viem'
 import { Loader2, AlertCircle, CheckCircle, ExternalLink, ArrowDownUp } from 'lucide-react'
 import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_MAX_APPROVAL, ARC_SWAP_GAS, arcPublicClient } from '@/lib/contracts-arc'
+import { setWalletRpcPaused } from '@/lib/wallet-rpc-pause'
 import { buildEveV4Swap, quoteEveV4ExactIn, readEveV4Pool, type EveV4PoolInfo } from '@/lib/arc-v4-swap'
 import {
   arcSwapConfigured,
@@ -119,7 +120,6 @@ export function ArcDexTradePanel({
   onTraded?: () => void
 }) {
   const { address, chainId, isConnected } = useAccount()
-  const { data: wallet } = useConnectorClient({ chainId: ARC_CHAIN_ID })
   const { writeContractAsync } = useWriteContract()
 
   const [mode, setMode] = useState<'buy' | 'sell'>('buy')
@@ -218,7 +218,12 @@ export function ArcDexTradePanel({
   })
 
   useEffect(() => {
+    return () => setWalletRpcPaused(false)
+  }, [])
+
+  useEffect(() => {
     if (!mined) return
+    setWalletRpcPaused(false)
     setStatusMsg('Confirmed ✓')
     setBusy(false)
     submitLock.current = false
@@ -231,9 +236,11 @@ export function ArcDexTradePanel({
   }, [mined, onTraded, refetchQuote, refetchTok, refetchAllowance])
 
   useEffect(() => {
-    if (!amount || Number(amount) <= 0 || !swapOn) {
-      setEstOut(null)
-      setError(null)
+    if (busy || !amount || Number(amount) <= 0 || !swapOn) {
+      if (!amount || Number(amount) <= 0 || !swapOn) {
+        setEstOut(null)
+        setError(null)
+      }
       setQuoting(false)
       return
     }
@@ -258,17 +265,12 @@ export function ArcDexTradePanel({
             return
           }
           const zeroForOne = mode === 'buy' ? !v4Pool.tokenIsCurrency0 : v4Pool.tokenIsCurrency0
-          // Public client first: wagmi's wallet client has no readContract (V3 uses
-          // viem/actions; a connected wallet used to throw and print "Quote failed").
-          const clients = [arcPublicClient(), wallet].filter(Boolean)
+          // Public RPC only. A wallet eth_call while Rabby is open blanks the Sign screen.
           let local: bigint | null = null
-          for (const c of clients) {
-            try {
-              local = await quoteEveV4ExactIn(v4Pool, inAmt, zeroForOne, c as Parameters<typeof quoteEveV4ExactIn>[3])
-              if (local != null && local > 0n) break
-            } catch {
-              /* try the next client / API */
-            }
+          try {
+            local = await quoteEveV4ExactIn(v4Pool, inAmt, zeroForOne, arcPublicClient())
+          } catch {
+            local = null
           }
           if (cancelled) return
           if (local != null && local > 0n) {
@@ -277,11 +279,11 @@ export function ArcDexTradePanel({
             return
           }
         }
-        if (!isV4 && wallet) {
+        if (!isV4) {
           const local =
             mode === 'buy'
-              ? await quoteArcBuy(token, parseUsdc(amount), ref, wallet)
-              : await quoteArcSell(token, parseToken(amount, tokDec), wallet)
+              ? await quoteArcBuy(token, parseUsdc(amount), ref)
+              : await quoteArcSell(token, parseToken(amount, tokDec))
           if (cancelled) return
           if (local != null && local > 0n) {
             setEstOut(local)
@@ -327,7 +329,7 @@ export function ArcDexTradePanel({
       cancelled = true
       clearTimeout(t)
     }
-  }, [amount, mode, token, swapOn, wallet, tokDec, isV4, v4Pool, v4Ready, quoteDec])
+  }, [amount, mode, token, swapOn, busy, tokDec, isV4, v4Pool, v4Ready, quoteDec])
 
   const needApprove = (() => {
     if (!amount || Number(amount) <= 0) return false
@@ -347,6 +349,7 @@ export function ArcDexTradePanel({
     setError(null)
     setBusy(true)
     setStatusMsg('')
+    setWalletRpcPaused(true)
     try {
       if (needApprove) {
         setStatusMsg(mode === 'buy' ? `Approve ${quoteSym}…` : `Approve ${symbol}…`)
@@ -363,6 +366,7 @@ export function ArcDexTradePanel({
           setStatusMsg('Approved. Waiting for a quote…')
           setBusy(false)
           submitLock.current = false
+          setWalletRpcPaused(false)
           return
         }
       }
@@ -392,14 +396,16 @@ export function ArcDexTradePanel({
           chainId: call.chainId,
           gas: ARC_SWAP_GAS,
         })
+        setWalletRpcPaused(false)
         setTxHash(hash)
         setStatusMsg('Confirming…')
       } else if (mode === 'buy') {
         const inAmt = parseUsdc(amount)
         const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
         setStatusMsg('Confirm in wallet…')
-        // Same tier the quote resolved — cached, so this is not an extra RPC round trip.
-        const poolFee = (await findArcPoolFee(token, wallet)) ?? undefined
+        // Cached from the public quote. Do not pass the wallet client: those
+        // eth_calls land in Rabby while the sign popup is opening and blank it.
+        const poolFee = (await findArcPoolFee(token)) ?? undefined
         let call = buildArcBuy(token, inAmt, minOut, poolFee, refCode)
         call = withRecipient(call, address)
         const hash = await writeContractAsync({
@@ -410,13 +416,14 @@ export function ArcDexTradePanel({
           chainId: call.chainId,
           gas: ARC_SWAP_GAS,
         })
+        setWalletRpcPaused(false)
         setTxHash(hash)
         setStatusMsg('Confirming…')
       } else {
         const inAmt = parseToken(amount, tokDec)
         const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
         setStatusMsg('Confirm in wallet…')
-        const poolFee = (await findArcPoolFee(token, wallet)) ?? undefined
+        const poolFee = (await findArcPoolFee(token)) ?? undefined
         const call = buildArcSell(token, inAmt, minOut, address, poolFee)
         const hash = await writeContractAsync({
           address: call.address,
@@ -426,6 +433,7 @@ export function ArcDexTradePanel({
           chainId: call.chainId,
           gas: ARC_SWAP_GAS,
         })
+        setWalletRpcPaused(false)
         setTxHash(hash)
         setStatusMsg('Confirming…')
       }
@@ -436,6 +444,7 @@ export function ArcDexTradePanel({
       setBusy(false)
       setStatusMsg('')
       submitLock.current = false
+      setWalletRpcPaused(false)
     }
   }
 
