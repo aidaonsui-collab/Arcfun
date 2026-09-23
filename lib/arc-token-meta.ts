@@ -25,6 +25,7 @@ export interface ArcTokenMeta {
   poolId?: string
   dexVenue?: 'v3' | 'v4'
   feeBps?: number
+  sellFeeBps?: number
   instantLaunch?: boolean
 }
 

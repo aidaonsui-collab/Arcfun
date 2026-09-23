@@ -5,7 +5,11 @@
 import { parseEventLogs, type Address, type Hex, type TransactionReceipt } from 'viem'
 import { INSTANT_QUOTE_FACTORY_ABI } from './instant-quote-launchpad'
 import { INSTANT_REFLECTION_FACTORY_ABI } from './arc-reflection-launchpad'
-import { EVE_INSTANT_V4_FACTORY_ABI, parseV4PoolId } from './eve-instant-v4-launchpad'
+import {
+  EVE_INSTANT_V4_FACTORY_ABI,
+  EVE_V4_TOKEN_LAUNCHED_DUAL_ABI,
+  parseV4PoolId,
+} from './eve-instant-v4-launchpad'
 import { arcReceiptClient } from './contracts-arc'
 
 export type ArcCreateReceipt = {
@@ -42,15 +46,17 @@ export function parseArcCreateReceipt(receipt: TransactionReceipt): {
       pool: (reflection.args.pool as Address | undefined) || undefined,
     }
   }
-  const [v4] = parseEventLogs({
-    abi: EVE_INSTANT_V4_FACTORY_ABI,
-    eventName: 'TokenLaunched',
-    logs: receipt.logs,
-  })
-  if (v4?.args?.token) {
-    return {
-      token: v4.args.token as Address,
-      poolId: parseV4PoolId(v4.args.id),
+  for (const abi of [EVE_V4_TOKEN_LAUNCHED_DUAL_ABI, EVE_INSTANT_V4_FACTORY_ABI]) {
+    const [v4] = parseEventLogs({
+      abi,
+      eventName: 'TokenLaunched',
+      logs: receipt.logs,
+    })
+    if (v4?.args?.token) {
+      return {
+        token: v4.args.token as Address,
+        poolId: parseV4PoolId(v4.args.id),
+      }
     }
   }
   return {}

@@ -28,6 +28,7 @@ import { quoteDecimalsForToken, quotePolicy, quoteSymbolForQuote, rwaAssetByQuot
 import { fetchQuoteUsdSpot, spotQuoteToUsd } from '@/lib/quote-usd-spot'
 import { formatToken, parseToken } from '@/lib/token-format'
 import { getIncomingReferralCode } from '@/lib/crucible'
+import { feePairLabel } from '@/lib/eve-fee-split'
 import { fmtPrice, fmtUsd, tileGradient } from '@/lib/ui-format'
 import { cdnImage } from '@/lib/cdn-image'
 import { WalletButton } from '@/components/WalletButton'
@@ -519,7 +520,10 @@ export function ArcDexTradePanel({
       </span>
     )
 
-  const feeBps = isV4 ? v4Pool?.feeBps || 100 : 100
+  const buyFeeBps = isV4 ? v4Pool?.buyFeeBps || v4Pool?.feeBps || 100 : 100
+  const sellFeeBps = isV4 ? v4Pool?.sellFeeBps || v4Pool?.feeBps || 100 : 100
+  const feeBps = mode === 'sell' ? sellFeeBps : buyFeeBps
+  const feeLabel = isV4 ? feePairLabel(buyFeeBps, sellFeeBps) : feeBps === 100 ? '1% fee' : `${(feeBps / 100).toFixed(1)}% fee`
   const inUsd = quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, spotPx)
   const outUsd =
     estOut != null && estOut > 0n
@@ -668,7 +672,7 @@ export function ArcDexTradePanel({
             </span>
           </div>
           <div className="mt-1 flex justify-between text-xs text-t3">
-            <span>{feeBps === 100 ? '1% fee' : `${(feeBps / 100).toFixed(1)}% fee`}</span>
+            <span>{feeLabel}</span>
             <span className="tabular-nums">{amtNum > 0 ? fmtUsd(feeUsd) : '$0'}</span>
           </div>
 

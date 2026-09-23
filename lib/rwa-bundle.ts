@@ -5,19 +5,17 @@
 import type { Address } from 'viem'
 import { isAddress } from 'viem'
 import type { FeeSplit } from './eve-fee-split'
+import {
+  EVE_FEE_HOOK_SPLIT_COMPONENTS,
+  EVE_FEE_HOOK_SPLIT_DUAL_COMPONENTS,
+  splitToTuple,
+} from './eve-instant-v4-launchpad'
 import type { ArcRwaAsset } from './arc-rwa-assets'
 
 const ARC_CHAIN_ID = Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID) || 5042
 const DEFAULT_VIRTUAL_QUOTE = 3_000_000_000n
 
-const SPLIT_COMPONENTS = [
-  { name: 'feeBps', type: 'uint16' },
-  { name: 'creatorBps', type: 'uint16' },
-  { name: 'burnBps', type: 'uint16' },
-  { name: 'holdersBps', type: 'uint16' },
-  { name: 'autoLpBps', type: 'uint16' },
-  { name: 'platformBps', type: 'uint16' },
-] as const
+const SPLIT_COMPONENTS = EVE_FEE_HOOK_SPLIT_COMPONENTS
 
 export const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as Address
 
@@ -208,6 +206,40 @@ export function encodeBasketArgs(rows: BasketRow[], quote: Address, mode: Bundle
   }
 }
 
+function rwaCreateAbi(name: 'createToken' | 'createTokenWithBundle', dual: boolean) {
+  const components = dual ? EVE_FEE_HOOK_SPLIT_DUAL_COMPONENTS : EVE_FEE_HOOK_SPLIT_COMPONENTS
+  const outputs =
+    name === 'createTokenWithBundle'
+      ? [
+          { name: 'token', type: 'address' },
+          { name: 'id', type: 'bytes32' },
+          { name: 'tokensOut', type: 'uint256' },
+          { name: 'bundleSink', type: 'address' },
+        ]
+      : [
+          { name: 'token', type: 'address' },
+          { name: 'id', type: 'bytes32' },
+          { name: 'tokensOut', type: 'uint256' },
+        ]
+  return [
+    {
+      type: 'function' as const,
+      name,
+      stateMutability: 'nonpayable' as const,
+      inputs: [
+        { name: 'name', type: 'string' },
+        { name: 'symbol', type: 'string' },
+        { name: 'quote', type: 'address' },
+        { name: 'creator', type: 'address' },
+        { name: 'launchVirtualQuote_', type: 'uint256' },
+        { name: 'firstBuyQuoteAmount', type: 'uint256' },
+        { name: 'split', type: 'tuple' as const, components },
+      ],
+      outputs,
+    },
+  ]
+}
+
 export function buildCreateTokenRwaV4(opts: {
   factory: Address
   name: string
@@ -216,11 +248,16 @@ export function buildCreateTokenRwaV4(opts: {
   creator: Address
   firstBuyQuoteRaw: bigint
   split: FeeSplit
+  dual?: boolean
   launchVirtualQuote?: bigint
 }) {
+  const dual = Boolean(opts.dual)
+  if (!dual && opts.split.buyFeeBps !== opts.split.sellFeeBps) {
+    throw new Error('This factory still charges one fee. Keep buy and sell the same.')
+  }
   return {
     address: opts.factory,
-    abi: RWA_V4_FACTORY_ABI,
+    abi: rwaCreateAbi('createToken', dual),
     functionName: 'createToken' as const,
     args: [
       opts.name,
@@ -229,14 +266,7 @@ export function buildCreateTokenRwaV4(opts: {
       opts.creator,
       opts.launchVirtualQuote ?? DEFAULT_VIRTUAL_QUOTE,
       opts.firstBuyQuoteRaw,
-      {
-        feeBps: opts.split.feeBps,
-        creatorBps: opts.split.creatorBps,
-        burnBps: opts.split.burnBps,
-        holdersBps: opts.split.holdersBps,
-        autoLpBps: opts.split.autoLpBps,
-        platformBps: opts.split.platformBps,
-      },
+      splitToTuple(opts.split, dual),
     ] as const,
     chainId: ARC_CHAIN_ID,
   }
@@ -250,11 +280,16 @@ export function buildCreateTokenWithBundle(opts: {
   creator: Address
   firstBuyQuoteRaw: bigint
   split: FeeSplit
+  dual?: boolean
   launchVirtualQuote?: bigint
 }) {
+  const dual = Boolean(opts.dual)
+  if (!dual && opts.split.buyFeeBps !== opts.split.sellFeeBps) {
+    throw new Error('This factory still charges one fee. Keep buy and sell the same.')
+  }
   return {
     address: opts.factory,
-    abi: RWA_V4_FACTORY_ABI,
+    abi: rwaCreateAbi('createTokenWithBundle', dual),
     functionName: 'createTokenWithBundle' as const,
     args: [
       opts.name,
@@ -263,14 +298,7 @@ export function buildCreateTokenWithBundle(opts: {
       opts.creator,
       opts.launchVirtualQuote ?? DEFAULT_VIRTUAL_QUOTE,
       opts.firstBuyQuoteRaw,
-      {
-        feeBps: opts.split.feeBps,
-        creatorBps: opts.split.creatorBps,
-        burnBps: opts.split.burnBps,
-        holdersBps: opts.split.holdersBps,
-        autoLpBps: opts.split.autoLpBps,
-        platformBps: opts.split.platformBps,
-      },
+      splitToTuple(opts.split, dual),
     ] as const,
     chainId: ARC_CHAIN_ID,
   }

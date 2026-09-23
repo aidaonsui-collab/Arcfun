@@ -66,7 +66,8 @@ contract EveInstantV4Test is Test {
 
     function _creatorSplit() internal pure returns (EveFeeHook.Split memory) {
         return EveFeeHook.Split({
-            feeBps: 100,
+            buyFeeBps: 100,
+            sellFeeBps: 100,
             creatorBps: 7_000,
             burnBps: 1_000,
             holdersBps: 0,
@@ -77,7 +78,8 @@ contract EveInstantV4Test is Test {
 
     function _reflectSplit() internal pure returns (EveFeeHook.Split memory) {
         return EveFeeHook.Split({
-            feeBps: 100,
+            buyFeeBps: 100,
+            sellFeeBps: 100,
             creatorBps: 2_000,
             burnBps: 1_000,
             holdersBps: 5_000,
@@ -88,7 +90,8 @@ contract EveInstantV4Test is Test {
 
     function _scorchedSplit() internal pure returns (EveFeeHook.Split memory) {
         return EveFeeHook.Split({
-            feeBps: 100,
+            buyFeeBps: 100,
+            sellFeeBps: 100,
             creatorBps: 2_000,
             burnBps: 6_000,
             holdersBps: 0,
@@ -183,7 +186,8 @@ contract EveInstantV4Test is Test {
             address regAutoLp,
             address regPlatform,
             address launch,
-            uint16 feeBps,
+            uint16 buyFeeBps,
+            uint16 sellFeeBps,
             uint16 cBps,
             uint16 bBps,
             uint16 hBps,
@@ -196,7 +200,8 @@ contract EveInstantV4Test is Test {
         assertEq(regAutoLp, address(factory));
         assertEq(regPlatform, platform);
         assertEq(launch, token);
-        assertEq(feeBps, factory.DEFAULT_FEE_BPS());
+        assertEq(buyFeeBps, factory.DEFAULT_FEE_BPS());
+        assertEq(sellFeeBps, factory.DEFAULT_FEE_BPS());
         assertEq(cBps, 7_000);
         assertEq(bBps, 1_000);
         assertEq(hBps, 0);
@@ -333,15 +338,17 @@ contract EveInstantV4Test is Test {
         assertEq(platformTok, total - creatorTok - burnTok - autoLpTok);
     }
 
-    function test_feeBounds_030And300Work() public {
+    function test_feeBounds_030And500Work() public {
         EveFeeHook.Split memory lo = _creatorSplit();
-        lo.feeBps = 30;
+        lo.buyFeeBps = 30;
+        lo.sellFeeBps = 30;
         (address tLo,, bool zLo) = _launchSplit(lo, address(0));
         _buy(_key(tLo, zLo), zLo, 10_000e6);
         assertGt(hook.owed(creator, Currency.wrap(tLo)), 0);
 
         EveFeeHook.Split memory hi = _creatorSplit();
-        hi.feeBps = 300;
+        hi.buyFeeBps = 500;
+        hi.sellFeeBps = 500;
         (address tHi,, bool zHi) = _launchSplit(hi, address(0));
         _buy(_key(tHi, zHi), zHi, 10_000e6);
         assertGt(hook.owed(creator, Currency.wrap(tHi)), 0);
@@ -349,18 +356,68 @@ contract EveInstantV4Test is Test {
 
     function test_create_rejectsFeeOutOfRange() public {
         EveFeeHook.Split memory s = _creatorSplit();
-        s.feeBps = 29;
+        s.buyFeeBps = 29;
         vm.expectRevert(EveFeeHook.BadFeeBps.selector);
         factory.createToken("X", "X", address(quote), creator, 0, 0, s, address(0));
 
-        s.feeBps = 301;
+        s = _creatorSplit();
+        s.sellFeeBps = 501;
         vm.expectRevert(EveFeeHook.BadFeeBps.selector);
         factory.createToken("Y", "Y", address(quote), creator, 0, 0, s, address(0));
     }
 
+    function test_asymmetricFees_buy03Sell5() public {
+        EveFeeHook.Split memory s = _creatorSplit();
+        s.buyFeeBps = 30;
+        s.sellFeeBps = 500;
+        (address token, PoolId id, bool tokenIsCurrency0) = _launchSplit(s, address(0));
+        PoolKey memory key = _key(token, tokenIsCurrency0);
+        _buy(key, tokenIsCurrency0, 10_000e6);
+
+        Currency tokenCurrency = Currency.wrap(token);
+        uint256 buyFee = hook.owed(creator, tokenCurrency) + hook.owed(platform, tokenCurrency)
+            + hook.pendingAutoLp(id, tokenCurrency) + IERC20Like(token).balanceOf(hook.DEAD());
+        uint256 got = IERC20Like(token).balanceOf(trader);
+        assertGt(buyFee, 0);
+        // Hook takes exactly 30 bps of the pre-fee output. Reconstructing from the
+        // trader balance can floor one bp because of the returned swap delta.
+        uint256 buyBps = (buyFee * 10_000) / (got + buyFee);
+        assertGe(buyBps, 29);
+        assertLe(buyBps, 30);
+
+        uint256 quoteBefore = quote.balanceOf(trader);
+        _sellHalf(token, key, tokenIsCurrency0);
+        uint256 quoteOut = quote.balanceOf(trader) - quoteBefore;
+        Currency quoteCurrency = Currency.wrap(address(quote));
+        uint256 sellFee = hook.owed(creator, quoteCurrency) + hook.owed(platform, quoteCurrency)
+            + hook.pendingAutoLp(id, quoteCurrency) + hook.pendingBurn(id, quoteCurrency);
+        assertGt(sellFee, 0);
+        uint256 sellBps = (sellFee * 10_000) / (quoteOut + sellFee);
+        assertGe(sellBps, 499);
+        assertLe(sellBps, 500);
+    }
+
+    function test_firstBuy_usesBuyFeeNotSellFee() public {
+        uint256 buyIn = 1_000e6;
+        quote.mint(address(this), buyIn * 2);
+        quote.approve(address(factory), buyIn * 2);
+        EveFeeHook.Split memory cheap = _creatorSplit();
+        cheap.buyFeeBps = 30;
+        cheap.sellFeeBps = 500;
+        EveFeeHook.Split memory rich = _creatorSplit();
+        rich.buyFeeBps = 500;
+        rich.sellFeeBps = 30;
+        (,, uint256 outCheap) =
+            factory.createToken("Cheap", "CHP", address(quote), creator, VQ_6DP, buyIn, cheap, address(0));
+        (,, uint256 outRich) =
+            factory.createToken("Rich", "RCH", address(quote), creator, VQ_6DP, buyIn, rich, address(0));
+        assertGt(outCheap, outRich);
+    }
+
     function test_create_rejectsPlatformBelowFloor() public {
         EveFeeHook.Split memory s = EveFeeHook.Split({
-            feeBps: 100,
+            buyFeeBps: 100,
+            sellFeeBps: 100,
             creatorBps: 8_000,
             burnBps: 1_000,
             holdersBps: 0,

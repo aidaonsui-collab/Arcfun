@@ -64,7 +64,8 @@ contract RwaInstantV4Test is Test {
 
     function _creatorSplit() internal pure returns (EveFeeHook.Split memory) {
         return EveFeeHook.Split({
-            feeBps: 100,
+            buyFeeBps: 100,
+            sellFeeBps: 100,
             creatorBps: 7_000,
             burnBps: 1_000,
             holdersBps: 0,
@@ -119,7 +120,8 @@ contract RwaInstantV4Test is Test {
             address regAutoLp,
             address regPlatform,
             address launch,
-            uint16 feeBps,
+            uint16 buyFeeBps,
+            uint16 sellFeeBps,
             uint16 cBps,
             uint16 bBps,
             uint16 hBps,
@@ -132,7 +134,8 @@ contract RwaInstantV4Test is Test {
         assertEq(regAutoLp, address(factory));
         assertEq(regPlatform, platform);
         assertEq(launch, token);
-        assertEq(feeBps, 100);
+        assertEq(buyFeeBps, 100);
+        assertEq(sellFeeBps, 100);
         assertEq(cBps, 7_000);
         assertEq(hBps, 0);
         assertEq(uint256(cBps) + bBps + hBps + aBps + pBps, 10_000);
