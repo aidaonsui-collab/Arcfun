@@ -1,6 +1,6 @@
 # Instant V4: asymmetric buy / sell fee
 
-**Status:** implemented in source. Already-launched pools stay on the previous hook. New launches pick up buy and sell fees only after a new EveFeeHook and both factories are deployed and create is pointed at them.  
+**Status:** deployed 2026-09-23. New creates use hook `0xd0789f648014Ade05d40b26496570319ec124044`, USDC factory `0x1ADE6304CEbd48a724F07a0336759e37D1C9dB6d`, RWA factory `0x5Fa197152ac04C0bE7D92DA7270755400b281440`. Already-launched pools stay on the previous hook.  
 **Date:** 2026-09-22  
 **Decision locked:** max fee **5%** (`MAX_FEE_BPS = 500`) on each of buy and sell.  
 **Scope:** eve.fun Instant V4 (`EveFeeHook` + factories + create UI + router quotes + indexer)  
@@ -179,9 +179,6 @@ No migration of existing pools. Asymmetric fees are **new creates only**.
 
 Locked from product: **max 5% per side**.
 
-Ship yes is in. Both factories share the new `Split`, so the cutover deploys USDC and RWA together. The label stays fee.
+Ship yes is in. Both factories share the new `Split`. The label stays fee.
 
-Still needed before mainnet:
-
-1. CREATE2-deploy the new hook, `setFactoryAllowed` on it, deploy both factories, point create env at the new addresses.
-2. Leave the previous hook and factories in the catalog so existing tokens keep trading.
+Deployed together on 2026-09-23. The previous hook and factories stay in the catalog so existing tokens keep trading.
