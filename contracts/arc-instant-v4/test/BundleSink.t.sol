@@ -118,7 +118,8 @@ contract BundleSinkTest is Test {
 
     function _reflectSplit() internal pure returns (EveFeeHook.Split memory) {
         return EveFeeHook.Split({
-            feeBps: 100,
+            buyFeeBps: 100,
+            sellFeeBps: 100,
             creatorBps: 2_000,
             burnBps: 1_000,
             holdersBps: 5_000,

@@ -42,6 +42,9 @@ const REFLECTION_CREATED = parseAbiItem(
 const V4_LAUNCHED = parseAbiItem(
   'event TokenLaunched(address indexed token, address indexed quote, address indexed creator, bytes32 id, bool tokenIsCurrency0, uint16 feeBps)',
 )
+const V4_LAUNCHED_DUAL = parseAbiItem(
+  'event TokenLaunched(address indexed token, address indexed quote, address indexed creator, bytes32 id, bool tokenIsCurrency0, uint16 buyFeeBps, uint16 sellFeeBps)',
+)
 
 /** Known floors so first run doesn't scan from genesis. */
 const FACTORY_FLOOR = 14_000_000n
@@ -209,9 +212,10 @@ async function scanFactoryEvents(
   if (arcInstantV4Enabled()) {
     let scannedTo = from
     for (const factory of instantV4CatalogFactories()) {
+      for (const event of [V4_LAUNCHED, V4_LAUNCHED_DUAL]) {
       const scanned = await scanLogsChunked(client, {
         address: factory,
-        event: V4_LAUNCHED,
+        event,
         fromBlock: from,
         toBlock: head,
         maxChunks: MAX_FACTORY_CHUNKS,
@@ -249,6 +253,7 @@ async function scanFactoryEvents(
           quote: args.quote,
         })
         found++
+      }
       }
     }
     state = { ...state, factoryCursor: scannedTo.toString() }

@@ -2,11 +2,21 @@
  * Exact-in swaps against eve.fun Instant v4 pools via EveV4Router.
  * Quote is a slot0 linear estimate with the hook fee haircut — not a full curve sim.
  */
-import { concat, keccak256, pad, toHex, type Address, type Client, type Hex } from 'viem'
-import { readContract } from 'viem/actions'
+import {
+  concat,
+  decodeAbiParameters,
+  encodeFunctionData,
+  keccak256,
+  pad,
+  parseAbiParameters,
+  toHex,
+  type Address,
+  type Client,
+  type Hex,
+} from 'viem'
+import { call, readContract } from 'viem/actions'
 import { ARC, ARC_CHAIN_ID, instantV4CatalogFactories } from './contracts-arc'
 import {
-  EVE_FEE_HOOK_CONFIGS_ABI,
   EVE_INSTANT_V4_FACTORY_ABI,
   EVE_V4_POOL_MANAGER_STATE_ABI,
   EVE_V4_ROUTER_ABI,
@@ -37,7 +47,10 @@ export type EveV4PoolInfo = {
   holders: Address
   poolId: Hex
   tokenIsCurrency0: boolean
+  /** Buy fee. Equal to sellFeeBps on hooks that still store one fee. */
   feeBps: number
+  buyFeeBps: number
+  sellFeeBps: number
   key: EveV4PoolKey
 }
 
@@ -72,7 +85,7 @@ export async function readEveV4Pool(
       const currency0 = tokenIsCurrency0 ? launched : quote
       const currency1 = tokenIsCurrency0 ? quote : launched
       const poolId = row[4]
-      const feeBps = await readEveV4FeeBps(hooks, poolId, client)
+      const fees = await readEveV4Fees(hooks, poolId, client)
       return {
         token: launched,
         quote,
@@ -80,7 +93,9 @@ export async function readEveV4Pool(
         holders: row[3],
         poolId,
         tokenIsCurrency0,
-        feeBps,
+        feeBps: fees.buyFeeBps,
+        buyFeeBps: fees.buyFeeBps,
+        sellFeeBps: fees.sellFeeBps,
         key: {
           currency0,
           currency1,
@@ -137,34 +152,59 @@ export async function readEveV4SqrtPriceX96(poolId: Hex, client: Client): Promis
   return sqrtPriceX96FromExtsload(word)
 }
 
-export async function readEveV4FeeBps(hooks: Address, poolId: Hex, client: Client): Promise<number> {
-  if (!hooks || hooks === ZERO) return EVE_V4_DEFAULT_FEE_BPS
+const CONFIGS_CALL_ABI = [
+  {
+    type: 'function',
+    name: 'configs',
+    stateMutability: 'view',
+    inputs: [{ name: 'id', type: 'bytes32' }],
+    outputs: [],
+  },
+] as const
+
+const CONFIGS_OLD = parseAbiParameters(
+  'bool, address, address, address, address, address, uint16, uint16, uint16, uint16, uint16, uint16',
+)
+const CONFIGS_DUAL = parseAbiParameters(
+  'bool, address, address, address, address, address, uint16, uint16, uint16, uint16, uint16, uint16, uint16',
+)
+
+function feeOrDefault(v: unknown): number {
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? n : EVE_V4_DEFAULT_FEE_BPS
+}
+
+/** Old hooks return 12 words (one feeBps). New hooks return 13 (buy, then sell). */
+export async function readEveV4Fees(
+  hooks: Address,
+  poolId: Hex,
+  client: Client,
+): Promise<{ buyFeeBps: number; sellFeeBps: number }> {
+  const fallback = { buyFeeBps: EVE_V4_DEFAULT_FEE_BPS, sellFeeBps: EVE_V4_DEFAULT_FEE_BPS }
+  if (!hooks || hooks === ZERO) return fallback
   try {
-    const row = (await readContract(client, {
-      address: hooks,
-      abi: EVE_FEE_HOOK_CONFIGS_ABI,
-      functionName: 'configs',
-      args: [poolId],
-    })) as readonly [
-      boolean,
-      Address,
-      Address,
-      Address,
-      Address,
-      Address,
-      number | bigint,
-      number | bigint,
-      number | bigint,
-      number | bigint,
-      number | bigint,
-      number | bigint,
-    ]
-    const feeBps = Number(row[6])
-    if (Number.isFinite(feeBps) && feeBps > 0) return feeBps
+    const data = encodeFunctionData({ abi: CONFIGS_CALL_ABI, functionName: 'configs', args: [poolId] })
+    const res = await call(client, { to: hooks, data })
+    const raw = res.data
+    if (!raw || raw === '0x') return fallback
+    const words = (raw.length - 2) / 64
+    if (words >= 13) {
+      const row = decodeAbiParameters(CONFIGS_DUAL, raw)
+      return { buyFeeBps: feeOrDefault(row[6]), sellFeeBps: feeOrDefault(row[7]) }
+    }
+    if (words >= 12) {
+      const row = decodeAbiParameters(CONFIGS_OLD, raw)
+      const fee = feeOrDefault(row[6])
+      return { buyFeeBps: fee, sellFeeBps: fee }
+    }
   } catch {
     /* older hook or RPC miss — Instant default is 1% */
   }
-  return EVE_V4_DEFAULT_FEE_BPS
+  return fallback
+}
+
+export async function readEveV4FeeBps(hooks: Address, poolId: Hex, client: Client): Promise<number> {
+  return (await readEveV4Fees(hooks, poolId, client)).buyFeeBps
 }
 
 export async function quoteEveV4ExactIn(
@@ -176,7 +216,9 @@ export async function quoteEveV4ExactIn(
   if (amountIn <= 0n) return null
   const sqrtPriceX96 = await readEveV4SqrtPriceX96(pool.poolId, client)
   if (sqrtPriceX96 <= 0n) return null
-  const feeBps = pool.feeBps > 0 ? pool.feeBps : EVE_V4_DEFAULT_FEE_BPS
+  const buying = zeroForOne !== pool.tokenIsCurrency0
+  const sideFee = buying ? pool.buyFeeBps : pool.sellFeeBps
+  const feeBps = sideFee > 0 ? sideFee : pool.feeBps > 0 ? pool.feeBps : EVE_V4_DEFAULT_FEE_BPS
   const out = estimateEveV4ExactIn({ amountIn, zeroForOne, sqrtPriceX96, feeBps })
   return out > 0n ? out : null
 }

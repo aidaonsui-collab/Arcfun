@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
     poolId?: string
     dexVenue?: 'v3' | 'v4'
     feeBps?: number
+    sellFeeBps?: number
   }
   const token = body.token
   if (!token || !isPlausibleEvmAddress(token)) {
@@ -81,6 +82,7 @@ export async function POST(req: NextRequest) {
       poolId: typeof body.poolId === 'string' && body.poolId.startsWith('0x') ? body.poolId : undefined,
       dexVenue: body.dexVenue === 'v4' || body.dexVenue === 'v3' ? body.dexVenue : undefined,
       feeBps: Number.isFinite(body.feeBps) ? Number(body.feeBps) : undefined,
+      sellFeeBps: Number.isFinite(body.sellFeeBps) ? Number(body.sellFeeBps) : undefined,
       instantLaunch: true,
     })
   } catch {

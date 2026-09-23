@@ -100,7 +100,8 @@ contract RwaInstantV4Factory is IUnlockCallback {
         address indexed creator,
         PoolId id,
         bool tokenIsCurrency0,
-        uint16 feeBps
+        uint16 buyFeeBps,
+        uint16 sellFeeBps
     );
     event TokenFirstBuy(address indexed token, address indexed buyer, uint256 quoteIn, uint256 tokensOut);
     event LaunchVirtualQuoteSet(uint256 quote);
@@ -186,8 +187,14 @@ contract RwaInstantV4Factory is IUnlockCallback {
         emit LiquidityUnlocked(info.id, lock.beneficiary, liquidityRemoved);
     }
 
+    /// @notice 2 = buyFeeBps + sellFeeBps. Older factories omit this and use one feeBps.
+    function feeModel() external pure returns (uint8) {
+        return 2;
+    }
+
     function defaultSplit() public pure returns (EveFeeHook.Split memory s) {
-        s.feeBps = DEFAULT_FEE_BPS;
+        s.buyFeeBps = DEFAULT_FEE_BPS;
+        s.sellFeeBps = DEFAULT_FEE_BPS;
         s.creatorBps = DEFAULT_CREATOR_BPS;
         s.burnBps = DEFAULT_BURN_BPS;
         s.holdersBps = DEFAULT_HOLDERS_BPS;
@@ -319,7 +326,8 @@ contract RwaInstantV4Factory is IUnlockCallback {
                 call.creator,
                 call.vq,
                 call.firstBuy,
-                call.split.feeBps,
+                call.split.buyFeeBps,
+                call.split.sellFeeBps,
                 call.split.creatorBps,
                 call.split.burnBps,
                 call.split.autoLpBps,
@@ -395,7 +403,9 @@ contract RwaInstantV4Factory is IUnlockCallback {
         }
 
         poolOf[token] = PoolInfo({token: token, quote: call.quote, creator: call.creator, holders: holders, id: id});
-        emit TokenLaunched(token, call.quote, call.creator, id, tokenIsCurrency0, call.split.feeBps);
+        emit TokenLaunched(
+            token, call.quote, call.creator, id, tokenIsCurrency0, call.split.buyFeeBps, call.split.sellFeeBps
+        );
     }
 
     function _range(bool tokenIsCurrency0, uint256 vq)

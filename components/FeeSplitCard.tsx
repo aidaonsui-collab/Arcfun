@@ -1,10 +1,9 @@
 'use client'
 
 /**
- * Launch-fee chooser. Argus-shaped (presets + sliders + 100% ring) but eve.fun
- * lime-navy, one pool fee, no buy-vs-sell tax chrome.
+ * Launch-fee chooser. Buy and sell fees, then the same destination split.
  */
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import {
   FEE_LEGS,
   FEE_PRESET_META,
@@ -13,7 +12,9 @@ import {
   MIN_FEE_BPS,
   MIN_PLATFORM_BPS,
   bpsKey,
+  clampFeeBps,
   conicStops,
+  feePairLabel,
   feePctLabel,
   matchPreset,
   pctLabel,
@@ -31,6 +32,7 @@ export function FeeSplitCard({
   onChange,
   hideHolders = false,
   minHoldersBps = 0,
+  requireEqualFees = false,
   preview = false,
   open,
   onOpenChange,
@@ -39,15 +41,19 @@ export function FeeSplitCard({
   onChange: (next: FeeSplit) => void
   hideHolders?: boolean
   minHoldersBps?: number
+  /** Live single-fee factories cannot store a different sell fee. */
+  requireEqualFees?: boolean
   preview?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const check = splitValid(split, { hideHolders, minHoldersBps })
+  const check = splitValid(split, { hideHolders, minHoldersBps, requireEqualFees })
   const remaining = splitRemaining(split)
   const preset = matchPreset(split)
   const titleId = useId()
   const panelRef = useRef<HTMLDivElement>(null)
+  const [linked, setLinked] = useState(split.buyFeeBps === split.sellFeeBps)
+  const pairLabel = feePairLabel(split.buyFeeBps, split.sellFeeBps)
 
   useEffect(() => {
     if (!open) return
@@ -75,12 +81,22 @@ export function FeeSplitCard({
     if (id === 'custom') return
     if (hideHolders && id === 'reflect') return
     if (minHoldersBps > 0 && id !== 'reflect' && FEE_SPLIT_PRESETS[id].holdersBps < minHoldersBps) return
+    setLinked(true)
     onChange(FEE_SPLIT_PRESETS[id])
   }
 
-  const setFeeBps = (feeBps: number) => {
-    const clamped = Math.min(MAX_FEE_BPS, Math.max(MIN_FEE_BPS, Math.round(feeBps / 10) * 10))
-    onChange({ ...split, feeBps: clamped })
+  const setBuyFee = (bps: number) => {
+    const clamped = clampFeeBps(bps)
+    onChange({
+      ...split,
+      buyFeeBps: clamped,
+      sellFeeBps: linked ? clamped : split.sellFeeBps,
+    })
+  }
+
+  const setSellFee = (bps: number) => {
+    const clamped = clampFeeBps(bps)
+    onChange({ ...split, sellFeeBps: clamped })
   }
 
   const setLeg = (leg: FeeLeg, bps: number) => {
@@ -104,12 +120,17 @@ export function FeeSplitCard({
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">Launch fee</span>
             <span className="text-[11px] font-semibold tabular-nums text-lime-t">
-              {feePctLabel(split.feeBps)} · {FEE_PRESET_META[preset].title}
+              {pairLabel} · {FEE_PRESET_META[preset].title}
             </span>
           </div>
           <p className="mt-1 mb-0 text-xs text-t2 leading-snug">
-            Same cut on buys and sells. Tap to pick where it goes.
+            {split.buyFeeBps === split.sellFeeBps
+              ? 'Same cut on buys and sells. Tap to pick where it goes.'
+              : 'Buy and sell fees differ. Tap to edit the split.'}
           </p>
+          {!check.ok && check.reason ? (
+            <p className="mt-2 mb-0 text-[11px] leading-snug text-coral">{check.reason}</p>
+          ) : null}
         </div>
         <span className="shrink-0 text-[12px] font-semibold text-lime-t group-hover:text-white">
           Adjust
@@ -174,37 +195,47 @@ export function FeeSplitCard({
               <Donut split={split} hideHolders={hideHolders} size={92} />
               <div className="min-w-0 flex-1">
                 <div className="text-[28px] font-semibold tabular-nums tracking-tight leading-none">
-                  {feePctLabel(split.feeBps)}
+                  {split.buyFeeBps === split.sellFeeBps ? feePctLabel(split.buyFeeBps) : pairLabel}
                 </div>
                 <p className="mt-2 mb-0 text-[12px] text-t2 leading-snug">
-                  Buys cut the launch token. Sells cut the quote. Burn always ends as launch token
-                  at dead.
+                  Fee is taken from what the trader receives. Split below decides where it goes.
                 </p>
               </div>
             </div>
 
-            <div className="mt-5">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[12px] text-t3">Pool fee</span>
-                <span className="text-[13px] font-semibold tabular-nums text-white">
-                  {feePctLabel(split.feeBps)}
-                </span>
-              </div>
-              <input
-                type="range"
-                min={MIN_FEE_BPS}
-                max={MAX_FEE_BPS}
-                step={10}
-                value={split.feeBps}
-                onChange={(e) => setFeeBps(Number(e.target.value))}
-                className="fee-range w-full"
-                aria-label="Pool fee"
-              />
-              <div className="mt-1 flex justify-between text-[11px] text-t3 tabular-nums">
-                <span>0.3%</span>
-                <span>3.0%</span>
-              </div>
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <span className="text-[12px] text-t3">Buy and sell</span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (linked) {
+                    setLinked(false)
+                    return
+                  }
+                  setLinked(true)
+                  onChange({ ...split, sellFeeBps: split.buyFeeBps })
+                }}
+                className={`h-8 px-3 rounded-full text-[12px] font-semibold border ${
+                  linked
+                    ? 'bg-lime text-white border-transparent'
+                    : 'border-hair text-t2 bg-white/[0.03]'
+                }`}
+              >
+                {linked ? 'Same on buys and sells' : 'Set separately'}
+              </button>
             </div>
+
+            <FeeSlider
+              label="Buy fee"
+              value={split.buyFeeBps}
+              onChange={setBuyFee}
+            />
+            <FeeSlider
+              label="Sell fee"
+              value={split.sellFeeBps}
+              onChange={linked ? setBuyFee : setSellFee}
+              disabled={linked}
+            />
 
             <div className="mt-5 flex flex-wrap gap-1.5">
               {PRESET_ORDER.map((id) => {
@@ -288,13 +319,51 @@ export function FeeSplitCard({
               }`}
             >
               {check.ok
-                ? '100% allocated. Same fee on every swap.'
+                ? split.buyFeeBps === split.sellFeeBps
+                  ? '100% allocated.'
+                  : `100% allocated. ${pairLabel}.`
                 : check.reason || `Allocate ${pctLabel(Math.abs(remaining))}.`}
             </div>
           </div>
         </div>
       </div>
     </>
+  )
+}
+
+function FeeSlider({
+  label,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  label: string
+  value: number
+  onChange: (bps: number) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className={`mt-4 ${disabled ? 'opacity-60' : ''}`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[12px] text-t3">{label}</span>
+        <span className="text-[13px] font-semibold tabular-nums text-white">{feePctLabel(value)}</span>
+      </div>
+      <input
+        type="range"
+        min={MIN_FEE_BPS}
+        max={MAX_FEE_BPS}
+        step={10}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="fee-range w-full"
+        aria-label={label}
+      />
+      <div className="mt-1 flex justify-between text-[11px] text-t3 tabular-nums">
+        <span>0.3%</span>
+        <span>5.0%</span>
+      </div>
+    </div>
   )
 }
 

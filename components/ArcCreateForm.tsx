@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAccount, useConnect, useSwitchChain, useWriteContract, useSignMessage } from 'wagmi'
+import { useAccount, useConnect, useReadContract, useSwitchChain, useWriteContract, useSignMessage } from 'wagmi'
 import { erc20Abi, formatUnits, getAddress, isAddress, type Address } from 'viem'
 import { prepareTokenRegisterAuth } from '@/lib/arc-auth'
 import { Loader2, AlertCircle, CheckCircle, ImagePlus, ChevronDown } from 'lucide-react'
@@ -28,7 +28,11 @@ import {
   buildCreateTokenMemeInstantArc,
   parseArcQuote,
 } from '@/lib/arc-instant-launchpad'
-import { buildCreateTokenEveV4, EVE_V4_DEFAULT_VIRTUAL_QUOTE } from '@/lib/eve-instant-v4-launchpad'
+import {
+  buildCreateTokenEveV4,
+  EVE_V4_DEFAULT_VIRTUAL_QUOTE,
+  EVE_V4_FEE_MODEL_ABI,
+} from '@/lib/eve-instant-v4-launchpad'
 import { estimateInstantFirstBuyTokens, instantListedMcUsd } from '@/lib/instant-first-buy'
 import {
   liveRwaQuoteAssets,
@@ -307,6 +311,15 @@ export function ArcCreateForm({
     return null
   })()
   const rwaV4Live = Boolean(v4Live && rwaQuote && rwaFactoryAddr)
+  const feeFactory = (rwaV4Live && rwaFactoryAddr ? rwaFactoryAddr : ARC.INSTANT_V4_FACTORY) as Address
+  const feeModelQ = useReadContract({
+    address: feeFactory,
+    abi: EVE_V4_FEE_MODEL_ABI,
+    functionName: 'feeModel',
+    query: { retry: false, enabled: v4Ui && Boolean(feeFactory) },
+  })
+  const dualFee = Number(feeModelQ.data) === 2
+  const feeModelKnown = feeModelQ.isSuccess || feeModelQ.isError
   const bundleLive = rwaV4Live
   const hideHolders = Boolean(rwaQuote) && !bundleOn
   const minHoldersBps = isReflection
@@ -319,7 +332,10 @@ export function ArcCreateForm({
     if (!hideHolders || feeSplit.holdersBps === 0) return
     setFeeSplit((s) => foldHoldersIntoCreator(s))
   }, [hideHolders, feeSplit.holdersBps])
-  const feeOk = !v4Ui || splitValid(feeSplit, { hideHolders, minHoldersBps }).ok
+  const feeOk =
+    !v4Ui ||
+    (feeModelKnown &&
+      splitValid(feeSplit, { hideHolders, minHoldersBps, requireEqualFees: !dualFee }).ok)
   const basketCheck = bundleOn
     ? basketValid(basketRows, {
         quote: ((rwaQuote?.address as Address) || ARC.USDC) as Address,
@@ -628,6 +644,7 @@ export function ArcCreateForm({
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
           split: splitForCreate,
+          dual: dualFee,
           launchVirtualQuote: rwaQuote
             ? defaultRwaVirtualQuoteRaw(rwaQuote, {
                 spotUsd: spotUsd ? await refreshSpotPx(true) : undefined,
@@ -688,6 +705,7 @@ export function ArcCreateForm({
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
           split: splitForCreate,
+          dual: dualFee,
           launchVirtualQuote: rwaQuote
             ? defaultRwaVirtualQuoteRaw(rwaQuote, {
                 spotUsd: spotUsd ? await refreshSpotPx(true) : undefined,
@@ -716,6 +734,7 @@ export function ArcCreateForm({
           creator,
           firstBuyQuoteRaw: firstBuyQuote,
           split: splitForCreate,
+          dual: dualFee,
         })
         hash = await writeContractAsync({
           address: call.address,
@@ -794,7 +813,8 @@ export function ArcCreateForm({
             token: getAddress(token),
             pool: pool || '',
             dexVenue: v4Live ? 'v4' : 'v3',
-            feeBps: feeSplit.feeBps,
+            feeBps: feeSplit.buyFeeBps,
+            sellFeeBps: feeSplit.sellFeeBps,
           }),
         })
       } catch {
@@ -897,7 +917,7 @@ export function ArcCreateForm({
         quoteInRaw,
         virtualQuoteRaw,
         tokenDecimals: 18,
-        feeBps: v4Ui ? feeSplit.feeBps : 100,
+        feeBps: v4Ui ? feeSplit.buyFeeBps : 100,
       })
     } catch {
       firstBuyTokens = 0
@@ -1058,6 +1078,7 @@ export function ArcCreateForm({
         {v4Ui && launchesLive ? (
           <div className="mt-3 space-y-3">
             <FeeSplitCard
+              requireEqualFees={feeModelKnown && !dualFee}
               split={feeSplit}
               onChange={setFeeSplit}
               hideHolders={hideHolders}

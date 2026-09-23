@@ -94,7 +94,8 @@ contract EveInstantV4Factory is IUnlockCallback {
         address indexed creator,
         PoolId id,
         bool tokenIsCurrency0,
-        uint16 feeBps
+        uint16 buyFeeBps,
+        uint16 sellFeeBps
     );
     event TokenFirstBuy(address indexed token, address indexed buyer, uint256 quoteIn, uint256 tokensOut);
     event LaunchVirtualQuoteSet(uint256 quote);
@@ -177,9 +178,15 @@ contract EveInstantV4Factory is IUnlockCallback {
         emit LiquidityUnlocked(info.id, lock.beneficiary, liquidityRemoved);
     }
 
-    /// @notice Creator preset: 1% pool fee, 70/10/0/10/10 creator/burn/holders/auto-LP/platform.
+    /// @notice 2 = buyFeeBps + sellFeeBps. Older factories omit this and use one feeBps.
+    function feeModel() external pure returns (uint8) {
+        return 2;
+    }
+
+    /// @notice Creator preset: 1% buy and sell, 70/10/0/10/10 creator/burn/holders/auto-LP/platform.
     function defaultSplit() public pure returns (EveFeeHook.Split memory s) {
-        s.feeBps = DEFAULT_FEE_BPS;
+        s.buyFeeBps = DEFAULT_FEE_BPS;
+        s.sellFeeBps = DEFAULT_FEE_BPS;
         s.creatorBps = DEFAULT_CREATOR_BPS;
         s.burnBps = DEFAULT_BURN_BPS;
         s.holdersBps = DEFAULT_HOLDERS_BPS;
@@ -205,7 +212,7 @@ contract EveInstantV4Factory is IUnlockCallback {
         return _create(name, symbol, quote, creator, launchVirtualQuote_, firstBuyQuoteAmount, defaultSplit(), address(0));
     }
 
-    /// @param split Per-pool fee + 100% allocation. Hook enforces 0.3–3% and 10% platform floor.
+    /// @param split Per-pool buy/sell fees + 100% allocation. Hook enforces 0.3–5% each side and a 10% platform floor.
     /// @param holders Destination for the holders slice. Required iff `split.holdersBps > 0`.
     function createToken(
         string calldata name,
@@ -306,7 +313,8 @@ contract EveInstantV4Factory is IUnlockCallback {
                 call.creator,
                 call.vq,
                 call.firstBuy,
-                call.split.feeBps,
+                call.split.buyFeeBps,
+                call.split.sellFeeBps,
                 call.split.creatorBps,
                 call.split.burnBps,
                 call.split.holdersBps,
@@ -393,7 +401,9 @@ contract EveInstantV4Factory is IUnlockCallback {
             holders: holders,
             id: id
         });
-        emit TokenLaunched(token, call.quote, call.creator, id, tokenIsCurrency0, call.split.feeBps);
+        emit TokenLaunched(
+            token, call.quote, call.creator, id, tokenIsCurrency0, call.split.buyFeeBps, call.split.sellFeeBps
+        );
     }
 
     function _firstBuy(

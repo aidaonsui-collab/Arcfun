@@ -1,18 +1,19 @@
 /**
- * V4 Instant fee split — one pool fee (0.3–3%), 100% allocation across
- * creator / burn / holders / auto-LP / platform. Matches EveFeeHook.
+ * V4 Instant fee split — buy fee and sell fee (0.3–5% each), 100% allocation
+ * across creator / burn / holders / auto-LP / platform. Matches EveFeeHook.
  */
 
 export const FEE_BPS_DENOM = 10_000
 export const MIN_FEE_BPS = 30
-export const MAX_FEE_BPS = 300
+export const MAX_FEE_BPS = 500
 export const MIN_PLATFORM_BPS = 1_000
 export const MIN_REFLECT_HOLDERS_BPS = 2_000
 
 export type FeeSplitId = 'creator' | 'reflect' | 'scorched' | 'pool' | 'custom'
 
 export type FeeSplit = {
-  feeBps: number
+  buyFeeBps: number
+  sellFeeBps: number
   creatorBps: number
   burnBps: number
   holdersBps: number
@@ -37,7 +38,8 @@ export const FEE_LEGS: {
 
 export const FEE_SPLIT_PRESETS: Record<Exclude<FeeSplitId, 'custom'>, FeeSplit> = {
   creator: {
-    feeBps: 100,
+    buyFeeBps: 100,
+    sellFeeBps: 100,
     creatorBps: 7_000,
     burnBps: 1_000,
     holdersBps: 0,
@@ -45,7 +47,8 @@ export const FEE_SPLIT_PRESETS: Record<Exclude<FeeSplitId, 'custom'>, FeeSplit> 
     platformBps: 1_000,
   },
   reflect: {
-    feeBps: 100,
+    buyFeeBps: 100,
+    sellFeeBps: 100,
     creatorBps: 2_000,
     burnBps: 1_000,
     holdersBps: 5_000,
@@ -53,7 +56,8 @@ export const FEE_SPLIT_PRESETS: Record<Exclude<FeeSplitId, 'custom'>, FeeSplit> 
     platformBps: 1_000,
   },
   scorched: {
-    feeBps: 100,
+    buyFeeBps: 100,
+    sellFeeBps: 100,
     creatorBps: 2_000,
     burnBps: 6_000,
     holdersBps: 0,
@@ -61,7 +65,8 @@ export const FEE_SPLIT_PRESETS: Record<Exclude<FeeSplitId, 'custom'>, FeeSplit> 
     platformBps: 1_000,
   },
   pool: {
-    feeBps: 100,
+    buyFeeBps: 100,
+    sellFeeBps: 100,
     creatorBps: 2_000,
     burnBps: 1_000,
     holdersBps: 0,
@@ -114,11 +119,24 @@ export function feePctLabel(feeBps: number): string {
   return `${pct.toFixed(1)}%`
 }
 
+export function clampFeeBps(bps: number): number {
+  return Math.min(MAX_FEE_BPS, Math.max(MIN_FEE_BPS, Math.round(bps / 10) * 10))
+}
+
+/** One percent when buy and sell match. Otherwise both, for token pages and the create card. */
+export function feePairLabel(buyFeeBps: number, sellFeeBps: number): string {
+  if (buyFeeBps === sellFeeBps) {
+    return buyFeeBps === 100 ? '1% fee' : `${feePctLabel(buyFeeBps)} fee`
+  }
+  return `Buy ${feePctLabel(buyFeeBps)} · Sell ${feePctLabel(sellFeeBps)}`
+}
+
 export function matchPreset(s: FeeSplit): FeeSplitId {
   for (const id of ['creator', 'reflect', 'scorched', 'pool'] as const) {
     const p = FEE_SPLIT_PRESETS[id]
     if (
-      s.feeBps === p.feeBps &&
+      s.buyFeeBps === p.buyFeeBps &&
+      s.sellFeeBps === p.sellFeeBps &&
       s.creatorBps === p.creatorBps &&
       s.burnBps === p.burnBps &&
       s.holdersBps === p.holdersBps &&
@@ -138,10 +156,18 @@ export function foldHoldersIntoCreator(s: FeeSplit): FeeSplit {
 
 export function splitValid(
   s: FeeSplit,
-  opts: { minHoldersBps?: number; hideHolders?: boolean } = {},
+  opts: { minHoldersBps?: number; hideHolders?: boolean; requireEqualFees?: boolean } = {},
 ): { ok: boolean; reason: string | null } {
-  if (s.feeBps < MIN_FEE_BPS || s.feeBps > MAX_FEE_BPS) {
-    return { ok: false, reason: 'Pool fee must be between 0.3% and 3%.' }
+  if (
+    s.buyFeeBps < MIN_FEE_BPS ||
+    s.buyFeeBps > MAX_FEE_BPS ||
+    s.sellFeeBps < MIN_FEE_BPS ||
+    s.sellFeeBps > MAX_FEE_BPS
+  ) {
+    return { ok: false, reason: 'Buy and sell fees must be between 0.3% and 5%.' }
+  }
+  if (opts.requireEqualFees && s.buyFeeBps !== s.sellFeeBps) {
+    return { ok: false, reason: 'This factory still charges one fee. Keep buy and sell the same.' }
   }
   if (s.platformBps < MIN_PLATFORM_BPS) {
     return { ok: false, reason: 'eve.fun takes at least 10%.' }

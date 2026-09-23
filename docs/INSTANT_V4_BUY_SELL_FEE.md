@@ -1,6 +1,6 @@
 # Instant V4: asymmetric buy / sell fee
 
-**Status:** design note — not implemented. Money-moving hook/factory work waits on an explicit ship yes.  
+**Status:** deployed 2026-09-23. New creates use hook `0xd0789f648014Ade05d40b26496570319ec124044`, USDC factory `0x1ADE6304CEbd48a724F07a0336759e37D1C9dB6d`, RWA factory `0x5Fa197152ac04C0bE7D92DA7270755400b281440`. Already-launched pools stay on the previous hook.  
 **Date:** 2026-09-22  
 **Decision locked:** max fee **5%** (`MAX_FEE_BPS = 500`) on each of buy and sell.  
 **Scope:** eve.fun Instant V4 (`EveFeeHook` + factories + create UI + router quotes + indexer)  
@@ -179,10 +179,6 @@ No migration of existing pools. Asymmetric fees are **new creates only**.
 
 Locked from product: **max 5% per side**.
 
-Still needed before build:
+Ship yes is in. Both factories share the new `Split`. The label stays fee.
 
-1. Explicit **ship yes** (this note is not that).
-2. Rollout: USDC Instant factory only first, or USDC + RWA factories together?
-3. Confirm Instant “fee” label (recommended) vs “tax”.
-
-No implementation until (1) is answered yes.
+Deployed together on 2026-09-23. The previous hook and factories stay in the catalog so existing tokens keep trading.

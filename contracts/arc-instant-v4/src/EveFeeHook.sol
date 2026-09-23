@@ -18,10 +18,12 @@ import {CurrencySettler} from "./libraries/CurrencySettler.sol";
 
 /// @title EveFeeHook
 /// @notice Shared v4 afterSwap hook for eve.fun Instant (meme, reflect, RWA).
-///         One swap fee (0.3–3%), same on buy and sell. 100% of that fee is allocated
-///         creator / burn / holders / auto-LP / platform. Platform floor 10%.
+///         Separate buy and sell fees (0.3–5% each). 100% of the fee taken on a swap
+///         is allocated creator / burn / holders / auto-LP / platform. Platform floor 10%.
 ///
-///         Fee is levied on the unspecified currency (what the swapper receives).
+///         Fee is levied on the unspecified currency of an exact-in swap (what the
+///         swapper receives). Buy (launch token out) uses buyFeeBps. Sell (quote out)
+///         uses sellFeeBps. One destination split applies to both.
 ///         Burn: if that currency is the launch token, send to dead in this tx; if it is
 ///         quote, accrue to pendingBurn. `flushQuoteBurn` swaps quote -> launch outside
 ///         afterSwap and sends the launch token to dead. Auto-LP accrues per-pool
@@ -35,7 +37,7 @@ contract EveFeeHook is IHooks, IUnlockCallback {
 
     uint16 public constant BPS_DENOM = 10_000;
     uint16 public constant MIN_FEE_BPS = 30; // 0.3%
-    uint16 public constant MAX_FEE_BPS = 300; // 3%
+    uint16 public constant MAX_FEE_BPS = 500; // 5%
     uint16 public constant MIN_PLATFORM_BPS = 1_000; // 10%
     address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
 
@@ -52,7 +54,8 @@ contract EveFeeHook is IHooks, IUnlockCallback {
     uint16 public constant MAX_ANCHOR_DEVIATION_BPS = 300; // 3%
 
     struct Split {
-        uint16 feeBps;
+        uint16 buyFeeBps;
+        uint16 sellFeeBps;
         uint16 creatorBps;
         uint16 burnBps;
         uint16 holdersBps;
@@ -67,7 +70,8 @@ contract EveFeeHook is IHooks, IUnlockCallback {
         address autoLp;
         address platformWallet;
         address launch;
-        uint16 feeBps;
+        uint16 buyFeeBps;
+        uint16 sellFeeBps;
         uint16 creatorBps;
         uint16 burnBps;
         uint16 holdersBps;
@@ -213,7 +217,8 @@ contract EveFeeHook is IHooks, IUnlockCallback {
         Split calldata split
     ) external onlyFactory {
         if (creator == address(0) || platformWallet == address(0) || launch == address(0)) revert ZeroAddress();
-        if (split.feeBps < MIN_FEE_BPS || split.feeBps > MAX_FEE_BPS) revert BadFeeBps();
+        if (split.buyFeeBps < MIN_FEE_BPS || split.buyFeeBps > MAX_FEE_BPS) revert BadFeeBps();
+        if (split.sellFeeBps < MIN_FEE_BPS || split.sellFeeBps > MAX_FEE_BPS) revert BadFeeBps();
         if (split.platformBps < MIN_PLATFORM_BPS) revert BadSplit();
         if (
             uint256(split.creatorBps) + split.burnBps + split.holdersBps + split.autoLpBps + split.platformBps
@@ -229,7 +234,8 @@ contract EveFeeHook is IHooks, IUnlockCallback {
             autoLp: autoLp,
             platformWallet: platformWallet,
             launch: launch,
-            feeBps: split.feeBps,
+            buyFeeBps: split.buyFeeBps,
+            sellFeeBps: split.sellFeeBps,
             creatorBps: split.creatorBps,
             burnBps: split.burnBps,
             holdersBps: split.holdersBps,
@@ -413,10 +419,11 @@ contract EveFeeHook is IHooks, IUnlockCallback {
         uint256 unspecifiedAbs = (unspecifiedDelta < 0 ? -unspecifiedDelta : unspecifiedDelta).toUint256();
         if (unspecifiedAbs == 0) return (IHooks.afterSwap.selector, 0);
 
-        uint256 feeAmount = (unspecifiedAbs * c.feeBps) / BPS_DENOM;
+        Currency feeCurrency = unspecifiedIsCurrency0 ? key.currency0 : key.currency1;
+        uint16 feeBps = Currency.unwrap(feeCurrency) == c.launch ? c.buyFeeBps : c.sellFeeBps;
+        uint256 feeAmount = (unspecifiedAbs * feeBps) / BPS_DENOM;
         if (feeAmount == 0) return (IHooks.afterSwap.selector, 0);
 
-        Currency feeCurrency = unspecifiedIsCurrency0 ? key.currency0 : key.currency1;
         poolManager.take(feeCurrency, address(this), feeAmount);
 
         uint256 creatorAmt = (feeAmount * c.creatorBps) / BPS_DENOM;

@@ -477,23 +477,23 @@ export const ARC = {
     process.env.NEXT_PUBLIC_ARC_INSTANT_LOCKER,
     '0xE522907807CdDF006b433a103356d2c30ac39209',
   ),
-  /** Uniswap v4 Instant (DeployEveInstantV4 on 5042, price-anchor hook). */
+  /** Uniswap v4 Instant. Dual buy/sell fee hook, deployed 2026-09-23. */
   INSTANT_V4_FACTORY: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_FACTORY,
-    '0xCfC8287Fd6331A826565B2ACBc69CB3E083602Ea',
+    '0x1ADE6304CEbd48a724F07a0336759e37D1C9dB6d',
   ),
   INSTANT_V4_HOOK: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_HOOK,
-    '0x8fa4B88e4052302FBd9E8419eeC6E9FdAC210044',
+    '0xd0789f648014Ade05d40b26496570319ec124044',
   ),
   INSTANT_V4_ROUTER: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_ROUTER,
     '0x494715a3923392Dd0fD312B0CC40055679Feaad2',
   ),
-  /** RWA Instant v4 (DeployRwaInstantV4 on 5042). Quote is per-create. Give this to terminals. */
+  /** RWA Instant v4 on the dual-fee hook. Quote is per-create. Give this to terminals. */
   INSTANT_V4_RWA_FACTORY: envAddr(
     process.env.NEXT_PUBLIC_ARC_INSTANT_V4_RWA_FACTORY,
-    '0x3489E76510238ef57Ee9d18005a6Fb110f17912D',
+    '0x5Fa197152ac04C0bE7D92DA7270755400b281440',
   ),
   POOL_MANAGER: envAddr(
     process.env.NEXT_PUBLIC_ARC_POOL_MANAGER,
@@ -575,6 +575,12 @@ export const ARC_INSTANT_V4_FACTORY_PERM = '0x32a0AF0B4c423f3485E6eaABE8DA64e631
 export const ARC_INSTANT_V4_RWA_FACTORY_PERM = '0x66Ca5b85C31AEBD2082eF12D7f61af37bD4892fc' as Address
 /** Pre-anchor EveFeeHook. Existing launches stay on it. */
 export const ARC_INSTANT_V4_HOOK_PREV = '0xd8F5790094711747ae4083651dDDfcE73699C044' as Address
+/** Single-fee anchor hook (0.3–3%). Tokens launched before dual fees stay here. */
+export const ARC_INSTANT_V4_HOOK_SINGLE = '0x8fa4B88e4052302FBd9E8419eeC6E9FdAC210044' as Address
+/** v4 Instant USDC factory on the single-fee hook. Keep in the catalog. */
+export const ARC_INSTANT_V4_FACTORY_SINGLE = '0xCfC8287Fd6331A826565B2ACBc69CB3E083602Ea' as Address
+/** v4 Instant RWA factory on the single-fee hook. Keep in the catalog. Do not give this to terminals. */
+export const ARC_INSTANT_V4_RWA_FACTORY_SINGLE = '0x3489E76510238ef57Ee9d18005a6Fb110f17912D' as Address
 
 function uniqAddrs(addrs: readonly (Address | string | undefined | null)[]): Address[] {
   const seen = new Set<string>()
@@ -606,6 +612,8 @@ export function instantV4CatalogFactories(): Address[] {
   return uniqAddrs([
     ARC.INSTANT_V4_FACTORY,
     ARC.INSTANT_V4_RWA_FACTORY,
+    ARC_INSTANT_V4_FACTORY_SINGLE,
+    ARC_INSTANT_V4_RWA_FACTORY_SINGLE,
     ARC_INSTANT_V4_FACTORY_PREV,
     ARC_INSTANT_V4_RWA_FACTORY_PREV,
     ARC_INSTANT_V4_FACTORY_PERM,
@@ -653,11 +661,14 @@ export function instantProtocolAddresses(): Address[] {
     ARC.REFLECTION_LOCKER,
     ARC.INSTANT_V4_FACTORY,
     ARC.INSTANT_V4_RWA_FACTORY,
+    ARC_INSTANT_V4_FACTORY_SINGLE,
+    ARC_INSTANT_V4_RWA_FACTORY_SINGLE,
     ARC_INSTANT_V4_FACTORY_PREV,
     ARC_INSTANT_V4_RWA_FACTORY_PREV,
     ARC_INSTANT_V4_FACTORY_PERM,
     ARC_INSTANT_V4_RWA_FACTORY_PERM,
     ARC.INSTANT_V4_HOOK,
+    ARC_INSTANT_V4_HOOK_SINGLE,
     ARC_INSTANT_V4_HOOK_PREV,
     ARC.INSTANT_V4_ROUTER,
     ARC.POOL_MANAGER,
