@@ -194,10 +194,18 @@ export function BasketPairCard({
               type="button"
               disabled={disabled || busy || (!on && picked.length >= 3)}
               onClick={() => toggle(leg.symbol)}
-              className={`h-8 rounded-full px-2.5 text-[12px] font-semibold border ${
+              className={`h-8 rounded-full pl-1 pr-2.5 text-[12px] font-semibold border inline-flex items-center gap-1.5 ${
                 on ? 'border-lime-line text-white bg-lime/15' : 'border-hair text-t3'
               }`}
             >
+              <span className="inline-flex size-6 items-center justify-center rounded-full bg-white overflow-hidden shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={leg.logo}
+                  alt=""
+                  className={leg.symbol === 'COIN' ? 'size-6 object-cover' : 'size-3.5 object-contain'}
+                />
+              </span>
               {leg.symbol}
             </button>
           )

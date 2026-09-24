@@ -9,17 +9,17 @@ import { INSTANT_TARGET_FDV_USD, sharedRwaV4Factory, type ArcRwaAsset } from '@/
 export const BASKET_STORAGE_KEY = 'eve.baskets.v1'
 
 export const DINARI_LEGS = [
-  { symbol: 'CRCL', address: '0x2eBbD389bf504fA9f0600361ef70C15eb62Cc93B' },
-  { symbol: 'NVDA', address: '0x4B16f5251cd4c853f28998809DcA61ccCBcB898B' },
-  { symbol: 'AAPL', address: '0xB6b0149009eb78239213b97A960b5c793C03373b' },
-  { symbol: 'MSFT', address: '0x1831FdAC7Fcb9271f2E2FfB1bbba965CcAf8136B' },
-  { symbol: 'GOOGL', address: '0x7024f993A0781169E064346396c5F6139DC6d98A' },
-  { symbol: 'AMZN', address: '0xAbA4a08C36404f6EFf79Dc85b0b4c5172A095504' },
-  { symbol: 'META', address: '0x5183EfaBdDA4F872788307B705163982036ba962' },
-  { symbol: 'TSLA', address: '0x4193C2B9B176763f48B1eF5266aEd71f6348ba81' },
-  { symbol: 'AMD', address: '0x2B7c9A6448576790aa6CE639E4c70BBb32E65c43' },
-  { symbol: 'COIN', address: '0x7eE2c4BE439b9571FabC520dE92ad05582492A3D' },
-  { symbol: 'SPY', address: '0x82E9e5725dA9050e121D12802fCC302752aBaA1A' },
+  { symbol: 'CRCL', address: '0x2eBbD389bf504fA9f0600361ef70C15eb62Cc93B', logo: '/marks/stocks/crcl.svg' },
+  { symbol: 'NVDA', address: '0x4B16f5251cd4c853f28998809DcA61ccCBcB898B', logo: '/marks/stocks/nvda.svg' },
+  { symbol: 'AAPL', address: '0xB6b0149009eb78239213b97A960b5c793C03373b', logo: '/marks/stocks/aapl.svg' },
+  { symbol: 'MSFT', address: '0x1831FdAC7Fcb9271f2E2FfB1bbba965CcAf8136B', logo: '/marks/stocks/msft.svg' },
+  { symbol: 'GOOGL', address: '0x7024f993A0781169E064346396c5F6139DC6d98A', logo: '/marks/stocks/googl.svg' },
+  { symbol: 'AMZN', address: '0xAbA4a08C36404f6EFf79Dc85b0b4c5172A095504', logo: '/marks/stocks/amzn.svg' },
+  { symbol: 'META', address: '0x5183EfaBdDA4F872788307B705163982036ba962', logo: '/marks/stocks/meta.svg' },
+  { symbol: 'TSLA', address: '0x4193C2B9B176763f48B1eF5266aEd71f6348ba81', logo: '/marks/stocks/tsla.svg' },
+  { symbol: 'AMD', address: '0x2B7c9A6448576790aa6CE639E4c70BBb32E65c43', logo: '/marks/stocks/amd.svg' },
+  { symbol: 'COIN', address: '0x7eE2c4BE439b9571FabC520dE92ad05582492A3D', logo: '/marks/stocks/coin.png' },
+  { symbol: 'SPY', address: '0x82E9e5725dA9050e121D12802fCC302752aBaA1A', logo: '/marks/stocks/spy.svg' },
 ] as const
 
 export type BasketLegInput = {
