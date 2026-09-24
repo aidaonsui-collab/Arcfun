@@ -1,6 +1,6 @@
 # iMessage bot: buy $EVE on Arc
 
-**Status:** proposal only — architecture sketch. No gateway, AA deploy, or money-moving code in this PR.  
+**Status:** Phase 1 dry run built (`npm run imsg-buybot`). No gateway, AA deploy, signing, or broadcast code.  
 **Date:** 2026-09-23  
 **Scope:** eve.fun Instant buy path (`lib/arc-swap.ts`) behind an iMessage YES gate, starting with USDC → `$EVE`  
 **Out of scope:** Instant create, sell, multi-token catalog, mint/redeem of RWAs, dividends, Apple Business Chat / iMessage for Business certification (product call later)
@@ -137,8 +137,8 @@ The bot’s signer must **not** be a full owner key. Use a Kernel session / vali
 
 | Allow | Deny |
 |-------|------|
-| `approve(USDC, FeeRouter or ReferralRouter, amount ≤ quote)` | Arbitrary `approve` / unlimited unless explicitly capped per quote |
-| `FeeRouter.swapExactInput(UNI_ROUTER, USDC, EVE, fee, amountIn, minOut)` | Any other tokenOut |
+| `USDC.approve(ReferralRouter, amount == quote amountIn)` | Arbitrary `approve`, and the web UI’s unlimited approve |
+| `ReferralRouter.buy(EVE, 10000, amountIn, minOut, "")` — the live buy path (see §4) | Any other tokenOut; any non-empty referral code |
 | Optional: native USDC paymaster interaction as required by Arc bundler | Transfers of USDC or $EVE to arbitrary addresses |
 | Max notional per UserOp (e.g. **$25** first week) and per day (e.g. **$100**) | Sell path in v1 |
 | Deadline / validUntil on the session and on each quote | Calls to unknown contracts |
@@ -154,10 +154,15 @@ Do **not** fork swap math. Call into the same surface Instant uses:
 | Resolve fee tier | `findArcPoolFee($EVE)` (expect `10000`) |
 | Quote | `quoteArcBuy(EVE, usdcIn)` |
 | Min out | `minOutFromSlippage(quoted, 100)` (1% default; configurable) |
-| Spender | `arcSwapSpender('buy')` → FeeRouter (or ReferralRouter when set) |
-| Calldata | `buildArcBuy(EVE, usdcIn, minOut, fee)` |
+| Spender | `arcSwapSpender('buy')` → ReferralRouter (production sets `NEXT_PUBLIC_ARC_REFERRAL_ROUTER`) |
+| Calldata | `buildArcBuy(EVE, usdcIn, minOut, fee, '')` → `ReferralRouter.buy(...)` |
 
-Canonical addresses (mainnet defaults in `lib/contracts-arc.ts` / `lib/eve.ts`):
+Because production sets the ReferralRouter, the shared helpers emit `ReferralRouter.buy`, not
+`FeeRouter.swapExactInput`. The ReferralRouter forwards to the FeeRouter (1%) and SwapRouter02,
+and pays `$EVE` to `msg.sender` — verified by `eth_simulateV1` on mainnet (2026-09-23): approve +
+buy of $5 both succeed and the caller's `$EVE` balance rises by exactly the quoted amount.
+
+Live mainnet addresses (from the deployed site bundle and on-chain reads, 2026-09-23):
 
 | Name | Address |
 |------|---------|
@@ -166,13 +171,20 @@ Canonical addresses (mainnet defaults in `lib/contracts-arc.ts` / `lib/eve.ts`):
 | `$EVE` | `0x19209E55049bc613c5cC8b66B7DF7824096e78CF` |
 | Uni V3 factory | `0xf0db7b58379503491d857dB50AC9ece64c653918` |
 | SwapRouter02 | `0x53BF6B0684Ec7eF91e1387Da3D1a1769bC5A6F77` |
-| FeeRouter | `0x6795d7Ee7A83EfeDE1dedD96B86f0f6Efdabf088` |
+| ReferralRouter (buy spender) | `0xe65eE188f8FaB172CaA981b9bf4b8B71a3E8dC06` |
+| FeeRouter (1%, behind ReferralRouter) | `0x8d051f7FCf2F67f272b6ec96dAf2e9a847633394` |
 | Quoter | `0x7DfD4F31be6814D2906BDE155c3e1B146EAc1468` |
+| EntryPoint v0.7 | `0x0000000071727De22E5E9d8BAf0edAc6f37da032` |
 
-UserOp `callData` is typically a Kernel execute batch:
+Do not trust the in-code fallbacks: without production env, `lib/contracts-arc.ts` falls back
+to an older FeeRouter (`0x6795d7Ee7A83EfeDE1dedD96B86f0f6Efdabf088`) and no ReferralRouter. The
+bot's policy pins the live addresses above, so a missing env produces a refused quote rather than
+a buy through the wrong router.
 
-1. `USDC.approve(spender, usdcIn)` if allowance &lt; usdcIn  
-2. FeeRouter / router buy calldata from `buildArcBuy`
+UserOp `callData` is a Kernel v3 (ERC-7579) `execute` batch:
+
+1. `USDC.approve(ReferralRouter, usdcIn)` if allowance &lt; usdcIn (exact amount, never unlimited)
+2. `ReferralRouter.buy` calldata from `buildArcBuy`
 
 Gas: Arc USDC paymaster / native USDC gas — same class of flow Invisible Money uses (~sub-cent observed on simple transfers; quote the estimate in the YES message).
 
@@ -199,7 +211,7 @@ Use a maintained Arc 4337 bundler (ZeroDev / Pimlico-class, or Arc’s public bu
 | Phase | Deliverable | Ship gate |
 |-------|-------------|-----------|
 | **0 — this doc** | Architecture + addresses + policy | Merged as docs |
-| **1 — dry-run** | CLI: parse intent → quote → print UserOp calldata (no Messages, no broadcast) | Internal |
+| **1 — dry-run** ✅ | CLI: parse intent → quote → print UserOp calldata (no Messages, no broadcast). Built: `lib/imsg-buybot/`, `npm run imsg-buybot` | Internal |
 | **2 — AA testnet / mainnet canary** | One funded Kernel + session key; scripted YES path buys $1 of $EVE | Explicit yes |
 | **3 — iMessage MVP** | Gateway + link flow + buy $EVE only + YES | Explicit yes |
 | **4 — harden** | Limits, monitoring, support runbook, optional `sell` / other Instant tickers | Explicit yes each |
@@ -243,4 +255,20 @@ Locked by this note: **docs-only architecture**; Instant buy helpers are the swa
 - `lib/arc-swap.ts` — `quoteArcBuy`, `buildArcBuy`, `arcSwapSpender`, slippage helpers  
 - `lib/contracts-arc.ts` — `ARC.USDC`, `ARC.UNI_*`, `ARC.FEE_ROUTER`, chain 5042  
 - `lib/eve.ts` — `EVE_TOKEN`, `EVE_POOL_FEE`  
+- `lib/imsg-buybot/` — Phase 1: `intent.ts` (grammar), `policy.ts` (pinned session-key allowlist + caps), `kernel.ts` (ERC-7579 batch callData), `bot.ts` (quote → YES → submit loop, gateway-agnostic), `live.ts` (quotes via arc-swap)  
+- `lib/imsg-buybot.test.mjs` — offline tests for all of the above  
 - Invisible Money (external reference, 2026-09-23): iMessage `Send $N to 0x…` → YES → Kernel UserOp, USDC gas on Arc
+
+## Running the Phase 1 dry run
+
+Needs production's router env (`vercel env pull --environment production .env.local`, or set
+`NEXT_PUBLIC_ARC_FEE_ROUTER` and `NEXT_PUBLIC_ARC_REFERRAL_ROUTER`). Without it the policy refuses
+to quote, by design.
+
+```bash
+npm run imsg-buybot                              # chat as if in Messages
+npm run imsg-buybot -- "buy $5 of $eve"          # one message, auto-YES, print the unsigned UserOp
+npm run imsg-buybot -- --account 0x… balance     # read a real wallet's USDC / $EVE
+```
+
+Live quotes, real callData, never signs or broadcasts.
