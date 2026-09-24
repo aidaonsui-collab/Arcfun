@@ -10,8 +10,8 @@ import { formatUnits, isAddress, parseUnits } from 'viem'
 import { quoteArcBuy, quoteArcSell, formatUsdc, parseUsdc } from '@/lib/arc-swap'
 import { formatToken, parseToken } from '@/lib/token-format'
 import { ARC, arcPublicClient } from '@/lib/contracts-arc'
-import { quoteDecimalsForToken, quoteSymbolForQuote } from '@/lib/arc-rwa-assets'
-import { quoteEveV4ExactIn, readEveV4Pool } from '@/lib/arc-v4-swap'
+import { quoteDecimalsForToken, quotePayUsdcSwap, quoteSymbolForQuote, rwaAssetByQuote } from '@/lib/arc-rwa-assets'
+import { quoteEveV4ExactIn, quoteEveV4PricedInUsdc, readEveV4Pool } from '@/lib/arc-v4-swap'
 import { limitOr429 } from '@/lib/rate-limit'
 import { summarizeRpcError } from '@/lib/rpc-error'
 import { jsonSafe } from '@/lib/json-safe'
@@ -40,6 +40,24 @@ export async function GET(req: NextRequest) {
     if (v4) {
       const qDec = quoteDecimalsForToken(v4.quote)
       const qSym = quoteSymbolForQuote(v4.quote)
+      const payUsdc = quotePayUsdcSwap(rwaAssetByQuote(v4.quote)) && qSym !== 'USDC'
+      if (payUsdc) {
+        const inAmt = side === 'buy' ? parseUsdc(amount) : parseToken(amount, ARC.TOKEN_DECIMALS)
+        if (inAmt <= 0n) return NextResponse.json({ ok: false, error: 'invalid amount' }, { status: 400 })
+        const priced = await quoteEveV4PricedInUsdc(v4, side, inAmt, arcPublicClient())
+        if (!priced || priced.out <= 0n) {
+          return NextResponse.json({
+            ok: false,
+            error: 'No USDC quote for this size. Try a smaller amount.',
+          })
+        }
+        return jsonSafe({
+          ok: true,
+          out: priced.out.toString(),
+          quote: side === 'buy' ? 'TOKEN' : 'USDC',
+          formatted: side === 'buy' ? formatToken(priced.out, ARC.TOKEN_DECIMALS) : formatUsdc(priced.out),
+        })
+      }
       const inAmt =
         side === 'buy' ? parseUnits(amount, qDec) : parseToken(amount, ARC.TOKEN_DECIMALS)
       if (inAmt <= 0n) return NextResponse.json({ ok: false, error: 'invalid amount' }, { status: 400 })

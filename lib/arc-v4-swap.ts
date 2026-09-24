@@ -15,6 +15,7 @@ import {
   type Hex,
 } from 'viem'
 import { call, readContract } from 'viem/actions'
+import { quoteV3ExactIn } from './arc-swap'
 import { ARC, ARC_CHAIN_ID, instantV4CatalogFactories } from './contracts-arc'
 import {
   EVE_INSTANT_V4_FACTORY_ABI,
@@ -221,6 +222,41 @@ export async function quoteEveV4ExactIn(
   const feeBps = sideFee > 0 ? sideFee : pool.feeBps > 0 ? pool.feeBps : EVE_V4_DEFAULT_FEE_BPS
   const out = estimateEveV4ExactIn({ amountIn, zeroForOne, sqrtPriceX96, feeBps })
   return out > 0n ? out : null
+}
+
+export type EveV4UsdcQuote = {
+  /** What the trader receives: launch tokens on a buy, USDC on a sell. */
+  out: bigint
+  /** Quote-token amount in the middle of the hop (XAUM, cirBTC, …). */
+  quoteAmount: bigint
+  /** Uniswap v3 fee tier of the quote/USDC pool. */
+  usdcFee: number
+}
+
+/**
+ * Price an Instant v4 pool in USDC.
+ * Buy: USDC → quote on v3, then quote → token on the Instant pool.
+ * Sell: token → quote on the Instant pool, then quote → USDC on v3.
+ */
+export async function quoteEveV4PricedInUsdc(
+  pool: EveV4PoolInfo,
+  side: 'buy' | 'sell',
+  amount: bigint,
+  client: Client,
+): Promise<EveV4UsdcQuote | null> {
+  if (amount <= 0n) return null
+  if (side === 'buy') {
+    const hop = await quoteV3ExactIn(ARC.USDC, pool.quote, amount, client)
+    if (!hop) return null
+    const out = await quoteEveV4ExactIn(pool, hop.amountOut, !pool.tokenIsCurrency0, client)
+    if (out == null || out <= 0n) return null
+    return { out, quoteAmount: hop.amountOut, usdcFee: hop.fee }
+  }
+  const quoteOut = await quoteEveV4ExactIn(pool, amount, pool.tokenIsCurrency0, client)
+  if (quoteOut == null || quoteOut <= 0n) return null
+  const hop = await quoteV3ExactIn(pool.quote, ARC.USDC, quoteOut, client)
+  if (!hop) return null
+  return { out: hop.amountOut, quoteAmount: quoteOut, usdcFee: hop.fee }
 }
 
 export function buildEveV4Swap(opts: {

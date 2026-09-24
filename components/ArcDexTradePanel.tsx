@@ -10,18 +10,20 @@ import { erc20Abi, formatUnits, parseUnits, type Address } from 'viem'
 import { Loader2, AlertCircle, CheckCircle, ExternalLink, ArrowDownUp } from 'lucide-react'
 import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_MAX_APPROVAL, ARC_SWAP_GAS, arcPublicClient } from '@/lib/contracts-arc'
 import { setWalletRpcPaused } from '@/lib/wallet-rpc-pause'
-import { buildEveV4Swap, quoteEveV4ExactIn, readEveV4Pool, type EveV4PoolInfo } from '@/lib/arc-v4-swap'
+import { buildEveV4Swap, quoteEveV4ExactIn, quoteEveV4PricedInUsdc, readEveV4Pool, type EveV4PoolInfo } from '@/lib/arc-v4-swap'
 import {
   arcSwapConfigured,
   arcSwapSpender,
   buildArcBuy,
   buildArcSell,
+  buildV3ExactIn,
   findArcPoolFee,
   formatUsdc,
   minOutFromSlippage,
   parseUsdc,
   quoteArcBuy,
   quoteArcSell,
+  quoteV3ExactIn,
   withRecipient,
 } from '@/lib/arc-swap'
 import { quoteDecimalsForToken, quotePolicy, quoteSymbolForQuote, rwaAssetByQuote, usdToQuoteHuman } from '@/lib/arc-rwa-assets'
@@ -151,6 +153,8 @@ export function ArcDexTradePanel({
   const spotPolicy = quotePolicy(quoteAsset)
   const spotUsd = spotPolicy.usd === 'spot'
   const spotPair = spotPolicy.usdSpot
+  /** Gold and BTC pools trade in the quote token. The pad prices those in USDC. */
+  const payUsdc = Boolean(isV4 && spotPolicy.payUsdcSwap && quoteSym !== 'USDC')
 
   useEffect(() => {
     let cancelled = false
@@ -192,12 +196,15 @@ export function ArcDexTradePanel({
   const initial = (symbol || '?').charAt(0).toUpperCase()
 
   const quoteQ = useArcErc20Balance(quoteToken, address)
+  const usdcQ = useArcErc20Balance(payUsdc ? ARC.USDC : undefined, address)
   const tokQ = useArcErc20Balance(token, address)
   const quoteBal = quoteQ.data
+  const usdcBal = usdcQ.data
   const tokenBal = tokQ.data
   const refetchQuote = quoteQ.refetch
+  const refetchUsdc = usdcQ.refetch
   const refetchTok = tokQ.refetch
-  const payBalPending = mode === 'buy' ? quoteQ.isPending : tokQ.isPending
+  const payBalPending = mode === 'buy' ? (payUsdc ? usdcQ.isPending : quoteQ.isPending) : tokQ.isPending
 
   const { data: tokenDecimals } = useReadContract({
     address: token,
@@ -208,12 +215,13 @@ export function ArcDexTradePanel({
   })
   const tokDec = Number(tokenDecimals ?? ARC.TOKEN_DECIMALS) || ARC.TOKEN_DECIMALS
 
-  const approveToken: Address = mode === 'buy' ? quoteToken : token
+  const approveSpender: Address = payUsdc && mode === 'buy' ? ARC.UNI_ROUTER : spender
+  const approveToken: Address = mode === 'buy' ? (payUsdc ? ARC.USDC : quoteToken) : token
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: approveToken,
     abi: erc20Abi,
     functionName: 'allowance',
-    args: address ? [address, spender] : undefined,
+    args: address ? [address, approveSpender] : undefined,
     chainId: ARC_CHAIN_ID,
     query: { enabled: !!address },
   })
@@ -231,10 +239,11 @@ export function ArcDexTradePanel({
     setAmount('')
     setEstOut(null)
     void refetchQuote()
+    void refetchUsdc()
     void refetchTok()
     void refetchAllowance()
     onTraded?.()
-  }, [mined, onTraded, refetchQuote, refetchTok, refetchAllowance])
+  }, [mined, onTraded, refetchQuote, refetchUsdc, refetchTok, refetchAllowance])
 
   useEffect(() => {
     if (busy || !amount || Number(amount) <= 0 || !swapOn) {
@@ -256,8 +265,13 @@ export function ArcDexTradePanel({
       try {
         const ref = mode === 'buy' ? getIncomingReferralCode() : ''
         if (isV4 && v4Pool) {
-          const inAmt =
-            mode === 'buy' ? parseQuoteAmt(amount, quoteDec) : parseToken(amount, tokDec)
+          const inAmt = payUsdc
+            ? mode === 'buy'
+              ? parseUsdc(amount)
+              : parseToken(amount, tokDec)
+            : mode === 'buy'
+              ? parseQuoteAmt(amount, quoteDec)
+              : parseToken(amount, tokDec)
           if (inAmt <= 0n) {
             if (!cancelled) {
               setEstOut(null)
@@ -269,7 +283,12 @@ export function ArcDexTradePanel({
           // Public RPC only. A wallet eth_call while Rabby is open blanks the Sign screen.
           let local: bigint | null = null
           try {
-            local = await quoteEveV4ExactIn(v4Pool, inAmt, zeroForOne, arcPublicClient())
+            if (payUsdc) {
+              const priced = await quoteEveV4PricedInUsdc(v4Pool, mode, inAmt, arcPublicClient())
+              local = priced?.out ?? null
+            } else {
+              local = await quoteEveV4ExactIn(v4Pool, inAmt, zeroForOne, arcPublicClient())
+            }
           } catch {
             local = null
           }
@@ -330,15 +349,17 @@ export function ArcDexTradePanel({
       cancelled = true
       clearTimeout(t)
     }
-  }, [amount, mode, token, swapOn, busy, tokDec, isV4, v4Pool, v4Ready, quoteDec])
+  }, [amount, mode, token, swapOn, busy, tokDec, isV4, v4Pool, v4Ready, quoteDec, payUsdc])
 
   const needApprove = (() => {
     if (!amount || Number(amount) <= 0) return false
     const need =
       mode === 'buy'
-        ? isV4
-          ? parseQuoteAmt(amount, quoteDec)
-          : parseUsdc(amount)
+        ? payUsdc
+          ? parseUsdc(amount)
+          : isV4
+            ? parseQuoteAmt(amount, quoteDec)
+            : parseUsdc(amount)
         : parseToken(amount, tokDec)
     return (allowance as bigint | undefined ?? 0n) < need
   })()
@@ -353,12 +374,12 @@ export function ArcDexTradePanel({
     setWalletRpcPaused(true)
     try {
       if (needApprove) {
-        setStatusMsg(mode === 'buy' ? `Approve ${quoteSym}…` : `Approve ${symbol}…`)
+        setStatusMsg(mode === 'buy' ? `Approve ${payUsdc ? 'USDC' : quoteSym}…` : `Approve ${symbol}…`)
         await writeContractAsync({
           address: approveToken,
           abi: erc20Abi,
           functionName: 'approve',
-          args: [spender, ARC_MAX_APPROVAL],
+          args: [approveSpender, ARC_MAX_APPROVAL],
           chainId: ARC_CHAIN_ID,
           gas: ARC_ERC20_APPROVE_GAS,
         })
@@ -375,7 +396,141 @@ export function ArcDexTradePanel({
         throw new Error('No quote yet. Wait a moment or try a smaller amount.')
       }
       const quoted = estOut
-      if (isV4 && v4Pool) {
+      const pub = arcPublicClient()
+      const send = async (
+        call: { address: Address; abi: readonly unknown[]; functionName: string; args: readonly unknown[]; chainId: number },
+        gas: bigint = ARC_SWAP_GAS,
+      ) => {
+        const hash = await writeContractAsync({
+          address: call.address,
+          abi: call.abi as never,
+          functionName: call.functionName as never,
+          args: call.args as never,
+          chainId: call.chainId,
+          gas,
+        })
+        const receipt = await pub.waitForTransactionReceipt({ hash })
+        if (receipt.status !== 'success') throw new Error('Transaction failed')
+        return hash
+      }
+      const balanceOf = async (erc20: Address) =>
+        pub.readContract({
+          address: erc20,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [address],
+        })
+      if (isV4 && v4Pool && payUsdc) {
+        const priced = await quoteEveV4PricedInUsdc(
+          v4Pool,
+          mode,
+          mode === 'buy' ? parseUsdc(amount) : parseToken(amount, tokDec),
+          pub,
+        )
+        if (!priced || priced.out <= 0n || priced.quoteAmount <= 0n) {
+          throw new Error('No USDC quote for this size. Try a smaller amount.')
+        }
+        if (mode === 'buy') {
+          const usdcIn = parseUsdc(amount)
+          setStatusMsg('Confirm USDC swap…')
+          const before = await balanceOf(v4Pool.quote)
+          await send(
+            buildV3ExactIn({
+              tokenIn: ARC.USDC,
+              tokenOut: v4Pool.quote,
+              fee: priced.usdcFee,
+              amountIn: usdcIn,
+              minOut: minOutFromSlippage(priced.quoteAmount, SLIPPAGE_BPS),
+              recipient: address,
+            }),
+          )
+          const got = (await balanceOf(v4Pool.quote)) - before
+          if (got <= 0n) throw new Error('USDC swap returned no quote token.')
+          const allowanceNow = await pub.readContract({
+            address: v4Pool.quote,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [address, ARC.INSTANT_V4_ROUTER],
+          })
+          if (allowanceNow < got) {
+            setStatusMsg(`Approve ${quoteSym}…`)
+            await send(
+              {
+                address: v4Pool.quote,
+                abi: erc20Abi,
+                functionName: 'approve',
+                args: [ARC.INSTANT_V4_ROUTER, ARC_MAX_APPROVAL],
+                chainId: ARC_CHAIN_ID,
+              },
+              ARC_ERC20_APPROVE_GAS,
+            )
+          }
+          setStatusMsg('Confirm buy…')
+          const tokenOut = await quoteEveV4ExactIn(v4Pool, got, !v4Pool.tokenIsCurrency0, pub)
+          const hash = await send(
+            buildEveV4Swap({
+              key: v4Pool.key,
+              zeroForOne: !v4Pool.tokenIsCurrency0,
+              amountIn: got,
+              minOut: minOutFromSlippage(tokenOut && tokenOut > 0n ? tokenOut : priced.out, SLIPPAGE_BPS),
+              recipient: address,
+            }),
+          )
+          setWalletRpcPaused(false)
+          setTxHash(hash)
+          setStatusMsg('Confirming…')
+        } else {
+          const inAmt = parseToken(amount, tokDec)
+          setStatusMsg('Confirm sell…')
+          const before = await balanceOf(v4Pool.quote)
+          await send(
+            buildEveV4Swap({
+              key: v4Pool.key,
+              zeroForOne: v4Pool.tokenIsCurrency0,
+              amountIn: inAmt,
+              minOut: minOutFromSlippage(priced.quoteAmount, SLIPPAGE_BPS),
+              recipient: address,
+            }),
+          )
+          const got = (await balanceOf(v4Pool.quote)) - before
+          if (got <= 0n) throw new Error(`Sell returned no ${quoteSym}.`)
+          const hop = await quoteV3ExactIn(v4Pool.quote, ARC.USDC, got, pub)
+          if (!hop) throw new Error(`Could not quote ${quoteSym} to USDC. ${quoteSym} is in your wallet.`)
+          const allowanceNow = await pub.readContract({
+            address: v4Pool.quote,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [address, ARC.UNI_ROUTER],
+          })
+          if (allowanceNow < got) {
+            setStatusMsg(`Approve ${quoteSym}…`)
+            await send(
+              {
+                address: v4Pool.quote,
+                abi: erc20Abi,
+                functionName: 'approve',
+                args: [ARC.UNI_ROUTER, ARC_MAX_APPROVAL],
+                chainId: ARC_CHAIN_ID,
+              },
+              ARC_ERC20_APPROVE_GAS,
+            )
+          }
+          setStatusMsg('Confirm USDC swap…')
+          const hash = await send(
+            buildV3ExactIn({
+              tokenIn: v4Pool.quote,
+              tokenOut: ARC.USDC,
+              fee: hop.fee,
+              amountIn: got,
+              minOut: minOutFromSlippage(hop.amountOut, SLIPPAGE_BPS),
+              recipient: address,
+            }),
+          )
+          setWalletRpcPaused(false)
+          setTxHash(hash)
+          setStatusMsg('Confirming…')
+        }
+      } else if (isV4 && v4Pool) {
         const inAmt = mode === 'buy' ? parseQuoteAmt(amount, quoteDec) : parseToken(amount, tokDec)
         if (inAmt <= 0n) throw new Error('Invalid amount.')
         const minOut = minOutFromSlippage(quoted, SLIPPAGE_BPS)
@@ -458,11 +613,13 @@ export function ArcDexTradePanel({
   }
 
   const amtNum = Number(amount) || 0
-  const payBal = mode === 'buy' ? ((quoteBal as bigint | undefined) ?? 0n) : ((tokenBal as bigint | undefined) ?? 0n)
+  const payBal = mode === 'buy'
+    ? ((payUsdc ? usdcBal : quoteBal) as bigint | undefined) ?? 0n
+    : ((tokenBal as bigint | undefined) ?? 0n)
   const payBalLabel = payBalPending
     ? '…'
     : mode === 'buy'
-      ? quoteSym === 'USDC'
+      ? payUsdc || quoteSym === 'USDC'
         ? formatUsdc(payBal)
         : fmtQuoteAmt(payBal, quoteDec)
       : fmtTok(payBal, tokDec)
@@ -473,19 +630,19 @@ export function ArcDexTradePanel({
         ? '0'
         : mode === 'buy'
           ? fmtTok(estOut, tokDec)
-          : isV4
-            ? fmtQuoteAmt(estOut, quoteDec)
-            : formatUsdc(estOut)
-  const receiveSym = mode === 'buy' ? symbol : isV4 ? quoteSym : 'USDC'
+          : payUsdc || !isV4
+            ? formatUsdc(estOut)
+            : fmtQuoteAmt(estOut, quoteDec)
+  const receiveSym = mode === 'buy' ? symbol : payUsdc || !isV4 ? 'USDC' : quoteSym
   const receiveUsd =
-    mode === 'sell' && estOut != null && estOut > 0n
+    mode === 'sell' && !payUsdc && estOut != null && estOut > 0n
       ? quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteToken : ARC.USDC, spotPx)
-      : mode === 'buy' && amtNum > 0
+      : mode === 'buy' && !payUsdc && amtNum > 0
         ? quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, spotPx)
         : null
   const TokenChip = ({ kind }: { kind: 'quote' | 'token' }) =>
     kind === 'quote' ? (
-      quoteSym === 'USDC' ? (
+      quoteSym === 'USDC' || payUsdc ? (
         <span className="inline-flex items-center gap-2 h-10 pl-1.5 pr-3 rounded-full bg-[#111318] border border-white/10">
           <UsdcMark />
           <span className="text-[15px] font-semibold">USDC</span>
@@ -524,12 +681,16 @@ export function ArcDexTradePanel({
   const sellFeeBps = isV4 ? v4Pool?.sellFeeBps || v4Pool?.feeBps || 100 : 100
   const feeBps = mode === 'sell' ? sellFeeBps : buyFeeBps
   const feeLabel = isV4 ? feePairLabel(buyFeeBps, sellFeeBps) : feeBps === 100 ? '1% fee' : `${(feeBps / 100).toFixed(1)}% fee`
-  const inUsd = quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, spotPx)
+  const inUsd = payUsdc && mode === 'buy'
+    ? amtNum > 0 ? amtNum : null
+    : quoteHumanToUsd(amtNum, isV4 ? quoteToken : ARC.USDC, spotPx)
   const outUsd =
     estOut != null && estOut > 0n
       ? mode === 'buy'
         ? null
-        : quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteToken : ARC.USDC, spotPx)
+        : payUsdc
+          ? Number(formatUnits(estOut, 6))
+          : quoteHumanToUsd(Number(formatUnits(estOut, isV4 ? quoteDec : 6)), isV4 ? quoteToken : ARC.USDC, spotPx)
       : null
   const feeUsd =
     mode === 'buy'
@@ -575,7 +736,7 @@ export function ArcDexTradePanel({
       </div>
 
       <label className="mt-5 block text-xs text-t3">
-            {mode === 'buy' ? `You pay · ${isV4 ? quoteSym : 'USDC'}` : `You sell · $${symbol}`}
+            {mode === 'buy' ? `You pay · ${payUsdc || !isV4 || quoteSym === 'USDC' ? 'USDC' : quoteSym}` : `You sell · $${symbol}`}
           </label>
           <div className="mt-2 flex items-center gap-2 h-12 rounded-xl bg-s2 border border-hair px-3">
             <input
@@ -588,7 +749,7 @@ export function ArcDexTradePanel({
             <TokenChip kind={mode === 'buy' ? 'quote' : 'token'} />
           </div>
           <div className="mt-2 flex justify-between text-xs text-t3">
-            <span>Wallet {payBalLabel}{mode === 'buy' && isV4 && quoteSym !== 'USDC' ? ` ${quoteSym}` : ''}</span>
+            <span>Wallet {payBalLabel}{mode === 'buy' && isV4 && !payUsdc && quoteSym !== 'USDC' ? ` ${quoteSym}` : ''}</span>
             <button
               type="button"
               disabled={payBalPending || payBal === 0n}
@@ -596,7 +757,7 @@ export function ArcDexTradePanel({
                 if (payBalPending || payBal <= 0n) return
                 setAmount(
                   mode === 'buy'
-                    ? quoteSym === 'USDC'
+                    ? payUsdc || quoteSym === 'USDC'
                       ? formatUsdc(payBal).replace(/,/g, '')
                       : formatUnits(payBal, quoteDec)
                     : formatToken(payBal, tokDec),
@@ -607,7 +768,7 @@ export function ArcDexTradePanel({
               Max
             </button>
           </div>
-          {mode === 'buy' && isV4 && spotUsd && amtNum > 0 && spotPx ? (
+          {mode === 'buy' && isV4 && spotUsd && !payUsdc && amtNum > 0 && spotPx ? (
             <p className="mt-1 mb-0 text-[11px] text-t3">≈ {fmtUsd(spotQuoteToUsd(amtNum, spotPx))}</p>
           ) : null}
           {mode === 'buy' ? (
@@ -616,9 +777,11 @@ export function ArcDexTradePanel({
                 <button
                   key={v}
                   type="button"
-                  disabled={spotUsd && !(spotPx && spotPx > 0)}
+                  disabled={!payUsdc && spotUsd && !(spotPx && spotPx > 0)}
                   onClick={() => {
-                    if (spotUsd) {
+                    if (payUsdc) {
+                      setAmount(String(v))
+                    } else if (spotUsd) {
                       if (!spotPx) return
                       setAmount(usdToQuoteHuman(v, spotPx, quoteDec))
                     } else {

@@ -351,6 +351,60 @@ async function quoteExactInput(
   return res[0] > 0n ? res[0] : null
 }
 
+/**
+ * Plain Uniswap v3 exact-in between two tokens. No Instant fee skim.
+ * The fee tier is the TOKEN/USDC pool, so one side must be USDC.
+ */
+export async function quoteV3ExactIn(
+  tokenIn: Address,
+  tokenOut: Address,
+  amountIn: bigint,
+  client?: Client,
+): Promise<{ amountOut: bigint; fee: number } | null> {
+  if (amountIn <= 0n || !arcSwapConfigured()) return null
+  const c = rpc(client)
+  const usdc = ARC.USDC.toLowerCase()
+  const feeToken = tokenIn.toLowerCase() === usdc ? tokenOut : tokenIn
+  const fee = await findArcPoolFee(feeToken, c)
+  if (fee == null) return null
+  try {
+    const amountOut = await quoteExactInput(c, tokenIn, tokenOut, amountIn, fee)
+    if (amountOut == null || amountOut <= 0n) return null
+    return { amountOut, fee }
+  } catch (e) {
+    if (!client && isArcRpcInfraError(e)) throw e
+    return null
+  }
+}
+
+/** Direct SwapRouter hop. Used to turn a gold or BTC quote into USDC around an Instant v4 pool. */
+export function buildV3ExactIn(opts: {
+  tokenIn: Address
+  tokenOut: Address
+  fee: number
+  amountIn: bigint
+  minOut: bigint
+  recipient: Address
+}): ArcSwapWrite {
+  return {
+    address: ARC.UNI_ROUTER,
+    abi: SWAP_ROUTER_ABI,
+    functionName: 'exactInputSingle',
+    args: [
+      {
+        tokenIn: opts.tokenIn,
+        tokenOut: opts.tokenOut,
+        fee: opts.fee,
+        recipient: opts.recipient,
+        amountIn: opts.amountIn,
+        amountOutMinimum: opts.minOut,
+        sqrtPriceLimitX96: 0n,
+      },
+    ],
+    chainId: ARC_CHAIN_ID,
+  }
+}
+
 export async function quoteArcBuy(
   token: Address,
   usdcIn: bigint,
