@@ -244,11 +244,12 @@ export function ArcCreateForm({
     isConnected && chainId === ARC_CHAIN_ID && payUsdcSwap ? address : undefined,
   )
 
-  // Keep first-buy amount in the active quote's units when the pair changes.
-  // Spot quotes keep USD string state (converted to quote raw only at submit).
+  // Reset only when the pair changes. rwaAssetById builds a new object every
+  // render, so depending on it snaps the field back to the 100 USDC preset.
   useEffect(() => {
-    setFirstBuy(defaultFirstBuy(quoteId, rwaQuote))
-  }, [quoteId, quoteDecimalsLive, rwaQuote])
+    const asset = quoteId === 'usdc' ? null : rwaAssetById(quoteId)
+    setFirstBuy(defaultFirstBuy(quoteId, asset))
+  }, [quoteId, quoteDecimalsLive])
 
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
 

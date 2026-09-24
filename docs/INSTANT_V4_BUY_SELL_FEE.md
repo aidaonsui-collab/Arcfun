@@ -1,6 +1,6 @@
 # Instant V4: asymmetric buy / sell fee
 
-**Status:** deployed 2026-09-23. New creates use hook `0xd0789f648014Ade05d40b26496570319ec124044`, USDC factory `0x1ADE6304CEbd48a724F07a0336759e37D1C9dB6d`, RWA factory `0x5Fa197152ac04C0bE7D92DA7270755400b281440`. Already-launched pools stay on the previous hook.  
+**Status:** dual-fee contracts deployed 2026-09-23 and kept in the catalog. Create points at the single-fee factories terminals already index: hook `0x8fa4B88e4052302FBd9E8419eeC6E9FdAC210044`, USDC factory `0xCfC8287Fd6331A826565B2ACBc69CB3E083602Ea`, RWA factory `0x3489E76510238ef57Ee9d18005a6Fb110f17912D`. One fee, 0.3–3%, same on both sides. Tokens launched on the dual-fee factories stay there.  
 **Date:** 2026-09-22  
 **Decision locked:** max fee **5%** (`MAX_FEE_BPS = 500`) on each of buy and sell.  
 **Scope:** eve.fun Instant V4 (`EveFeeHook` + factories + create UI + router quotes + indexer)  

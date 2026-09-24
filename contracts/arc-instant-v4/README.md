@@ -31,28 +31,7 @@ Create UI: `/create` shows the fee chooser unless `NEXT_PUBLIC_ARC_INSTANT_V4=0`
 and reflect creates hit `EveInstantV4Factory`. The V3 Instant factory stays for tokens already
 on that path.
 
-## Live on Arc 5042 (2026-09-23, dual buy/sell fees)
-
-| Contract | Address |
-| --- | --- |
-| Uniswap `PoolManager` | `0x8366a39CC670B4001A1121B8F6A443A643e40951` |
-| `EveFeeHook` | `0xd0789f648014Ade05d40b26496570319ec124044` |
-| `EveInstantV4Factory` | `0x1ADE6304CEbd48a724F07a0336759e37D1C9dB6d` |
-| `InstantAutoLpHelper` | `0xEBe3D8901Cd905B98AeAD8874FA81aFcb339fad9` |
-| `EveV4Router` | `0x494715a3923392Dd0fD312B0CC40055679Feaad2` |
-| `BundleSinkDeployer` | `0xa7cB2D85dB7ACaB1F745ABD0cd630bDbd6F0362b` |
-| `RwaInstantV4Factory` | `0x5Fa197152ac04C0bE7D92DA7270755400b281440` |
-
-Give terminals **`RwaInstantV4Factory` `0x5Fa197152ac04C0bE7D92DA7270755400b281440`**. Buy and sell fees are separate, each 0.3–5%. Router `0x4947…` was reused. Factory `launchVirtualQuote` fallback is still `5500e6`. The create form passes `3200e6` so listed FDV stays $3,000.
-
-Tokens launched before this stay on the single-fee hook `0x8fa4B88e4052302FBd9E8419eeC6E9FdAC210044` and factories `0xCfC8287Fd6331A826565B2ACBc69CB3E083602Ea` / `0x3489E76510238ef57Ee9d18005a6Fb110f17912D`.
-
-## Previous live set (2026-09-16, single fee)
-
-Deployed with `script/DeployEveInstantV4.s.sol` through Arachnid's CREATE2 deployer
-(`0x4e59b44847b379578588920cA78FbF26c0B4956C`) so the hook address carries
-`AFTER_SWAP | AFTER_SWAP_RETURNS_DELTA` (flags 68). Owner is passed into the hook constructor
-so the CREATE2 factory is not locked as owner.
+## Create target on Arc 5042 (single fee, the set terminals already index)
 
 | Contract | Address |
 | --- | --- |
@@ -64,8 +43,25 @@ so the CREATE2 factory is not locked as owner.
 | `BundleSinkDeployer` | `0xf775493CE7E16a94e175C1C984bcdF2F689895fc` |
 | `RwaInstantV4Factory` | `0x3489E76510238ef57Ee9d18005a6Fb110f17912D` |
 
-This set is retired for new creates. Quote was per-create (`TokenLaunched`).
-Already-launched tokens stay on this hook.
+Create uses this set. One fee, 0.3–3%, same on buys and sells. Terminals already index `0xCfC8…` and `0x3489…`. Router `0x4947…` is unchanged. The create form passes `3200e6` so listed FDV stays $3,000.
+
+## Dual-fee set (2026-09-23, catalog only)
+
+Tokens launched that day stay on this hook. New creates do not.
+
+| Contract | Address |
+| --- | --- |
+| `EveFeeHook` | `0xd0789f648014Ade05d40b26496570319ec124044` |
+| `EveInstantV4Factory` | `0x1ADE6304CEbd48a724F07a0336759e37D1C9dB6d` |
+| `InstantAutoLpHelper` | `0xEBe3D8901Cd905B98AeAD8874FA81aFcb339fad9` |
+| `RwaInstantV4Factory` | `0x5Fa197152ac04C0bE7D92DA7270755400b281440` |
+
+Buy and sell fees are separate, each 0.3–5%.
+
+The create-target set was deployed 2026-09-16 with `script/DeployEveInstantV4.s.sol` through Arachnid's CREATE2 deployer
+(`0x4e59b44847b379578588920cA78FbF26c0B4956C`) so the hook address carries
+`AFTER_SWAP | AFTER_SWAP_RETURNS_DELTA` (flags 68). Owner is passed into the hook constructor
+so the CREATE2 factory is not locked as owner. Quote was per-create (`TokenLaunched`).
 
 PoolManager is Uniswap's official Arc address (`Uniswap/contracts` `deployments/json/5042.json`).
 Factory `launchVirtualQuote` is `5500e6`. Owner / platform wallet is
