@@ -31,6 +31,11 @@ Create UI: `/create` shows the fee chooser unless `NEXT_PUBLIC_ARC_INSTANT_V4=0`
 and reflect creates hit `EveInstantV4Factory`. The V3 Instant factory stays for tokens already
 on that path.
 
+Basket pairs (`BasketShareVault` / `BasketVaultFactory`) mint an 18-decimal share backed by a
+fixed stock recipe. That share is the quote on `RwaInstantV4Factory`. Deploy with
+`script/DeployBasketVaultFactory.s.sol`, then set `NEXT_PUBLIC_ARC_BASKET_FACTORY`. Create will
+not seed until each leg's `totalSupply` is above zero.
+
 ## Create target on Arc 5042 (single fee, the set terminals already index)
 
 | Contract | Address |

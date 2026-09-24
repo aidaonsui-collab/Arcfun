@@ -151,8 +151,15 @@ function mergeAsset(base: ArcRwaAsset, over?: Partial<ArcRwaAsset>): ArcRwaAsset
   }
 }
 
-function sharedRwaV4Factory(): Address | '' {
+export function sharedRwaV4Factory(): Address | '' {
   return envAddr('NEXT_PUBLIC_ARC_INSTANT_V4_RWA_FACTORY') || (V4_RWA_FACTORY_DEFAULT as Address)
+}
+
+/** Baskets seeded in this browser. Not part of the built-in catalog. */
+let clientBasketQuotes: ArcRwaAsset[] = []
+
+export function setClientBasketQuotes(assets: ArcRwaAsset[]) {
+  clientBasketQuotes = assets
 }
 
 function builtinCatalog(): ArcRwaAsset[] {
@@ -334,7 +341,7 @@ export function listRwaAssets(): ArcRwaAsset[] {
       })
     }
   }
-  return [...byId.values()]
+  return [...byId.values(), ...clientBasketQuotes]
 }
 
 export function rwaCreateReady(a: ArcRwaAsset): boolean {

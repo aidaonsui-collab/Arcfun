@@ -46,6 +46,8 @@ import {
   type ArcRwaAsset,
 } from '@/lib/arc-rwa-assets'
 import { BundleBasketCard } from '@/components/BundleBasketCard'
+import { BasketPairCard } from '@/components/BasketPairCard'
+import { basketVirtualQuoteRaw, isBasketQuoteId } from '@/lib/arc-basket'
 import {
   RWA_V4_FACTORY_ABI,
   basketValid,
@@ -646,6 +648,18 @@ export function ArcCreateForm({
         }
       }
 
+      const launchVirtualQuote = async () => {
+        if (!rwaQuote) return undefined
+        if (isBasketQuoteId(rwaQuote.id)) {
+          const q = basketVirtualQuoteRaw(rwaQuote.id)
+          if (q <= 0n) throw new Error('Set a dollar price for one basket share before launching.')
+          return q
+        }
+        return defaultRwaVirtualQuoteRaw(rwaQuote, {
+          spotUsd: spotUsd ? await refreshSpotPx(true) : undefined,
+        })
+      }
+
       if (rwaV4Live && bundleOn && bundleLive) {
         setStep('creating')
         const creator = address
@@ -658,11 +672,7 @@ export function ArcCreateForm({
           firstBuyQuoteRaw: firstBuyQuote,
           split: splitForCreate,
           dual: dualFee,
-          launchVirtualQuote: rwaQuote
-            ? defaultRwaVirtualQuoteRaw(rwaQuote, {
-                spotUsd: spotUsd ? await refreshSpotPx(true) : undefined,
-              })
-            : undefined,
+          launchVirtualQuote: await launchVirtualQuote(),
         })
         hash = await writeContractAsync({
           address: call.address,
@@ -719,11 +729,7 @@ export function ArcCreateForm({
           firstBuyQuoteRaw: firstBuyQuote,
           split: splitForCreate,
           dual: dualFee,
-          launchVirtualQuote: rwaQuote
-            ? defaultRwaVirtualQuoteRaw(rwaQuote, {
-                spotUsd: spotUsd ? await refreshSpotPx(true) : undefined,
-              })
-            : undefined,
+          launchVirtualQuote: await launchVirtualQuote(),
         })
         hash = await writeContractAsync({
           address: call.address,
@@ -1065,6 +1071,16 @@ export function ArcCreateForm({
           }}
         />
       ) : null}
+      <BasketPairCard
+        active={launchType === 'instant' && isBasketQuoteId(quoteId)}
+        disabled={!launchesLive}
+        onSelect={(id) => {
+          setLaunchType('instant')
+          setQuoteId(id)
+          setBundleOn(false)
+          setFeeSplit(foldHoldersIntoCreator(feeSplit))
+        }}
+      />
       </div>
     </div>
   )
