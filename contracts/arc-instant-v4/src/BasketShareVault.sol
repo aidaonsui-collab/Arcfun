@@ -7,7 +7,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title BasketShareVault
-/// @notice Fixed-recipe share token. Mint pulls a set amount of each leg. Redeem pays
+/// @notice Fixed-recipe share token, two or three legs. Mint pulls a set amount of each leg. Redeem pays
 ///         pro-rata of whatever the vault holds. Seed shares stay locked here so redeem
 ///         cannot empty the recipe. No admin withdraw and no recipe edit.
 ///
@@ -17,7 +17,7 @@ contract BasketShareVault is ERC20, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 public constant MIN_LEGS = 2;
-    uint256 public constant MAX_LEGS = 8;
+    uint256 public constant MAX_LEGS = 3;
 
     address public immutable creator;
     uint256 public immutable seedShares;

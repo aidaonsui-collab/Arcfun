@@ -52,7 +52,7 @@ export function BasketPairCard({
   const toggle = (sym: string) => {
     setPicked((cur) => {
       if (cur.includes(sym)) return cur.filter((s) => s !== sym)
-      if (cur.length >= 5) return cur
+      if (cur.length >= 3) return cur
       return [...cur, sym]
     })
   }
@@ -64,8 +64,8 @@ export function BasketPairCard({
       setNote('Connect a wallet to seed.')
       return
     }
-    if (picked.length < 2) {
-      setNote('Pick at least two stocks.')
+    if (picked.length < 2 || picked.length > 3) {
+      setNote('Pick two or three stocks.')
       return
     }
     const usd = Number(usdPerShare)
@@ -182,8 +182,8 @@ export function BasketPairCard({
     >
       <div className="text-sm font-medium">Basket paired</div>
       <p className="mt-1 mb-3 text-xs leading-relaxed text-t2">
-        Several Dinari stocks back one share. That share is the Instant quote on the RWA factory. Seed
-        turns on once each stock can be pulled.
+        Two or three Dinari stocks back one share. That share is the Instant quote on the RWA factory.
+        Seed turns on once each stock can be pulled.
       </p>
       <div className="flex flex-wrap gap-1.5">
         {DINARI_LEGS.map((leg) => {
@@ -192,7 +192,7 @@ export function BasketPairCard({
             <button
               key={leg.symbol}
               type="button"
-              disabled={disabled || busy}
+              disabled={disabled || busy || (!on && picked.length >= 3)}
               onClick={() => toggle(leg.symbol)}
               className={`h-8 rounded-full px-2.5 text-[12px] font-semibold border ${
                 on ? 'border-lime-line text-white bg-lime/15' : 'border-hair text-t3'

@@ -171,6 +171,21 @@ contract BasketShareVaultTest is Test {
         dupU[1] = UNIT;
         vm.expectRevert(BasketShareVault.BadRecipe.selector);
         factory.create("Dup", "DUP", dup, dupU, SEED, CAP);
+
+        Leg msft = new Leg("MSFT");
+        Leg googl = new Leg("GOOGL");
+        address[] memory four = new address[](4);
+        uint256[] memory fourU = new uint256[](4);
+        four[0] = address(nvda);
+        four[1] = address(aapl);
+        four[2] = address(msft);
+        four[3] = address(googl);
+        fourU[0] = UNIT;
+        fourU[1] = UNIT;
+        fourU[2] = UNIT;
+        fourU[3] = UNIT;
+        vm.expectRevert(BasketShareVault.BadRecipe.selector);
+        factory.create("Four", "FOUR", four, fourU, SEED, CAP);
     }
 
     function testOnlyCreatorSeedsOnce() public {
