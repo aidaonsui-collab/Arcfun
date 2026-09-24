@@ -6,6 +6,8 @@
 export const FEE_BPS_DENOM = 10_000
 export const MIN_FEE_BPS = 30
 export const MAX_FEE_BPS = 500
+/** Single-fee factories the terminals index. Their hook reverts above 3%. */
+export const LEGACY_MAX_FEE_BPS = 300
 export const MIN_PLATFORM_BPS = 1_000
 export const MIN_REFLECT_HOLDERS_BPS = 2_000
 
@@ -119,8 +121,8 @@ export function feePctLabel(feeBps: number): string {
   return `${pct.toFixed(1)}%`
 }
 
-export function clampFeeBps(bps: number): number {
-  return Math.min(MAX_FEE_BPS, Math.max(MIN_FEE_BPS, Math.round(bps / 10) * 10))
+export function clampFeeBps(bps: number, max = MAX_FEE_BPS): number {
+  return Math.min(max, Math.max(MIN_FEE_BPS, Math.round(bps / 10) * 10))
 }
 
 /** One percent when buy and sell match. Otherwise both, for token pages and the create card. */
@@ -156,21 +158,22 @@ export function foldHoldersIntoCreator(s: FeeSplit): FeeSplit {
 
 export function splitValid(
   s: FeeSplit,
-  opts: { minHoldersBps?: number; hideHolders?: boolean; requireEqualFees?: boolean } = {},
+  opts: { minHoldersBps?: number; hideHolders?: boolean; requireEqualFees?: boolean; maxFeeBps?: number } = {},
 ): { ok: boolean; reason: string | null } {
+  const maxFee = opts.maxFeeBps ?? MAX_FEE_BPS
   if (
     s.buyFeeBps < MIN_FEE_BPS ||
-    s.buyFeeBps > MAX_FEE_BPS ||
+    s.buyFeeBps > maxFee ||
     s.sellFeeBps < MIN_FEE_BPS ||
-    s.sellFeeBps > MAX_FEE_BPS
+    s.sellFeeBps > maxFee
   ) {
-    return { ok: false, reason: 'Buy and sell fees must be between 0.3% and 5%.' }
+    return { ok: false, reason: `Buy and sell fees must be between 0.3% and ${maxFee / 100}%.` }
   }
   if (opts.requireEqualFees && s.buyFeeBps !== s.sellFeeBps) {
     return { ok: false, reason: 'This factory still charges one fee. Keep buy and sell the same.' }
   }
   if (s.platformBps < MIN_PLATFORM_BPS) {
-    return { ok: false, reason: 'eve.fun takes at least 10%.' }
+    return { ok: false, reason: 'The pad takes at least 10%.' }
   }
   if (opts.hideHolders && s.holdersBps > 0) {
     return { ok: false, reason: 'This quote does not pay holders.' }

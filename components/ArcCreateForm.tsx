@@ -77,6 +77,8 @@ import { TokenCard } from '@/components/TokenCard'
 import { FeeSplitCard } from '@/components/FeeSplitCard'
 import {
   FEE_SPLIT_PRESETS,
+  LEGACY_MAX_FEE_BPS,
+  MAX_FEE_BPS,
   MIN_REFLECT_HOLDERS_BPS,
   foldHoldersIntoCreator,
   splitValid,
@@ -321,6 +323,7 @@ export function ArcCreateForm({
   })
   const dualFee = Number(feeModelQ.data) === 2
   const feeModelKnown = feeModelQ.isSuccess || feeModelQ.isError
+  const maxFeeBps = feeModelKnown && !dualFee ? LEGACY_MAX_FEE_BPS : MAX_FEE_BPS
   const bundleLive = rwaV4Live
   const hideHolders = Boolean(rwaQuote) && !bundleOn
   const minHoldersBps = isReflection
@@ -333,10 +336,19 @@ export function ArcCreateForm({
     if (!hideHolders || feeSplit.holdersBps === 0) return
     setFeeSplit((s) => foldHoldersIntoCreator(s))
   }, [hideHolders, feeSplit.holdersBps])
+  useEffect(() => {
+    if (!feeModelKnown || dualFee) return
+    if (feeSplit.buyFeeBps <= LEGACY_MAX_FEE_BPS && feeSplit.sellFeeBps <= LEGACY_MAX_FEE_BPS) return
+    setFeeSplit((s) => ({
+      ...s,
+      buyFeeBps: Math.min(s.buyFeeBps, LEGACY_MAX_FEE_BPS),
+      sellFeeBps: Math.min(s.sellFeeBps, LEGACY_MAX_FEE_BPS),
+    }))
+  }, [feeModelKnown, dualFee, feeSplit.buyFeeBps, feeSplit.sellFeeBps])
   const feeOk =
     !v4Ui ||
     (feeModelKnown &&
-      splitValid(feeSplit, { hideHolders, minHoldersBps, requireEqualFees: !dualFee }).ok)
+      splitValid(feeSplit, { hideHolders, minHoldersBps, requireEqualFees: !dualFee, maxFeeBps }).ok)
   const basketCheck = bundleOn
     ? basketValid(basketRows, {
         quote: ((rwaQuote?.address as Address) || ARC.USDC) as Address,
@@ -1080,6 +1092,7 @@ export function ArcCreateForm({
           <div className="mt-3 space-y-3">
             <FeeSplitCard
               requireEqualFees={feeModelKnown && !dualFee}
+              maxFeeBps={maxFeeBps}
               split={feeSplit}
               onChange={setFeeSplit}
               hideHolders={hideHolders}

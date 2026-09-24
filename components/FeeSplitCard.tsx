@@ -33,6 +33,7 @@ export function FeeSplitCard({
   hideHolders = false,
   minHoldersBps = 0,
   requireEqualFees = false,
+  maxFeeBps = MAX_FEE_BPS,
   preview = false,
   open,
   onOpenChange,
@@ -43,11 +44,13 @@ export function FeeSplitCard({
   minHoldersBps?: number
   /** Live single-fee factories cannot store a different sell fee. */
   requireEqualFees?: boolean
+  /** Single-fee factories cap at 3%. Dual-fee factories cap at 5%. */
+  maxFeeBps?: number
   preview?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const check = splitValid(split, { hideHolders, minHoldersBps, requireEqualFees })
+  const check = splitValid(split, { hideHolders, minHoldersBps, requireEqualFees, maxFeeBps })
   const remaining = splitRemaining(split)
   const preset = matchPreset(split)
   const titleId = useId()
@@ -86,7 +89,7 @@ export function FeeSplitCard({
   }
 
   const setBuyFee = (bps: number) => {
-    const clamped = clampFeeBps(bps)
+    const clamped = clampFeeBps(bps, maxFeeBps)
     onChange({
       ...split,
       buyFeeBps: clamped,
@@ -95,7 +98,7 @@ export function FeeSplitCard({
   }
 
   const setSellFee = (bps: number) => {
-    const clamped = clampFeeBps(bps)
+    const clamped = clampFeeBps(bps, maxFeeBps)
     onChange({ ...split, sellFeeBps: clamped })
   }
 
@@ -228,11 +231,13 @@ export function FeeSplitCard({
             <FeeSlider
               label="Buy fee"
               value={split.buyFeeBps}
+              maxBps={maxFeeBps}
               onChange={setBuyFee}
             />
             <FeeSlider
               label="Sell fee"
               value={split.sellFeeBps}
+              maxBps={maxFeeBps}
               onChange={linked ? setBuyFee : setSellFee}
               disabled={linked}
             />
@@ -334,11 +339,13 @@ export function FeeSplitCard({
 function FeeSlider({
   label,
   value,
+  maxBps,
   onChange,
   disabled = false,
 }: {
   label: string
   value: number
+  maxBps: number
   onChange: (bps: number) => void
   disabled?: boolean
 }) {
@@ -351,9 +358,9 @@ function FeeSlider({
       <input
         type="range"
         min={MIN_FEE_BPS}
-        max={MAX_FEE_BPS}
+        max={maxBps}
         step={10}
-        value={value}
+        value={Math.min(value, maxBps)}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
         className="fee-range w-full"
@@ -361,7 +368,7 @@ function FeeSlider({
       />
       <div className="mt-1 flex justify-between text-[11px] text-t3 tabular-nums">
         <span>0.3%</span>
-        <span>5.0%</span>
+        <span>{feePctLabel(maxBps)}</span>
       </div>
     </div>
   )
