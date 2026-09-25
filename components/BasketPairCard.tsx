@@ -190,7 +190,9 @@ export function BasketPairCard({
       <div className="text-sm font-medium">Basket paired</div>
       <p className="mt-1 mb-3 text-xs leading-relaxed text-t2">
         Two or three assets back one share. A mint pulls that recipe plus a fee. A redeem pays it back
-        minus a fee. The share is the Instant quote. Mint turns on once each asset can be pulled.
+        minus a fee. The share is the Instant quote. USDC can buy or sell it in one swap once each
+        asset has a pool, and a dead asset can be skipped on the way out. Mint turns on once each
+        asset can be pulled.
       </p>
       <div className="flex flex-wrap gap-1.5">
         {DINARI_LEGS.map((leg) => {

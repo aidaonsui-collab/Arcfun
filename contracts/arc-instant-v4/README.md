@@ -40,6 +40,14 @@ is the quote on `RwaInstantV4Factory`. Deploy with `script/DeployBasketVaultFact
 set `NEXT_PUBLIC_ARC_BASKET_FACTORY`. Create will not mint until each leg's `totalSupply` is
 above zero.
 
+`BasketUsdcRouter` buys exact shares with USDC and sells shares back to USDC through
+SwapRouter02, one transaction, one v3 fee tier per call. A sell can skip a dead leg.
+The vault can pause new mints, cap mint and redeem per hour (redeem cannot be set below
+10% of supply per hour), and exclude a leg that reverts on transfer. The owner can exclude
+immediately. Anyone can exclude one day after `probeDead`. Holder backing for that leg is
+forfeited, not withdrawn by the owner. `resync` charges a missing balance to protocol fees
+first, then the owner, then holders.
+
 ## Create target on Arc 5042 (single fee, the set terminals already index)
 
 | Contract | Address |
