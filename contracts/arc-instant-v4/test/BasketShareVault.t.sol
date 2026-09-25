@@ -23,7 +23,6 @@ contract Leg is ERC20 {
     }
 }
 
-/// @dev Charges 1 wei on transferFrom so the vault must reject it.
 contract SkimLeg is ERC20 {
     constructor() ERC20("Skim", "SKIM") {}
 
@@ -44,13 +43,14 @@ contract BasketShareVaultTest is Test {
     Leg aapl;
     address creator = makeAddr("creator");
     address trader = makeAddr("trader");
+    address protocol = makeAddr("protocol");
 
     uint256 constant UNIT = 1 ether;
-    uint256 constant SEED = 100 ether;
-    uint256 constant CAP = 1_000 ether;
+    uint16 constant MINT_FEE = 100;
+    uint16 constant REDEEM_FEE = 100;
 
     function setUp() public {
-        factory = new BasketVaultFactory();
+        factory = new BasketVaultFactory(protocol);
         nvda = new Leg("NVDA");
         aapl = new Leg("AAPL");
         nvda.mint(creator, 10_000 ether);
@@ -71,106 +71,108 @@ contract BasketShareVaultTest is Test {
     function _deploy() internal returns (BasketShareVault vault) {
         (address[] memory tokens, uint256[] memory units) = _recipe();
         vm.prank(creator);
-        vault = factory.create("NVDA AAPL", "NA", tokens, units, SEED, CAP);
+        vault = factory.create("NVDA AAPL", "NA", tokens, units, MINT_FEE, REDEEM_FEE);
     }
 
-    function _approveSeed(BasketShareVault vault) internal {
-        vm.startPrank(creator);
+    function _approve(address who, BasketShareVault vault) internal {
+        vm.startPrank(who);
         nvda.approve(address(vault), type(uint256).max);
         aapl.approve(address(vault), type(uint256).max);
         vm.stopPrank();
     }
 
-    function testSeedMintRedeem() public {
+    function testMintChargesBackingAndFees() public {
         BasketShareVault vault = _deploy();
-        _approveSeed(vault);
+        _approve(creator, vault);
+        uint256 shares = 10 ether;
+        uint256 base = 10 ether;
+        uint256 ownerFee = (base * 100 + 9_999) / 10_000;
+        uint256 protocolFee = (base * 35 + 9_999) / 10_000;
+
         vm.prank(creator);
-        vault.seed();
+        vault.mint(shares, creator);
 
-        assertEq(vault.totalSupply(), SEED);
-        assertEq(vault.balanceOf(address(vault)), SEED);
-        assertEq(nvda.balanceOf(address(vault)), UNIT * 100);
-        assertEq(aapl.balanceOf(address(vault)), 2 * UNIT * 100);
-
-        vm.startPrank(trader);
-        nvda.approve(address(vault), type(uint256).max);
-        aapl.approve(address(vault), type(uint256).max);
-        vault.mint(10 ether);
-        vm.stopPrank();
-
-        assertEq(vault.balanceOf(trader), 10 ether);
-        assertEq(vault.totalSupply(), 110 ether);
-
-        uint256 nvdaBefore = nvda.balanceOf(trader);
-        uint256 aaplBefore = aapl.balanceOf(trader);
-        vm.prank(trader);
-        vault.redeem(4 ether);
-
-        assertEq(nvda.balanceOf(trader) - nvdaBefore, 4 ether);
-        assertEq(aapl.balanceOf(trader) - aaplBefore, 8 ether);
-        assertEq(vault.totalSupply(), 106 ether);
+        assertEq(vault.balanceOf(creator), shares);
+        assertEq(vault.backing(address(nvda)), base);
+        assertEq(vault.backing(address(aapl)), base * 2);
+        assertEq(vault.treasury(address(nvda)), ownerFee);
+        assertEq(vault.protocolFees(address(nvda)), protocolFee);
+        assertEq(nvda.balanceOf(address(vault)), base + ownerFee + protocolFee);
     }
 
-    function testSeedFloor() public {
+    function testRedeemPaysAfterFeesAndLeavesBuckets() public {
         BasketShareVault vault = _deploy();
-        _approveSeed(vault);
+        _approve(creator, vault);
         vm.prank(creator);
-        vault.seed();
+        vault.mint(10 ether, creator);
 
-        vm.startPrank(trader);
-        nvda.approve(address(vault), type(uint256).max);
-        aapl.approve(address(vault), type(uint256).max);
-        vault.mint(SEED);
-        vm.stopPrank();
+        uint256 before = nvda.balanceOf(creator);
+        vm.prank(creator);
+        vault.redeem(10 ether, creator);
 
-        vm.prank(trader);
-        vault.redeem(SEED);
-        assertEq(vault.totalSupply(), SEED);
-
-        vm.prank(trader);
-        vm.expectRevert(BasketShareVault.SeedFloor.selector);
-        vault.redeem(1);
+        uint256 gross = 10 ether;
+        uint256 ownerFee = (gross * 100) / 10_000;
+        uint256 protocolFee = (gross * 20) / 10_000;
+        assertEq(nvda.balanceOf(creator) - before, gross - ownerFee - protocolFee);
+        assertEq(vault.backing(address(nvda)), 0);
+        assertEq(vault.totalSupply(), 0);
+        assertGt(vault.treasury(address(nvda)), 0);
+        assertGt(vault.protocolFees(address(nvda)), 0);
     }
 
-    function testDonationStaysProRata() public {
+    function testHolderCannotTakeFeeBuckets() public {
         BasketShareVault vault = _deploy();
-        _approveSeed(vault);
+        _approve(creator, vault);
+        _approve(trader, vault);
         vm.prank(creator);
-        vault.seed();
-
-        nvda.mint(address(vault), 50 ether);
-
-        vm.startPrank(trader);
-        nvda.approve(address(vault), type(uint256).max);
-        aapl.approve(address(vault), type(uint256).max);
-        vault.mint(SEED);
-        vm.stopPrank();
-
-        uint256 supply = 200 ether;
-        uint256 nvdaBal = 250 ether;
-        uint256 before = nvda.balanceOf(trader);
+        vault.mint(10 ether, creator);
         vm.prank(trader);
-        vault.redeem(SEED);
-        assertEq(nvda.balanceOf(trader) - before, (nvdaBal * SEED) / supply);
-        assertGt(nvda.balanceOf(address(vault)), 0);
+        vault.mint(10 ether, trader);
+
+        uint256 treasuryBefore = vault.treasury(address(nvda));
+        uint256 protocolBefore = vault.protocolFees(address(nvda));
+        vm.prank(trader);
+        vault.redeem(10 ether, trader);
+        assertEq(vault.treasury(address(nvda)), treasuryBefore + (10 ether * 100) / 10_000);
+        assertEq(vault.protocolFees(address(nvda)), protocolBefore + (10 ether * 20) / 10_000);
+
+        vm.prank(trader);
+        vm.expectRevert(BasketShareVault.NotOwner.selector);
+        vault.withdrawTreasury(address(nvda));
+
+        uint256 owed = vault.protocolFees(address(nvda));
+        vault.sweepProtocolFees(address(nvda));
+        assertEq(nvda.balanceOf(protocol), owed);
+        assertEq(vault.protocolFees(address(nvda)), 0);
+
+        uint256 ownerCut = vault.treasury(address(nvda));
+        vm.prank(creator);
+        vault.withdrawTreasury(address(nvda));
+        assertEq(nvda.balanceOf(creator) > 0, true);
+        assertEq(vault.treasury(address(nvda)), 0);
+        assertEq(ownerCut > 0, true);
     }
 
-    function testRejectsBadRecipe() public {
+    function testAccreteRaisesUnitsFromTreasury() public {
+        BasketShareVault vault = _deploy();
+        _approve(creator, vault);
+        vm.prank(creator);
+        vault.mint(10 ether, creator);
+        uint256 unitsBefore = vault.unitsPerShare(address(nvda));
+        uint256 treasuryBefore = vault.treasury(address(nvda));
+        vault.accrete(address(nvda));
+        assertGt(vault.unitsPerShare(address(nvda)), unitsBefore);
+        assertLt(vault.treasury(address(nvda)), treasuryBefore);
+        assertGt(vault.backing(address(nvda)), 10 ether);
+    }
+
+    function testRejectsBadRecipeAndHighFee() public {
         address[] memory one = new address[](1);
         uint256[] memory oneU = new uint256[](1);
         one[0] = address(nvda);
         oneU[0] = UNIT;
         vm.expectRevert(BasketShareVault.BadRecipe.selector);
-        factory.create("One", "ONE", one, oneU, SEED, CAP);
-
-        address[] memory dup = new address[](2);
-        uint256[] memory dupU = new uint256[](2);
-        dup[0] = address(nvda);
-        dup[1] = address(nvda);
-        dupU[0] = UNIT;
-        dupU[1] = UNIT;
-        vm.expectRevert(BasketShareVault.BadRecipe.selector);
-        factory.create("Dup", "DUP", dup, dupU, SEED, CAP);
+        factory.create("One", "ONE", one, oneU, MINT_FEE, REDEEM_FEE);
 
         Leg msft = new Leg("MSFT");
         Leg googl = new Leg("GOOGL");
@@ -185,52 +187,11 @@ contract BasketShareVaultTest is Test {
         fourU[2] = UNIT;
         fourU[3] = UNIT;
         vm.expectRevert(BasketShareVault.BadRecipe.selector);
-        factory.create("Four", "FOUR", four, fourU, SEED, CAP);
-    }
+        factory.create("Four", "FOUR", four, fourU, MINT_FEE, REDEEM_FEE);
 
-    function testOnlyCreatorSeedsOnce() public {
-        BasketShareVault vault = _deploy();
-        _approveSeed(vault);
-        vm.prank(trader);
-        vm.expectRevert(BasketShareVault.NotCreator.selector);
-        vault.seed();
-
-        vm.prank(creator);
-        vault.seed();
-        vm.prank(creator);
-        vm.expectRevert(BasketShareVault.AlreadySeeded.selector);
-        vault.seed();
-    }
-
-    function testCapAndShort() public {
-        BasketShareVault vault = _deploy();
-        _approveSeed(vault);
-        vm.prank(creator);
-        vault.seed();
-
-        vm.startPrank(trader);
-        nvda.approve(address(vault), type(uint256).max);
-        aapl.approve(address(vault), type(uint256).max);
-        vm.expectRevert(BasketShareVault.Cap.selector);
-        vault.mint(CAP);
-        vm.stopPrank();
-
-        Leg poor = new Leg("POOR");
-        address[] memory tokens = new address[](2);
-        uint256[] memory units = new uint256[](2);
-        tokens[0] = address(nvda);
-        tokens[1] = address(poor);
-        units[0] = UNIT;
-        units[1] = UNIT;
-        vm.prank(creator);
-        BasketShareVault other = factory.create("Short", "SH", tokens, units, 1 ether, 10 ether);
-        nvda.mint(creator, 1 ether);
-        vm.startPrank(creator);
-        nvda.approve(address(other), type(uint256).max);
-        poor.approve(address(other), type(uint256).max);
-        vm.expectRevert();
-        other.seed();
-        vm.stopPrank();
+        (address[] memory tokens, uint256[] memory units) = _recipe();
+        vm.expectRevert(BasketShareVault.FeeTooHigh.selector);
+        factory.create("High", "HIGH", tokens, units, 101, 0);
     }
 
     function testFeeOnTransferRejected() public {
@@ -243,36 +204,29 @@ contract BasketShareVaultTest is Test {
         units[0] = UNIT;
         units[1] = UNIT;
         vm.prank(creator);
-        BasketShareVault vault = factory.create("Skim", "SK", tokens, units, 10 ether, 100 ether);
+        BasketShareVault vault = factory.create("Skim", "SK", tokens, units, 0, 0);
         vm.startPrank(creator);
         nvda.approve(address(vault), type(uint256).max);
         skim.approve(address(vault), type(uint256).max);
         vm.expectRevert(BasketShareVault.FeeOnTransfer.selector);
-        vault.seed();
+        vault.mint(1 ether, creator);
         vm.stopPrank();
     }
 
     function testShareIsInstantQuote() public {
         BasketShareVault vault = _deploy();
-        _approveSeed(vault);
+        _approve(creator, vault);
         vm.prank(creator);
-        vault.seed();
-
-        vm.startPrank(creator);
-        nvda.approve(address(vault), type(uint256).max);
-        aapl.approve(address(vault), type(uint256).max);
-        vault.mint(10 ether);
-        vm.stopPrank();
+        vault.mint(10 ether, creator);
 
         PoolManager manager = new PoolManager(address(this));
-        (address hookAddr, bytes32 salt) = HookMiner.find(
+        (, bytes32 salt) = HookMiner.find(
             address(this),
             uint160(Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG),
             type(EveFeeHook).creationCode,
             abi.encode(address(manager), address(this))
         );
         EveFeeHook hook = new EveFeeHook{salt: salt}(IPoolManager(address(manager)), address(this));
-        require(address(hook) == hookAddr, "hook");
         RwaInstantV4Factory rwa = new RwaInstantV4Factory(
             IPoolManager(address(manager)), hook, address(this), new BundleSinkDeployer()
         );
@@ -280,9 +234,7 @@ contract BasketShareVaultTest is Test {
 
         vm.startPrank(creator);
         vault.approve(address(rwa), 1 ether);
-        (address token,,) = rwa.createToken(
-            "Basket Meme", "BMEME", address(vault), creator, 30 ether, 1 ether
-        );
+        (address token,,) = rwa.createToken("Basket Meme", "BMEME", address(vault), creator, 30 ether, 1 ether);
         vm.stopPrank();
 
         (, address quote,,,) = rwa.poolOf(token);

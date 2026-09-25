@@ -50,8 +50,8 @@ export const BASKET_FACTORY_ABI = [
       { name: 'symbol', type: 'string' },
       { name: 'tokens', type: 'address[]' },
       { name: 'units', type: 'uint256[]' },
-      { name: 'seedShares', type: 'uint256' },
-      { name: 'shareCap', type: 'uint256' },
+      { name: 'mintFeeBps', type: 'uint16' },
+      { name: 'redeemFeeBps', type: 'uint16' },
     ],
     outputs: [{ name: 'vault', type: 'address' }],
   },
@@ -66,15 +66,34 @@ export const BASKET_FACTORY_ABI = [
   },
 ] as const
 
+export const PROTOCOL_MINT_FEE_BPS = 35n
+export const MAX_OWNER_FEE_BPS = 100
+
 export const BASKET_VAULT_ABI = [
   {
     type: 'function',
-    name: 'seed',
+    name: 'mint',
     stateMutability: 'nonpayable',
-    inputs: [],
+    inputs: [
+      { name: 'shares', type: 'uint256' },
+      { name: 'to', type: 'address' },
+    ],
     outputs: [],
   },
 ] as const
+
+function ceilDiv(a: bigint, d: bigint): bigint {
+  if (a === 0n) return 0n
+  return (a + d - 1n) / d
+}
+
+/** Tokens of one leg a mint must pull: backing rounded up, plus owner and protocol fees. */
+export function mintLegCost(units: bigint, shares: bigint, ownerFeeBps: number): bigint {
+  const base = ceilDiv(shares * units, 10n ** 18n)
+  const owner = ceilDiv(base * BigInt(ownerFeeBps), 10_000n)
+  const protocol = ceilDiv(base * PROTOCOL_MINT_FEE_BPS, 10_000n)
+  return base + owner + protocol
+}
 
 export function basketFactoryAddress(): Address | '' {
   const v = (process.env.NEXT_PUBLIC_ARC_BASKET_FACTORY || '').trim()

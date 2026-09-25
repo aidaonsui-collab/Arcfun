@@ -14,6 +14,7 @@ import {
   basketToAsset,
   loadBaskets,
   saveBasket,
+  mintLegCost,
   unitsPerShare,
   type SavedBasket,
 } from '@/lib/arc-basket'
@@ -36,7 +37,8 @@ export function BasketPairCard({
   const [picked, setPicked] = useState<string[]>(['NVDA', 'AAPL'])
   const [perShare, setPerShare] = useState<Record<string, string>>({})
   const [seedShares, setSeedShares] = useState('100')
-  const [shareCap, setShareCap] = useState('1000000')
+  const [mintFeeBps, setMintFeeBps] = useState('10')
+  const [redeemFeeBps, setRedeemFeeBps] = useState('10')
   const [usdPerShare, setUsdPerShare] = useState('100')
   const [symbol, setSymbol] = useState('NVDAAAPL')
   const [busy, setBusy] = useState(false)
@@ -92,7 +94,7 @@ export function BasketPairCard({
           }) as Promise<bigint>,
         ])
         if (supply === 0n) {
-          throw new Error(`${leg.symbol} has no supply yet. Seed waits until it can be pulled.`)
+          throw new Error(`${leg.symbol} has no supply yet. Mint waits until it can be pulled.`)
         }
         const human = perShare[leg.symbol] || '1'
         const units = unitsPerShare(human, Number(decimals))
@@ -100,8 +102,12 @@ export function BasketPairCard({
         resolved.push({ ...leg, decimals: Number(decimals), tokensPerShare: human, units })
       }
       const seedRaw = unitsPerShare(seedShares, 18)
-      const capRaw = unitsPerShare(shareCap, 18)
-      if (seedRaw === 0n || capRaw < seedRaw) throw new Error('Share cap has to cover the seed.')
+      const mintBps = Number(mintFeeBps)
+      const redeemBps = Number(redeemFeeBps)
+      if (seedRaw < 10n ** 15n) throw new Error('Mint at least 0.001 share.')
+      if (!Number.isInteger(mintBps) || !Number.isInteger(redeemBps) || mintBps < 0 || redeemBps < 0 || mintBps > 100 || redeemBps > 100) {
+        throw new Error('Owner fees are 0 to 1%.')
+      }
       const sym = symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11)
       if (sym.length < 2) throw new Error('Give the share a short symbol.')
       const name = resolved.map((l) => l.symbol).join(' ')
@@ -110,7 +116,7 @@ export function BasketPairCard({
         address: factory,
         abi: BASKET_FACTORY_ABI,
         functionName: 'create',
-        args: [name, sym, resolved.map((l) => l.address as Address), resolved.map((l) => l.units), seedRaw, capRaw],
+        args: [name, sym, resolved.map((l) => l.address as Address), resolved.map((l) => l.units), mintBps, redeemBps],
         chainId: ARC_CHAIN_ID,
         gas: VAULT_GAS,
       })
@@ -127,7 +133,7 @@ export function BasketPairCard({
       if (!vault) throw new Error('Vault address was missing from the create receipt.')
 
       for (const leg of resolved) {
-        const need = (leg.units * seedRaw) / 10n ** 18n
+        const need = mintLegCost(leg.units, seedRaw, mintBps)
         const approveHash = await writeContractAsync({
           address: leg.address as Address,
           abi: erc20Abi,
@@ -141,7 +147,8 @@ export function BasketPairCard({
       const seedHash = await writeContractAsync({
         address: vault,
         abi: BASKET_VAULT_ABI,
-        functionName: 'seed',
+        functionName: 'mint',
+        args: [seedRaw, address],
         chainId: ARC_CHAIN_ID,
         gas: VAULT_GAS,
       })
@@ -166,7 +173,7 @@ export function BasketPairCard({
       setSaved(rows)
       setClientBasketQuotes(rows.map(basketToAsset))
       onSelect(row.id)
-      setNote(`${sym} is seeded. Launch uses it as the pair.`)
+      setNote(`${sym} is minted. Launch uses it as the pair.`)
     } catch (e) {
       setNote(e instanceof Error ? e.message : 'Seed failed.')
     } finally {
@@ -182,8 +189,8 @@ export function BasketPairCard({
     >
       <div className="text-sm font-medium">Basket paired</div>
       <p className="mt-1 mb-3 text-xs leading-relaxed text-t2">
-        Two or three Dinari stocks back one share. That share is the Instant quote on the RWA factory.
-        Seed turns on once each stock can be pulled.
+        Two or three assets back one share. A mint pulls that recipe plus a fee. A redeem pays it back
+        minus a fee. The share is the Instant quote. Mint turns on once each asset can be pulled.
       </p>
       <div className="flex flex-wrap gap-1.5">
         {DINARI_LEGS.map((leg) => {
@@ -225,9 +232,9 @@ export function BasketPairCard({
           ))}
         </div>
       ) : null}
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <label className="text-xs text-t3">
-          Seed shares
+          Shares to mint
           <input
             value={seedShares}
             onChange={(e) => setSeedShares(e.target.value)}
@@ -235,10 +242,18 @@ export function BasketPairCard({
           />
         </label>
         <label className="text-xs text-t3">
-          Share cap
+          Mint fee, bps
           <input
-            value={shareCap}
-            onChange={(e) => setShareCap(e.target.value)}
+            value={mintFeeBps}
+            onChange={(e) => setMintFeeBps(e.target.value)}
+            className="mt-1 w-full h-10 rounded-xl bg-s2 px-3 text-sm text-white border border-hair"
+          />
+        </label>
+        <label className="text-xs text-t3">
+          Redeem fee, bps
+          <input
+            value={redeemFeeBps}
+            onChange={(e) => setRedeemFeeBps(e.target.value)}
             className="mt-1 w-full h-10 rounded-xl bg-s2 px-3 text-sm text-white border border-hair"
           />
         </label>
@@ -265,7 +280,7 @@ export function BasketPairCard({
         onClick={() => void seed()}
         className="mt-3 h-10 rounded-xl px-4 text-sm font-semibold bg-lime text-black disabled:opacity-50"
       >
-        {busy ? 'Seeding…' : 'Seed basket'}
+        {busy ? 'Minting…' : 'Mint basket'}
       </button>
       {saved.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-1.5">
