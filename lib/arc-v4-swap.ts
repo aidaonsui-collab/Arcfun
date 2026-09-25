@@ -5,6 +5,7 @@
 import {
   concat,
   decodeAbiParameters,
+  encodeAbiParameters,
   encodeFunctionData,
   keccak256,
   pad,
@@ -227,36 +228,124 @@ export async function quoteEveV4ExactIn(
 export type EveV4UsdcQuote = {
   /** What the trader receives: launch tokens on a buy, USDC on a sell. */
   out: bigint
-  /** Quote-token amount in the middle of the hop (XAUM, cirBTC, …). */
+  /** Quote-token amount in the middle of the hop (XAUM, cirBTC, USDCAT, …). */
   quoteAmount: bigint
-  /** Uniswap v3 fee tier of the quote/USDC pool. */
+  /** Uniswap v3 fee tier of the quote/USDC pool. Unused when `hop` is set. */
   usdcFee: number
+  hop: EveV4UsdcHop | null
+}
+
+/** Quote token's own USDC v4 pool, used when that book is not on v3. */
+export type EveV4UsdcHop = {
+  key: EveV4PoolKey
+  poolId: Hex
+  usdcIsCurrency0: boolean
+  /** Haircut for the pad quote. The pool fee is already inside the swap. */
+  feeBps: number
+}
+
+export function eveV4PoolId(key: EveV4PoolKey): Hex {
+  return keccak256(
+    encodeAbiParameters(
+      [
+        { type: 'address' },
+        { type: 'address' },
+        { type: 'uint24' },
+        { type: 'int24' },
+        { type: 'address' },
+      ],
+      [key.currency0, key.currency1, key.fee, key.tickSpacing, key.hooks],
+    ),
+  )
+}
+
+export function eveV4UsdcHop(opts: {
+  quote: Address
+  poolId: Hex
+  quoteIsCurrency0: boolean
+  fee: number
+  tickSpacing: number
+  hooks: Address
+  feeBps?: number
+}): EveV4UsdcHop {
+  const usdcIsCurrency0 = !opts.quoteIsCurrency0
+  const key: EveV4PoolKey = {
+    currency0: usdcIsCurrency0 ? ARC.USDC : opts.quote,
+    currency1: usdcIsCurrency0 ? opts.quote : ARC.USDC,
+    fee: opts.fee,
+    tickSpacing: opts.tickSpacing,
+    hooks: opts.hooks,
+  }
+  return {
+    key,
+    poolId: opts.poolId,
+    usdcIsCurrency0,
+    feeBps: opts.feeBps ?? 200,
+  }
+}
+
+/** Spend USDC for the quote when `usdcIn` is true. */
+export function eveV4HopZeroForOne(hop: EveV4UsdcHop, usdcIn: boolean): boolean {
+  return hop.usdcIsCurrency0 ? usdcIn : !usdcIn
+}
+
+export async function quoteEveV4HopExactIn(
+  hop: EveV4UsdcHop,
+  amountIn: bigint,
+  usdcIn: boolean,
+  client: Client,
+): Promise<bigint | null> {
+  if (amountIn <= 0n) return null
+  const sqrtPriceX96 = await readEveV4SqrtPriceX96(hop.poolId, client)
+  if (sqrtPriceX96 <= 0n) return null
+  const out = estimateEveV4ExactIn({
+    amountIn,
+    zeroForOne: eveV4HopZeroForOne(hop, usdcIn),
+    sqrtPriceX96,
+    feeBps: hop.feeBps,
+  })
+  return out > 0n ? out : null
 }
 
 /**
  * Price an Instant v4 pool in USDC.
- * Buy: USDC → quote on v3, then quote → token on the Instant pool.
- * Sell: token → quote on the Instant pool, then quote → USDC on v3.
+ * Buy: USDC → quote, then quote → token. Sell: token → quote, then quote → USDC.
+ * The middle hop is v4 when `v4Hop` is set, otherwise the quote/USDC v3 pool.
  */
 export async function quoteEveV4PricedInUsdc(
   pool: EveV4PoolInfo,
   side: 'buy' | 'sell',
   amount: bigint,
   client: Client,
+  v4Hop?: EveV4UsdcHop | null,
 ): Promise<EveV4UsdcQuote | null> {
   if (amount <= 0n) return null
+  if (v4Hop) {
+    if (side === 'buy') {
+      const quoteAmount = await quoteEveV4HopExactIn(v4Hop, amount, true, client)
+      if (quoteAmount == null) return null
+      const out = await quoteEveV4ExactIn(pool, quoteAmount, !pool.tokenIsCurrency0, client)
+      if (out == null || out <= 0n) return null
+      return { out, quoteAmount, usdcFee: 0, hop: v4Hop }
+    }
+    const quoteAmount = await quoteEveV4ExactIn(pool, amount, pool.tokenIsCurrency0, client)
+    if (quoteAmount == null || quoteAmount <= 0n) return null
+    const out = await quoteEveV4HopExactIn(v4Hop, quoteAmount, false, client)
+    if (out == null) return null
+    return { out, quoteAmount, usdcFee: 0, hop: v4Hop }
+  }
   if (side === 'buy') {
     const hop = await quoteV3ExactIn(ARC.USDC, pool.quote, amount, client)
     if (!hop) return null
     const out = await quoteEveV4ExactIn(pool, hop.amountOut, !pool.tokenIsCurrency0, client)
     if (out == null || out <= 0n) return null
-    return { out, quoteAmount: hop.amountOut, usdcFee: hop.fee }
+    return { out, quoteAmount: hop.amountOut, usdcFee: hop.fee, hop: null }
   }
   const quoteOut = await quoteEveV4ExactIn(pool, amount, pool.tokenIsCurrency0, client)
   if (quoteOut == null || quoteOut <= 0n) return null
   const hop = await quoteV3ExactIn(pool.quote, ARC.USDC, quoteOut, client)
   if (!hop) return null
-  return { out: hop.amountOut, quoteAmount: quoteOut, usdcFee: hop.fee }
+  return { out: hop.amountOut, quoteAmount: quoteOut, usdcFee: hop.fee, hop: null }
 }
 
 export function buildEveV4Swap(opts: {

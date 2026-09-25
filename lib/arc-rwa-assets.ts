@@ -65,6 +65,9 @@ const USDCAT_MAINNET = {
   decimals: 18,
   pricePoolId: '0x54d5fe8ee7a9546ce74ebe06c1d040defb7757410a627d4793d62a77eaaae4bf',
   priceTokenIsCurrency0: false,
+  priceFee: 10000,
+  priceTickSpacing: 200,
+  priceHooks: '0xDb0BFde55FeA51eAea8F6cc91D5A253c9265a044',
 } as const
 
 export type RwaAssetKind = 'mmf' | 'equity' | 'commodity' | 'meme'
@@ -108,6 +111,10 @@ export interface ArcRwaAsset {
   pricePoolId?: `0x${string}`
   /** True when this token is currency0 in pricePoolId. */
   priceTokenIsCurrency0?: boolean
+  /** Uniswap v4 fee of the quote/USDC pool (hundredths of a bip). */
+  priceFee?: number
+  priceTickSpacing?: number
+  priceHooks?: Address
   /**
    * Create first-buy may pay USDC and swap into this quote when the wallet is short.
    * Instant still pulls the quote token. Only for permissionless quotes with a USDC book.
@@ -308,6 +315,9 @@ function builtinCatalog(): ArcRwaAsset[] {
       usd: 'spot',
       pricePoolId: USDCAT_MAINNET.pricePoolId,
       priceTokenIsCurrency0: USDCAT_MAINNET.priceTokenIsCurrency0,
+      priceFee: USDCAT_MAINNET.priceFee,
+      priceTickSpacing: USDCAT_MAINNET.priceTickSpacing,
+      priceHooks: USDCAT_MAINNET.priceHooks as Address,
       payUsdcSwap: false,
     },
     {
@@ -525,6 +535,17 @@ export function quoteUsesUsdInput(asset: ArcRwaAsset | null | undefined, quoteId
 
 export function quotePayUsdcSwap(asset: ArcRwaAsset | null | undefined): boolean {
   return quotePolicy(asset).payUsdcSwap
+}
+
+/**
+ * Token-page buys and sells for a permissionless custom pair settle in USDC.
+ * cirBTC and XAUM hop through their v3 USDC pool. USDCAT hops through its v4 pool.
+ * Permissioned quotes stay in the quote token.
+ */
+export function quoteSettlesInUsdc(asset: ArcRwaAsset | null | undefined): boolean {
+  if (!asset || asset.permissioned) return false
+  if (asset.payUsdcSwap) return true
+  return Boolean(asset.pricePoolId && asset.priceHooks && asset.priceFee && asset.priceTickSpacing)
 }
 
 export function quoteChartLabel(symbol: string, asset: ArcRwaAsset | null | undefined): string {

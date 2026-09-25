@@ -4,13 +4,23 @@
  * ArcDexTradePanel — buy/sell Instant tokens on Arc.
  * V3 Instant is TOKEN/USDC. V4 Instant is TOKEN/{quote} (USDC, cirBTC, USYC, …).
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { erc20Abi, formatUnits, parseUnits, type Address } from 'viem'
 import { Loader2, AlertCircle, CheckCircle, ExternalLink, ArrowDownUp } from 'lucide-react'
 import { ARC, ARC_CHAIN_ID, ARC_ERC20_APPROVE_GAS, ARC_EXPLORER, ARC_MAX_APPROVAL, ARC_SWAP_GAS, arcPublicClient } from '@/lib/contracts-arc'
 import { setWalletRpcPaused } from '@/lib/wallet-rpc-pause'
-import { buildEveV4Swap, quoteEveV4ExactIn, quoteEveV4PricedInUsdc, readEveV4Pool, type EveV4PoolInfo } from '@/lib/arc-v4-swap'
+import {
+  buildEveV4Swap,
+  eveV4HopZeroForOne,
+  eveV4UsdcHop,
+  quoteEveV4ExactIn,
+  quoteEveV4HopExactIn,
+  quoteEveV4PricedInUsdc,
+  readEveV4Pool,
+  type EveV4PoolInfo,
+  type EveV4UsdcHop,
+} from '@/lib/arc-v4-swap'
 import {
   arcSwapConfigured,
   arcSwapSpender,
@@ -26,7 +36,14 @@ import {
   quoteV3ExactIn,
   withRecipient,
 } from '@/lib/arc-swap'
-import { quoteDecimalsForToken, quotePolicy, quoteSymbolForQuote, rwaAssetByQuote, usdToQuoteHuman } from '@/lib/arc-rwa-assets'
+import {
+  quoteDecimalsForToken,
+  quotePolicy,
+  quoteSettlesInUsdc,
+  quoteSymbolForQuote,
+  rwaAssetByQuote,
+  usdToQuoteHuman,
+} from '@/lib/arc-rwa-assets'
 import { fetchQuoteUsdSpot, spotQuoteToUsd } from '@/lib/quote-usd-spot'
 import { fetchQuotePoolUsd } from '@/lib/quote-pool-usd'
 import { formatToken, parseToken } from '@/lib/token-format'
@@ -157,8 +174,28 @@ export function ArcDexTradePanel({
   const poolPriceId = quoteAsset?.pricePoolId
   const poolTokenIs0 = quoteAsset?.priceTokenIsCurrency0 === true
   const poolTokenDecimals = quoteAsset?.decimals || 18
-  /** Gold and BTC pools trade in the quote token. The pad prices those in USDC. */
-  const payUsdc = Boolean(isV4 && spotPolicy.payUsdcSwap && quoteSym !== 'USDC')
+  const usdcHop: EveV4UsdcHop | null = useMemo(() => {
+    if (!quoteAsset?.pricePoolId || !quoteAsset.priceHooks || !quoteAsset.priceFee || !quoteAsset.priceTickSpacing) {
+      return null
+    }
+    return eveV4UsdcHop({
+      quote: quoteToken,
+      poolId: quoteAsset.pricePoolId,
+      quoteIsCurrency0: quoteAsset.priceTokenIsCurrency0 === true,
+      fee: quoteAsset.priceFee,
+      tickSpacing: quoteAsset.priceTickSpacing,
+      hooks: quoteAsset.priceHooks,
+    })
+  }, [
+    quoteToken,
+    quoteAsset?.pricePoolId,
+    quoteAsset?.priceHooks,
+    quoteAsset?.priceFee,
+    quoteAsset?.priceTickSpacing,
+    quoteAsset?.priceTokenIsCurrency0,
+  ])
+  /** Custom pairs settle in USDC. cirBTC/XAUM hop on v3. USDCAT hops on its v4 USDC pool. */
+  const payUsdc = Boolean(isV4 && quoteSym !== 'USDC' && quoteSettlesInUsdc(quoteAsset))
 
   useEffect(() => {
     let cancelled = false
@@ -232,7 +269,7 @@ export function ArcDexTradePanel({
   })
   const tokDec = Number(tokenDecimals ?? ARC.TOKEN_DECIMALS) || ARC.TOKEN_DECIMALS
 
-  const approveSpender: Address = payUsdc && mode === 'buy' ? ARC.UNI_ROUTER : spender
+  const approveSpender: Address = payUsdc && mode === 'buy' && !usdcHop ? ARC.UNI_ROUTER : spender
   const approveToken: Address = mode === 'buy' ? (payUsdc ? ARC.USDC : quoteToken) : token
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: approveToken,
@@ -301,7 +338,7 @@ export function ArcDexTradePanel({
           let local: bigint | null = null
           try {
             if (payUsdc) {
-              const priced = await quoteEveV4PricedInUsdc(v4Pool, mode, inAmt, arcPublicClient())
+              const priced = await quoteEveV4PricedInUsdc(v4Pool, mode, inAmt, arcPublicClient(), usdcHop)
               local = priced?.out ?? null
             } else {
               local = await quoteEveV4ExactIn(v4Pool, inAmt, zeroForOne, arcPublicClient())
@@ -366,7 +403,7 @@ export function ArcDexTradePanel({
       cancelled = true
       clearTimeout(t)
     }
-  }, [amount, mode, token, swapOn, busy, tokDec, isV4, v4Pool, v4Ready, quoteDec, payUsdc])
+  }, [amount, mode, token, swapOn, busy, tokDec, isV4, v4Pool, v4Ready, quoteDec, payUsdc, usdcHop])
 
   const needApprove = (() => {
     if (!amount || Number(amount) <= 0) return false
@@ -437,7 +474,110 @@ export function ArcDexTradePanel({
           functionName: 'balanceOf',
           args: [address],
         })
-      if (isV4 && v4Pool && payUsdc) {
+      if (isV4 && v4Pool && payUsdc && usdcHop) {
+        const priced = await quoteEveV4PricedInUsdc(v4Pool, mode, mode === 'buy' ? parseUsdc(amount) : parseToken(amount, tokDec), pub, usdcHop)
+        if (!priced || priced.out <= 0n || priced.quoteAmount <= 0n) {
+          throw new Error('No USDC quote for this size. Try a smaller amount.')
+        }
+        const hopSwap = async (amountIn: bigint, usdcIn: boolean, minOut: bigint) => {
+          if (minOut <= 0n) throw new Error('Quote too small for this size.')
+          return send(
+            buildEveV4Swap({
+              key: usdcHop.key,
+              zeroForOne: eveV4HopZeroForOne(usdcHop, usdcIn),
+              amountIn,
+              minOut,
+              recipient: address,
+            }),
+          )
+        }
+        if (mode === 'buy') {
+          const usdcIn = parseUsdc(amount)
+          setStatusMsg('Confirm USDC swap…')
+          const before = await balanceOf(v4Pool.quote)
+          const hopOut = await quoteEveV4HopExactIn(usdcHop, usdcIn, true, pub)
+          if (hopOut == null || hopOut <= 0n) throw new Error('No USDC quote for this size.')
+          await hopSwap(usdcIn, true, minOutFromSlippage(hopOut, SLIPPAGE_BPS))
+          const got = (await balanceOf(v4Pool.quote)) - before
+          if (got <= 0n) throw new Error('USDC swap returned no quote token.')
+          const allowanceNow = await pub.readContract({
+            address: v4Pool.quote,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [address, ARC.INSTANT_V4_ROUTER],
+          })
+          if (allowanceNow < got) {
+            setStatusMsg(`Approve ${quoteSym}…`)
+            await send(
+              {
+                address: v4Pool.quote,
+                abi: erc20Abi,
+                functionName: 'approve',
+                args: [ARC.INSTANT_V4_ROUTER, ARC_MAX_APPROVAL],
+                chainId: ARC_CHAIN_ID,
+              },
+              ARC_ERC20_APPROVE_GAS,
+            )
+          }
+          setStatusMsg('Confirm buy…')
+          const tokenOut = await quoteEveV4ExactIn(v4Pool, got, !v4Pool.tokenIsCurrency0, pub)
+          const hash = await send(
+            buildEveV4Swap({
+              key: v4Pool.key,
+              zeroForOne: !v4Pool.tokenIsCurrency0,
+              amountIn: got,
+              minOut: minOutFromSlippage(tokenOut && tokenOut > 0n ? tokenOut : priced.out, SLIPPAGE_BPS),
+              recipient: address,
+            }),
+          )
+          setWalletRpcPaused(false)
+          setTxHash(hash)
+          setStatusMsg('Confirming…')
+        } else {
+          const inAmt = parseToken(amount, tokDec)
+          setStatusMsg('Confirm sell…')
+          const before = await balanceOf(v4Pool.quote)
+          await send(
+            buildEveV4Swap({
+              key: v4Pool.key,
+              zeroForOne: v4Pool.tokenIsCurrency0,
+              amountIn: inAmt,
+              minOut: minOutFromSlippage(priced.quoteAmount, SLIPPAGE_BPS),
+              recipient: address,
+            }),
+          )
+          const got = (await balanceOf(v4Pool.quote)) - before
+          if (got <= 0n) throw new Error(`Sell returned no ${quoteSym}.`)
+          const hopOut = await quoteEveV4HopExactIn(usdcHop, got, false, pub)
+          if (hopOut == null || hopOut <= 0n) {
+            throw new Error(`Could not quote ${quoteSym} to USDC. ${quoteSym} is in your wallet.`)
+          }
+          const allowanceNow = await pub.readContract({
+            address: v4Pool.quote,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [address, ARC.INSTANT_V4_ROUTER],
+          })
+          if (allowanceNow < got) {
+            setStatusMsg(`Approve ${quoteSym}…`)
+            await send(
+              {
+                address: v4Pool.quote,
+                abi: erc20Abi,
+                functionName: 'approve',
+                args: [ARC.INSTANT_V4_ROUTER, ARC_MAX_APPROVAL],
+                chainId: ARC_CHAIN_ID,
+              },
+              ARC_ERC20_APPROVE_GAS,
+            )
+          }
+          setStatusMsg('Confirm USDC swap…')
+          const hash = await hopSwap(got, false, minOutFromSlippage(hopOut, SLIPPAGE_BPS))
+          setWalletRpcPaused(false)
+          setTxHash(hash)
+          setStatusMsg('Confirming…')
+        }
+      } else if (isV4 && v4Pool && payUsdc) {
         const priced = await quoteEveV4PricedInUsdc(
           v4Pool,
           mode,

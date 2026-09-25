@@ -10,8 +10,8 @@ import { formatUnits, isAddress, parseUnits } from 'viem'
 import { quoteArcBuy, quoteArcSell, formatUsdc, parseUsdc } from '@/lib/arc-swap'
 import { formatToken, parseToken } from '@/lib/token-format'
 import { ARC, arcPublicClient } from '@/lib/contracts-arc'
-import { quoteDecimalsForToken, quotePayUsdcSwap, quoteSymbolForQuote, rwaAssetByQuote } from '@/lib/arc-rwa-assets'
-import { quoteEveV4ExactIn, quoteEveV4PricedInUsdc, readEveV4Pool } from '@/lib/arc-v4-swap'
+import { quoteDecimalsForToken, quoteSettlesInUsdc, quoteSymbolForQuote, rwaAssetByQuote } from '@/lib/arc-rwa-assets'
+import { eveV4UsdcHop, quoteEveV4ExactIn, quoteEveV4PricedInUsdc, readEveV4Pool } from '@/lib/arc-v4-swap'
 import { limitOr429 } from '@/lib/rate-limit'
 import { summarizeRpcError } from '@/lib/rpc-error'
 import { jsonSafe } from '@/lib/json-safe'
@@ -40,11 +40,23 @@ export async function GET(req: NextRequest) {
     if (v4) {
       const qDec = quoteDecimalsForToken(v4.quote)
       const qSym = quoteSymbolForQuote(v4.quote)
-      const payUsdc = quotePayUsdcSwap(rwaAssetByQuote(v4.quote)) && qSym !== 'USDC'
+      const asset = rwaAssetByQuote(v4.quote)
+      const hop =
+        asset?.pricePoolId && asset.priceHooks && asset.priceFee && asset.priceTickSpacing
+          ? eveV4UsdcHop({
+              quote: v4.quote,
+              poolId: asset.pricePoolId,
+              quoteIsCurrency0: asset.priceTokenIsCurrency0 === true,
+              fee: asset.priceFee,
+              tickSpacing: asset.priceTickSpacing,
+              hooks: asset.priceHooks,
+            })
+          : null
+      const payUsdc = qSym !== 'USDC' && quoteSettlesInUsdc(asset)
       if (payUsdc) {
         const inAmt = side === 'buy' ? parseUsdc(amount) : parseToken(amount, ARC.TOKEN_DECIMALS)
         if (inAmt <= 0n) return NextResponse.json({ ok: false, error: 'invalid amount' }, { status: 400 })
-        const priced = await quoteEveV4PricedInUsdc(v4, side, inAmt, arcPublicClient())
+        const priced = await quoteEveV4PricedInUsdc(v4, side, inAmt, arcPublicClient(), hop)
         if (!priced || priced.out <= 0n) {
           return NextResponse.json({
             ok: false,
