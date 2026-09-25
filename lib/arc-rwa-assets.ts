@@ -55,7 +55,19 @@ const XAUM_MAINNET = {
   decimals: 18,
 } as const
 
-export type RwaAssetKind = 'mmf' | 'equity' | 'commodity'
+/**
+ * UpSideDownCat on Arc mainnet. On-chain symbol is USDC; the pad calls it USDCAT
+ * so it never shares a label with Circle USDC (6dp). 18 decimals. Its liquid book
+ * is the Argus v4 pool quoted in real USDC (token is currency1).
+ */
+const USDCAT_MAINNET = {
+  address: '0x8E98A62a995A50eca9979bfa016f91bf36A8F9D9',
+  decimals: 18,
+  pricePoolId: '0x54d5fe8ee7a9546ce74ebe06c1d040defb7757410a627d4793d62a77eaaae4bf',
+  priceTokenIsCurrency0: false,
+} as const
+
+export type RwaAssetKind = 'mmf' | 'equity' | 'commodity' | 'meme'
 
 /** USD source for FDV, tape, and first-buy. Required on every catalog row. */
 export type QuoteUsdMode = 'peg' | 'spot' | 'none'
@@ -89,6 +101,13 @@ export interface ArcRwaAsset {
    */
   usd: QuoteUsdMode
   usdSpot?: QuoteUsdSpot
+  /**
+   * v4 pool id of this token's own USDC book. Spot USD comes from slot0, not Coinbase.
+   * Mutually exclusive with usdSpot.
+   */
+  pricePoolId?: `0x${string}`
+  /** True when this token is currency0 in pricePoolId. */
+  priceTokenIsCurrency0?: boolean
   /**
    * Create first-buy may pay USDC and swap into this quote when the wallet is short.
    * Instant still pulls the quote token. Only for permissionless quotes with a USDC book.
@@ -268,6 +287,28 @@ function builtinCatalog(): ArcRwaAsset[] {
       usd: 'spot',
       usdSpot: 'XAU-USD',
       payUsdcSwap: true,
+    },
+    {
+      id: 'usdcat',
+      symbol: 'USDCAT',
+      name: 'UpSideDownCat',
+      kind: 'meme',
+      address:
+        envAddr('NEXT_PUBLIC_ARC_RWA_USDCAT') ||
+        (ARC_IS_TESTNET ? '' : (USDCAT_MAINNET.address as Address)),
+      decimals: USDCAT_MAINNET.decimals,
+      factory: envAddr('NEXT_PUBLIC_ARC_RWA_USDCAT_FACTORY') || sharedFactory,
+      locker: envAddr('NEXT_PUBLIC_ARC_RWA_USDCAT_LOCKER'),
+      permissioned: false,
+      chainId: ARC_CHAIN_ID,
+      enabled: envFlag('NEXT_PUBLIC_ARC_RWA_USDCAT_ENABLED') ?? Boolean(
+        (envAddr('NEXT_PUBLIC_ARC_RWA_USDCAT') || (!ARC_IS_TESTNET && USDCAT_MAINNET.address)) &&
+          (envAddr('NEXT_PUBLIC_ARC_RWA_USDCAT_FACTORY') || sharedFactory),
+      ),
+      usd: 'spot',
+      pricePoolId: USDCAT_MAINNET.pricePoolId,
+      priceTokenIsCurrency0: USDCAT_MAINNET.priceTokenIsCurrency0,
+      payUsdcSwap: false,
     },
     {
       id: 'jaaa',
@@ -457,10 +498,17 @@ export function quotePolicyOk(asset: ArcRwaAsset): { ok: true } | { ok: false; r
   if (asset.usd !== 'peg' && asset.usd !== 'spot' && asset.usd !== 'none') {
     return { ok: false, reason: `${asset.id}: set usd to peg | spot | none` }
   }
-  if (asset.usd === 'spot' && !(asset.usdSpot && QUOTE_USD_SPOTS.includes(asset.usdSpot))) {
-    return { ok: false, reason: `${asset.id}: usd=spot requires usdSpot (BTC-USD | XAU-USD)` }
+  if (asset.usd === 'spot') {
+    const hasFeed = Boolean(asset.usdSpot && QUOTE_USD_SPOTS.includes(asset.usdSpot))
+    const hasPool = Boolean(asset.pricePoolId)
+    if (hasFeed === hasPool) {
+      return {
+        ok: false,
+        reason: `${asset.id}: usd=spot needs a Coinbase usdSpot or a pricePoolId, not both`,
+      }
+    }
   }
-  if (asset.usd !== 'spot' && asset.usdSpot) {
+  if (asset.usd !== 'spot' && (asset.usdSpot || asset.pricePoolId)) {
     return { ok: false, reason: `${asset.id}: usdSpot only valid with usd=spot` }
   }
   if (asset.payUsdcSwap && (asset.permissioned || asset.usd === 'none')) {
@@ -494,6 +542,15 @@ export async function quoteUsdMultiplier(quote: string | null | undefined): Prom
   const asset = rwaAssetByQuote(q)
   const p = quotePolicy(asset)
   if (p.usd === 'peg') return 1
+  if (p.usd === 'spot' && asset?.pricePoolId) {
+    const { fetchQuotePoolUsd } = await import('./quote-pool-usd')
+    const px = await fetchQuotePoolUsd({
+      poolId: asset.pricePoolId,
+      tokenIsCurrency0: asset.priceTokenIsCurrency0 === true,
+      tokenDecimals: asset.decimals,
+    })
+    return px && px > 0 ? px : 0
+  }
   if (p.usd === 'spot' && p.usdSpot) {
     const { fetchQuoteUsdSpot } = await import('./quote-usd-spot')
     const px = await fetchQuoteUsdSpot(p.usdSpot)
@@ -519,7 +576,10 @@ export const INSTANT_TARGET_FDV_USD = 3000
  * Never use 3000e6 for an 8dp non-peg (that is 30 BTC, ~$3M FDV).
  */
 export function defaultRwaVirtualQuoteRaw(
-  asset: Pick<ArcRwaAsset, 'id' | 'decimals' | 'usd' | 'usdSpot' | 'payUsdcSwap' | 'permissioned'>,
+  asset: Pick<
+    ArcRwaAsset,
+    'id' | 'decimals' | 'usd' | 'usdSpot' | 'payUsdcSwap' | 'permissioned' | 'pricePoolId'
+  >,
   opts?: { spotUsd?: number | null; btcUsd?: number | null },
 ): bigint {
   const envKey = `NEXT_PUBLIC_ARC_RWA_${asset.id.toUpperCase()}_VIRTUAL_QUOTE`
@@ -527,6 +587,14 @@ export function defaultRwaVirtualQuoteRaw(
   if (/^\d+$/.test(raw)) return BigInt(raw)
   const dec = asset.decimals > 0 ? asset.decimals : 6
   const p = quotePolicy(asset)
+  if (p.usd === 'spot' && asset.pricePoolId) {
+    const spot = opts?.spotUsd ?? opts?.btcUsd
+    if (!(spot && spot > 0)) return 0n
+    // Micro-dollars keep an 18dp meme quote inside integer math (JS Number cannot hold 1e24).
+    const micro = BigInt(Math.round(spot * 1_000_000))
+    if (micro <= 0n) return 0n
+    return (3000n * 10n ** BigInt(dec) * 1_000_000n) / micro
+  }
   if (p.usd === 'spot' && p.usdSpot) {
     const spot = opts?.spotUsd ?? opts?.btcUsd
     if (spot && spot > 0) {

@@ -24,6 +24,7 @@ const PAIR_CHIPS: { id: PairFilter; label: string }[] = [
   { id: 'equity', label: 'Equity' },
   { id: 'btc', label: 'BTC' },
   { id: 'gold', label: 'Gold' },
+  { id: 'usdcat', label: 'USDCAT' },
   { id: 'reflect', label: 'Reflect' },
 ]
 

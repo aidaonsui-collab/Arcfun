@@ -2,7 +2,7 @@
  * Quote-token chrome for home/token UI (marks, tints, pair chips).
  * Create/trade still use `arc-rwa-assets` for on-chain policy.
  */
-export type QuoteKind = 'usdc' | 'mmf' | 'equity' | 'btc' | 'gold'
+export type QuoteKind = 'usdc' | 'mmf' | 'equity' | 'btc' | 'gold' | 'usdcat'
 
 export type QuoteAsset = {
   id: string
@@ -27,6 +27,14 @@ export const QUOTE_ASSETS: Record<string, QuoteAsset> = {
   crcl: { id: 'crcl', symbol: 'CRCL', kind: 'equity', label: 'Equity', mark: '/marks/crcl.svg', tint: '110 231 183' },
   cirbtc: { id: 'cirbtc', symbol: 'cirBTC', kind: 'btc', label: 'BTC', mark: '/marks/cirbtc.svg', tint: '247 168 90' },
   xaum: { id: 'xaum', symbol: 'XAUM', kind: 'gold', label: 'Gold', mark: '/marks/xaum.svg', tint: '212 185 110' },
+  usdcat: {
+    id: 'usdcat',
+    symbol: 'USDCAT',
+    kind: 'usdcat',
+    label: 'USDCAT',
+    mark: '/marks/usdcat.jpg',
+    tint: '37 99 235',
+  },
 }
 
 export function quoteAsset(quote?: string | null): QuoteAsset {
@@ -41,8 +49,21 @@ export function quoteAsset(quote?: string | null): QuoteAsset {
         ? 'btc'
         : GOLD.has(id)
           ? 'gold'
-          : 'usdc'
-  const label = kind === 'usdc' ? 'USDC' : kind === 'mmf' ? 'MMF' : kind === 'equity' ? 'Equity' : kind === 'btc' ? 'BTC' : 'Gold'
+          : id === 'usdcat'
+            ? 'usdcat'
+            : 'usdc'
+  const label =
+    kind === 'usdc'
+      ? 'USDC'
+      : kind === 'mmf'
+        ? 'MMF'
+        : kind === 'equity'
+          ? 'Equity'
+          : kind === 'btc'
+            ? 'BTC'
+            : kind === 'usdcat'
+              ? 'USDCAT'
+              : 'Gold'
   return { id, symbol: quote || 'USDC', kind, label, mark: null, tint: '110 184 232' }
 }
 

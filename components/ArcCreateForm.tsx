@@ -90,6 +90,7 @@ import { useArcErc20Balance } from '@/lib/use-arc-erc20-balance'
 import type { PoolToken } from '@/lib/tokens'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
 import { fetchQuoteUsdSpot, formatSpotQuoteApprox } from '@/lib/quote-usd-spot'
+import { fetchQuotePoolUsd } from '@/lib/quote-pool-usd'
 import { parseUsdc, planUsdcBuyOfToken } from '@/lib/arc-swap'
 
 type Step =
@@ -236,6 +237,9 @@ export function ArcCreateForm({
   const spotPolicy = quotePolicy(rwaQuote)
   const spotUsd = spotPolicy.usd === 'spot'
   const spotPair = spotPolicy.usdSpot
+  const poolPriceId = rwaQuote?.pricePoolId
+  const poolTokenIs0 = rwaQuote?.priceTokenIsCurrency0 === true
+  const poolTokenDecimals = rwaQuote?.decimals || 18
 
   const quoteDecimalsLive = rwaQuote?.decimals || 6
   const quoteTokenLive = (rwaQuote?.address as Address | undefined) || ARC.USDC
@@ -258,6 +262,21 @@ export function ArcCreateForm({
   const quoteSymbol = rwaQuote?.symbol || 'USDC'
 
   const refreshSpotPx = useCallback(async (force = false) => {
+    if (poolPriceId) {
+      setSpotPxStatus((s) => (s === 'ready' && !force ? s : 'loading'))
+      const price = await fetchQuotePoolUsd({
+        poolId: poolPriceId,
+        tokenIsCurrency0: poolTokenIs0,
+        tokenDecimals: poolTokenDecimals,
+      })
+      if (price == null) {
+        setSpotPxStatus('error')
+        return null
+      }
+      setSpotPx(price)
+      setSpotPxStatus('ready')
+      return price
+    }
     if (!spotUsd || !spotPair) return null
     setSpotPxStatus((s) => (s === 'ready' && !force ? s : 'loading'))
     const price = await fetchQuoteUsdSpot(spotPair, { force })
@@ -268,9 +287,33 @@ export function ArcCreateForm({
     setSpotPx(price)
     setSpotPxStatus('ready')
     return price
-  }, [spotUsd, spotPair])
+  }, [spotUsd, spotPair, poolPriceId, poolTokenIs0, poolTokenDecimals])
 
   useEffect(() => {
+    if (poolPriceId) {
+      let cancelled = false
+      setSpotPxStatus('loading')
+      const load = (force = false) =>
+        fetchQuotePoolUsd({
+          poolId: poolPriceId,
+          tokenIsCurrency0: poolTokenIs0,
+          tokenDecimals: poolTokenDecimals,
+        }).then((price) => {
+          if (cancelled) return
+          if (price == null) {
+            if (!force) setSpotPxStatus('error')
+            return
+          }
+          setSpotPx(price)
+          setSpotPxStatus('ready')
+        })
+      void load()
+      const t = window.setInterval(() => void load(true), 60_000)
+      return () => {
+        cancelled = true
+        window.clearInterval(t)
+      }
+    }
     if (!spotUsd || !spotPair) {
       setSpotPxStatus('idle')
       setSpotPx(null)
@@ -298,7 +341,7 @@ export function ArcCreateForm({
       cancelled = true
       window.clearInterval(t)
     }
-  }, [spotUsd, spotPair])
+  }, [spotUsd, spotPair, poolPriceId, poolTokenIs0, poolTokenDecimals])
   const isReflection = launchType === 'reflection'
   const v4Ui = arcInstantV4UiEnabled()
   const v4Live = arcInstantV4Enabled()
@@ -655,9 +698,13 @@ export function ArcCreateForm({
           if (q <= 0n) throw new Error('Set a dollar price for one basket share before launching.')
           return q
         }
-        return defaultRwaVirtualQuoteRaw(rwaQuote, {
+        const vq = defaultRwaVirtualQuoteRaw(rwaQuote, {
           spotUsd: spotUsd ? await refreshSpotPx(true) : undefined,
         })
+        if (rwaQuote.pricePoolId && vq <= 0n) {
+          throw new Error(`Could not price ${rwaQuote.symbol}. Retry in a moment.`)
+        }
+        return vq
       }
 
       if (rwaV4Live && bundleOn && bundleLive) {
@@ -1148,7 +1195,7 @@ export function ArcCreateForm({
               Launches coming soon
             </p>
             <p className="mt-2 mb-0 text-[13px] text-t2 leading-relaxed max-w-md mx-auto">
-              Instant, Reflection, and RWA paired launches are paused while we finish polishing.
+              Instant, Reflection, and custom pair launches are paused while we finish polishing.
               Trading existing tokens stays live.
             </p>
           </div>
@@ -1612,6 +1659,7 @@ function rwaMarkSrc(id: string): string | null {
   if (k === 'xaum') return '/marks/xaum.svg'
   if (k === 'buidl') return '/marks/buidl.png'
   if (k === 'crcl') return '/marks/crcl.svg'
+  if (k === 'usdcat') return '/marks/usdcat.jpg'
   return null
 }
 
@@ -1647,19 +1695,22 @@ function RwaPairedPicker({
   }, [menuOpen])
 
   const gatedLabel = gated.map((a) => a.symbol).join(' · ')
+  const liveLabel = openAssets
+    .map((a) => (a.id === 'usdcat' ? 'USDCAT' : a.symbol))
+    .join(' · ')
   const body = selected
-    ? selected.permissioned
-      ? `Quoted in ${selected.symbol} (permissioned). First buy is in ${selected.symbol}, not USD.`
-      : v4Ui
-        ? `Same Instant mint + LP lock, quoted in ${selected.symbol}. Optional holder basket.`
-        : `Same Instant mint + LP lock, quoted in ${selected.symbol}.`
+    ? selected.id === 'usdcat'
+      ? 'Quoted in USDCAT (UpSideDownCat). First buy is priced in dollars and paid in USDCAT.'
+      : selected.permissioned
+        ? `Quoted in ${selected.symbol} (permissioned). First buy is in ${selected.symbol}, not USD.`
+        : v4Ui
+          ? `Same Instant mint + LP lock, quoted in ${selected.symbol}. Optional holder basket.`
+          : `Same Instant mint + LP lock, quoted in ${selected.symbol}.`
     : canPick
-      ? gatedLabel
-        ? `Pick a quote. ${gatedLabel} stay Soon until the issuer publishes an Arc address.`
-        : 'Pick a quote.'
+      ? `Choose a pair${liveLabel ? `: ${liveLabel}` : ''}.${gatedLabel ? ` ${gatedLabel} stay Soon until an Arc address is published.` : ''}`
       : gatedLabel
-        ? `${gatedLabel} — waiting on issuer address + Instant factory.`
-        : 'Waiting on issuer + Instant factory.'
+        ? `${gatedLabel} — waiting on an Arc address.`
+        : 'Waiting on a pair address.'
 
   const cls = `relative rounded-2xl bg-s1 p-4 text-left border transition-colors duration-150 sm:col-span-2 ${
     !canPick
@@ -1676,7 +1727,7 @@ function RwaPairedPicker({
           Soon
         </span>
       ) : null}
-      <div className="text-sm font-medium">RWA paired</div>
+      <div className="text-sm font-medium">Custom Pairs</div>
       <p className="mt-1 mb-3 text-xs leading-relaxed text-t2">{body}</p>
       {canPick ? (
         <div className="relative">
@@ -1698,7 +1749,7 @@ function RwaPairedPicker({
               <span className="size-5 rounded-full bg-white/10 shrink-0" />
             )}
             <span className="flex-1 text-left font-medium">
-              {selected ? selected.symbol : 'Select RWA quote…'}
+              {selected ? (selected.id === 'usdcat' ? `${selected.symbol} · ${selected.name}` : selected.symbol) : 'Select a pair…'}
             </span>
             <ChevronDown className={`size-4 text-t3 shrink-0 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
           </button>
@@ -1729,6 +1780,9 @@ function RwaPairedPicker({
                         <span className="size-5 rounded-full bg-white/10 shrink-0" />
                       )}
                       <span className="font-medium">{a.symbol}</span>
+                      {a.id === 'usdcat' ? (
+                        <span className="truncate text-[11px] text-t3">{a.name}</span>
+                      ) : null}
                       {a.permissioned ? (
                         <span className="ml-auto text-[10px] uppercase tracking-wide text-amber-200/80 font-semibold">Gated</span>
                       ) : null}

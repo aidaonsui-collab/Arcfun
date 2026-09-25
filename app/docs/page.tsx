@@ -91,15 +91,16 @@ export default function DocsPage() {
 
             <article className="relative border border-hair rounded-[22px] bg-s1 p-5 sm:p-6">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="m-0 text-[17px] font-semibold tracking-tightish">RWA paired</h3>
+                <h3 className="m-0 text-[17px] font-semibold tracking-tightish">Custom Pairs</h3>
                 <span className="px-2 py-0.5 rounded-full bg-lime/15 text-[11px] font-bold uppercase tracking-wide text-lime-t">
                   Live
                 </span>
               </div>
               <p className="mt-2 mb-0 text-[13px] text-t2 leading-snug">
-                Same Instant mint + LP lock, quoted against cirBTC (permissionless). USYC and
-                other allowlisted RWAs stay Soon in the create UI until public trading works.
-                BUIDL / JAAA / JTRSY wait on Arc addresses. TOKEN/USDC trading is unaffected.
+                Same Instant mint + LP lock, quoted against cirBTC, XAUM, or UpSideDownCat
+                (shown as USDCAT, not Circle USDC). USYC and other allowlisted RWAs stay Soon
+                in the create UI until public trading works. BUIDL / JAAA / JTRSY wait on Arc
+                addresses. TOKEN/USDC trading is unaffected.
               </p>
             </article>
           </div>

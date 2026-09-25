@@ -28,6 +28,7 @@ import {
 } from '@/lib/arc-swap'
 import { quoteDecimalsForToken, quotePolicy, quoteSymbolForQuote, rwaAssetByQuote, usdToQuoteHuman } from '@/lib/arc-rwa-assets'
 import { fetchQuoteUsdSpot, spotQuoteToUsd } from '@/lib/quote-usd-spot'
+import { fetchQuotePoolUsd } from '@/lib/quote-pool-usd'
 import { formatToken, parseToken } from '@/lib/token-format'
 import { getIncomingReferralCode } from '@/lib/crucible'
 import { feePairLabel } from '@/lib/eve-fee-split'
@@ -153,6 +154,9 @@ export function ArcDexTradePanel({
   const spotPolicy = quotePolicy(quoteAsset)
   const spotUsd = spotPolicy.usd === 'spot'
   const spotPair = spotPolicy.usdSpot
+  const poolPriceId = quoteAsset?.pricePoolId
+  const poolTokenIs0 = quoteAsset?.priceTokenIsCurrency0 === true
+  const poolTokenDecimals = quoteAsset?.decimals || 18
   /** Gold and BTC pools trade in the quote token. The pad prices those in USDC. */
   const payUsdc = Boolean(isV4 && spotPolicy.payUsdcSwap && quoteSym !== 'USDC')
 
@@ -179,6 +183,19 @@ export function ArcDexTradePanel({
   }, [token])
 
   useEffect(() => {
+    if (poolPriceId) {
+      let cancelled = false
+      void fetchQuotePoolUsd({
+        poolId: poolPriceId,
+        tokenIsCurrency0: poolTokenIs0,
+        tokenDecimals: poolTokenDecimals,
+      }).then((px) => {
+        if (!cancelled) setSpotPx(px)
+      })
+      return () => {
+        cancelled = true
+      }
+    }
     if (!spotUsd || !spotPair) {
       setSpotPx(null)
       return
@@ -190,7 +207,7 @@ export function ArcDexTradePanel({
     return () => {
       cancelled = true
     }
-  }, [spotUsd, spotPair])
+  }, [spotUsd, spotPair, poolPriceId, poolTokenIs0, poolTokenDecimals])
   const refCode = mode === 'buy' ? getIncomingReferralCode() : ''
   const { tile, mono } = tileGradient(token)
   const initial = (symbol || '?').charAt(0).toUpperCase()
