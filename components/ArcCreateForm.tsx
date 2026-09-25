@@ -46,7 +46,6 @@ import {
   type ArcRwaAsset,
 } from '@/lib/arc-rwa-assets'
 import { BundleBasketCard } from '@/components/BundleBasketCard'
-import { BasketPairCard } from '@/components/BasketPairCard'
 import { basketVirtualQuoteRaw, isBasketQuoteId } from '@/lib/arc-basket'
 import {
   RWA_V4_FACTORY_ABI,
@@ -370,7 +369,10 @@ export function ArcCreateForm({
   const feeModelKnown = feeModelQ.isSuccess || feeModelQ.isError
   const maxFeeBps = feeModelKnown && !dualFee ? LEGACY_MAX_FEE_BPS : MAX_FEE_BPS
   const bundleLive = rwaV4Live
-  const hideHolders = Boolean(rwaQuote) && !bundleOn
+  // Permissionless custom pairs (USDCAT, cirBTC, XAUM) can reflect in the quote token.
+  // Permissioned quotes still cannot send that token straight to holders.
+  const quoteReflect = Boolean(rwaQuote && !rwaQuote.permissioned)
+  const hideHolders = Boolean(rwaQuote) && !quoteReflect && !bundleOn
   const minHoldersBps = isReflection
     ? MIN_REFLECT_HOLDERS_BPS
     : bundleOn
@@ -574,13 +576,16 @@ export function ArcCreateForm({
           firstBuyQuote = parseArcQuote(firstBuy, quoteDecimals)
         }
       }
-      // Belt-and-suspenders: never send holdersBps to plain RWA createToken.
+      // Permissioned RWA create reverts if holdersBps is set and Bundle is off.
       const splitForCreate =
-        Boolean(rwaQuote) && !bundleOn ? foldHoldersIntoCreator(feeSplit) : feeSplit
+        Boolean(rwaQuote?.permissioned) && !bundleOn ? foldHoldersIntoCreator(feeSplit) : feeSplit
+      const reflectInQuote = Boolean(rwaQuote && !rwaQuote.permissioned && splitForCreate.holdersBps > 0)
       const factory =
-        rwaV4Live && rwaFactoryAddr
-          ? rwaFactoryAddr
-          : v4Live
+        reflectInQuote
+          ? ARC.INSTANT_V4_FACTORY
+          : rwaV4Live && rwaFactoryAddr
+            ? rwaFactoryAddr
+            : v4Live
             ? ARC.INSTANT_V4_FACTORY
             : isReflection
               ? ARC.REFLECTION_FACTORY
@@ -764,7 +769,7 @@ export function ArcCreateForm({
           setPendingBasket({ token, sink, quote: quoteToken })
           throw e
         }
-      } else if (rwaV4Live && rwaFactoryAddr) {
+      } else if (rwaV4Live && rwaFactoryAddr && !reflectInQuote) {
         setStep('creating')
         const creator = rewardsAddr || address
         const call = buildCreateTokenRwaV4({
@@ -801,6 +806,7 @@ export function ArcCreateForm({
           firstBuyQuoteRaw: firstBuyQuote,
           split: splitForCreate,
           dual: dualFee,
+          launchVirtualQuote: rwaQuote ? await launchVirtualQuote() : undefined,
         })
         hash = await writeContractAsync({
           address: call.address,
@@ -1114,20 +1120,11 @@ export function ArcCreateForm({
             setLaunchType('instant')
             setQuoteId(id)
             setBundleOn(false)
-            setFeeSplit(foldHoldersIntoCreator(feeSplit))
+            const picked = rwaAssetById(id)
+            if (picked?.permissioned) setFeeSplit((s) => foldHoldersIntoCreator(s))
           }}
         />
       ) : null}
-      <BasketPairCard
-        active={launchType === 'instant' && isBasketQuoteId(quoteId)}
-        disabled={!launchesLive}
-        onSelect={(id) => {
-          setLaunchType('instant')
-          setQuoteId(id)
-          setBundleOn(false)
-          setFeeSplit(foldHoldersIntoCreator(feeSplit))
-        }}
-      />
       </div>
     </div>
   )
@@ -1159,12 +1156,13 @@ export function ArcCreateForm({
               split={feeSplit}
               onChange={setFeeSplit}
               hideHolders={hideHolders}
+              holdersHint={quoteReflect ? `Paid in ${quoteSymbol}` : undefined}
               minHoldersBps={minHoldersBps}
               preview={!v4Live}
               open={feeOpen}
               onOpenChange={setFeeOpen}
             />
-            {rwaQuote ? (
+            {rwaQuote?.permissioned ? (
               <BundleBasketCard
                 enabled={bundleOn}
                 onEnabled={(on) => {
@@ -1700,7 +1698,7 @@ function RwaPairedPicker({
     .join(' · ')
   const body = selected
     ? selected.id === 'usdcat'
-      ? 'Quoted in USDCAT (UpSideDownCat). First buy is priced in dollars and paid in USDCAT.'
+      ? 'Quoted in USDCAT (UpSideDownCat). First buy is priced in dollars and paid in USDCAT. The launch fee can pay holders in USDCAT.'
       : selected.permissioned
         ? `Quoted in ${selected.symbol} (permissioned). First buy is in ${selected.symbol}, not USD.`
         : v4Ui

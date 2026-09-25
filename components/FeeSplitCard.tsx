@@ -37,6 +37,7 @@ export function FeeSplitCard({
   preview = false,
   open,
   onOpenChange,
+  holdersHint,
 }: {
   split: FeeSplit
   onChange: (next: FeeSplit) => void
@@ -49,6 +50,8 @@ export function FeeSplitCard({
   preview?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Replaces the Holders row hint, e.g. the quote token holders are paid in. */
+  holdersHint?: string
 }) {
   const check = splitValid(split, { hideHolders, minHoldersBps, requireEqualFees, maxFeeBps })
   const remaining = splitRemaining(split)
@@ -284,7 +287,9 @@ export function FeeSplitCard({
                           style={{ background: leg.color }}
                         />
                         <span className="text-[13px] font-medium">{leg.label}</span>
-                        <span className="text-[11px] text-t3 truncate">{leg.hint}</span>
+                        <span className="text-[11px] text-t3 truncate">
+                          {leg.key === 'holders' && holdersHint ? holdersHint : leg.hint}
+                        </span>
                       </div>
                       <div className="flex items-center gap-1">
                         <input
