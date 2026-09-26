@@ -2,7 +2,7 @@
  * Quote-token chrome for home/token UI (marks, tints, pair chips).
  * Create/trade still use `arc-rwa-assets` for on-chain policy.
  */
-export type QuoteKind = 'usdc' | 'mmf' | 'equity' | 'btc' | 'gold' | 'usdcat'
+export type QuoteKind = 'usdc' | 'mmf' | 'equity' | 'btc' | 'gold' | 'usdcat' | 'poll'
 
 export type QuoteAsset = {
   id: string
@@ -35,6 +35,7 @@ export const QUOTE_ASSETS: Record<string, QuoteAsset> = {
     mark: '/marks/usdcat.jpg',
     tint: '37 99 235',
   },
+  poll: { id: 'poll', symbol: 'POLL', kind: 'poll', label: 'POLL', mark: null, tint: '124 58 237' },
 }
 
 export function quoteAsset(quote?: string | null): QuoteAsset {

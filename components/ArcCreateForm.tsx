@@ -90,6 +90,7 @@ import type { PoolToken } from '@/lib/tokens'
 import { prefillFromSearch, type BlitzPrefill } from '@/lib/arc-blitz'
 import { fetchQuoteUsdSpot, formatSpotQuoteApprox } from '@/lib/quote-usd-spot'
 import { fetchQuotePoolUsd } from '@/lib/quote-pool-usd'
+import { getArcLivePriceUsdc } from '@/lib/arc-instant-tokens'
 import { parseUsdc, planUsdcBuyOfToken } from '@/lib/arc-swap'
 
 type Step =
@@ -239,6 +240,8 @@ export function ArcCreateForm({
   const poolPriceId = rwaQuote?.pricePoolId
   const poolTokenIs0 = rwaQuote?.priceTokenIsCurrency0 === true
   const poolTokenDecimals = rwaQuote?.decimals || 18
+  const v3PricePool = rwaQuote?.priceV3Pool
+  const v3PriceToken = rwaQuote?.address as Address | undefined
 
   const quoteDecimalsLive = rwaQuote?.decimals || 6
   const quoteTokenLive = (rwaQuote?.address as Address | undefined) || ARC.USDC
@@ -276,6 +279,17 @@ export function ArcCreateForm({
       setSpotPxStatus('ready')
       return price
     }
+    if (v3PricePool && v3PriceToken) {
+      setSpotPxStatus((s) => (s === 'ready' && !force ? s : 'loading'))
+      const price = await getArcLivePriceUsdc(v3PriceToken, v3PricePool)
+      if (price == null) {
+        setSpotPxStatus('error')
+        return null
+      }
+      setSpotPx(price)
+      setSpotPxStatus('ready')
+      return price
+    }
     if (!spotUsd || !spotPair) return null
     setSpotPxStatus((s) => (s === 'ready' && !force ? s : 'loading'))
     const price = await fetchQuoteUsdSpot(spotPair, { force })
@@ -286,7 +300,7 @@ export function ArcCreateForm({
     setSpotPx(price)
     setSpotPxStatus('ready')
     return price
-  }, [spotUsd, spotPair, poolPriceId, poolTokenIs0, poolTokenDecimals])
+  }, [spotUsd, spotPair, poolPriceId, poolTokenIs0, poolTokenDecimals, v3PricePool, v3PriceToken])
 
   useEffect(() => {
     if (poolPriceId) {
@@ -298,6 +312,26 @@ export function ArcCreateForm({
           tokenIsCurrency0: poolTokenIs0,
           tokenDecimals: poolTokenDecimals,
         }).then((price) => {
+          if (cancelled) return
+          if (price == null) {
+            if (!force) setSpotPxStatus('error')
+            return
+          }
+          setSpotPx(price)
+          setSpotPxStatus('ready')
+        })
+      void load()
+      const t = window.setInterval(() => void load(true), 60_000)
+      return () => {
+        cancelled = true
+        window.clearInterval(t)
+      }
+    }
+    if (v3PricePool && v3PriceToken) {
+      let cancelled = false
+      setSpotPxStatus('loading')
+      const load = (force = false) =>
+        getArcLivePriceUsdc(v3PriceToken, v3PricePool).then((price) => {
           if (cancelled) return
           if (price == null) {
             if (!force) setSpotPxStatus('error')
@@ -340,7 +374,7 @@ export function ArcCreateForm({
       cancelled = true
       window.clearInterval(t)
     }
-  }, [spotUsd, spotPair, poolPriceId, poolTokenIs0, poolTokenDecimals])
+  }, [spotUsd, spotPair, poolPriceId, poolTokenIs0, poolTokenDecimals, v3PricePool, v3PriceToken])
   const isReflection = launchType === 'reflection'
   const v4Ui = arcInstantV4UiEnabled()
   const v4Live = arcInstantV4Enabled()
@@ -706,7 +740,7 @@ export function ArcCreateForm({
         const vq = defaultRwaVirtualQuoteRaw(rwaQuote, {
           spotUsd: spotUsd ? await refreshSpotPx(true) : undefined,
         })
-        if (rwaQuote.pricePoolId && vq <= 0n) {
+        if ((rwaQuote.pricePoolId || rwaQuote.priceV3Pool) && vq <= 0n) {
           throw new Error(`Could not price ${rwaQuote.symbol}. Retry in a moment.`)
         }
         return vq

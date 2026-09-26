@@ -70,6 +70,18 @@ const USDCAT_MAINNET = {
   priceHooks: '0xDb0BFde55FeA51eAea8F6cc91D5A253c9265a044',
 } as const
 
+/**
+ * Polly on Arc mainnet. Independent launch — not on any Instant/curve factory, so no v4 pool
+ * or launchVirtualQuote to read. Its only book is a plain Uni V3 1% pool against USDC
+ * (0x80D5…d934; token is currency1). Priced off that pool's own slot0, like cirBTC/XAUM's
+ * v3 hop, not a v4 poolId.
+ */
+const POLL_MAINNET = {
+  address: '0xf76b1D00bD3d63A37246B5f512074e864010E33d',
+  decimals: 18,
+  priceV3Pool: '0x80D56586aa2f51661F54C109A58B6391EafdD934',
+} as const
+
 export type RwaAssetKind = 'mmf' | 'equity' | 'commodity' | 'meme'
 
 /** USD source for FDV, tape, and first-buy. Required on every catalog row. */
@@ -115,6 +127,8 @@ export interface ArcRwaAsset {
   priceFee?: number
   priceTickSpacing?: number
   priceHooks?: Address
+  /** Uni V3 pool address for a quote's own USDC book. Same idea as pricePoolId, v3 shape. */
+  priceV3Pool?: Address
   /**
    * Create first-buy may pay USDC and swap into this quote when the wallet is short.
    * Instant still pulls the quote token. Only for permissionless quotes with a USDC book.
@@ -321,6 +335,27 @@ function builtinCatalog(): ArcRwaAsset[] {
       payUsdcSwap: false,
     },
     {
+      id: 'poll',
+      symbol: 'POLL',
+      name: 'Polly',
+      kind: 'meme',
+      address:
+        envAddr('NEXT_PUBLIC_ARC_RWA_POLL') ||
+        (ARC_IS_TESTNET ? '' : (POLL_MAINNET.address as Address)),
+      decimals: POLL_MAINNET.decimals,
+      factory: envAddr('NEXT_PUBLIC_ARC_RWA_POLL_FACTORY') || sharedFactory,
+      locker: envAddr('NEXT_PUBLIC_ARC_RWA_POLL_LOCKER'),
+      permissioned: false,
+      chainId: ARC_CHAIN_ID,
+      enabled: envFlag('NEXT_PUBLIC_ARC_RWA_POLL_ENABLED') ?? Boolean(
+        (envAddr('NEXT_PUBLIC_ARC_RWA_POLL') || (!ARC_IS_TESTNET && POLL_MAINNET.address)) &&
+          (envAddr('NEXT_PUBLIC_ARC_RWA_POLL_FACTORY') || sharedFactory),
+      ),
+      usd: 'spot',
+      priceV3Pool: POLL_MAINNET.priceV3Pool as Address,
+      payUsdcSwap: true,
+    },
+    {
       id: 'jaaa',
       symbol: 'JAAA',
       name: 'Janus Henderson Anemoy AAA CLO Fund',
@@ -511,14 +546,15 @@ export function quotePolicyOk(asset: ArcRwaAsset): { ok: true } | { ok: false; r
   if (asset.usd === 'spot') {
     const hasFeed = Boolean(asset.usdSpot && QUOTE_USD_SPOTS.includes(asset.usdSpot))
     const hasPool = Boolean(asset.pricePoolId)
-    if (hasFeed === hasPool) {
+    const hasV3Pool = Boolean(asset.priceV3Pool)
+    if (Number(hasFeed) + Number(hasPool) + Number(hasV3Pool) !== 1) {
       return {
         ok: false,
-        reason: `${asset.id}: usd=spot needs a Coinbase usdSpot or a pricePoolId, not both`,
+        reason: `${asset.id}: usd=spot needs exactly one of a Coinbase usdSpot, a v4 pricePoolId, or a priceV3Pool`,
       }
     }
   }
-  if (asset.usd !== 'spot' && (asset.usdSpot || asset.pricePoolId)) {
+  if (asset.usd !== 'spot' && (asset.usdSpot || asset.pricePoolId || asset.priceV3Pool)) {
     return { ok: false, reason: `${asset.id}: usdSpot only valid with usd=spot` }
   }
   if (asset.payUsdcSwap && (asset.permissioned || asset.usd === 'none')) {
@@ -572,6 +608,11 @@ export async function quoteUsdMultiplier(quote: string | null | undefined): Prom
     })
     return px && px > 0 ? px : 0
   }
+  if (p.usd === 'spot' && asset?.priceV3Pool) {
+    const { getArcLivePriceUsdc } = await import('./arc-instant-tokens')
+    const px = await getArcLivePriceUsdc(asset.address as Address, asset.priceV3Pool)
+    return px && px > 0 ? px : 0
+  }
   if (p.usd === 'spot' && p.usdSpot) {
     const { fetchQuoteUsdSpot } = await import('./quote-usd-spot')
     const px = await fetchQuoteUsdSpot(p.usdSpot)
@@ -599,7 +640,14 @@ export const INSTANT_TARGET_FDV_USD = 3000
 export function defaultRwaVirtualQuoteRaw(
   asset: Pick<
     ArcRwaAsset,
-    'id' | 'decimals' | 'usd' | 'usdSpot' | 'payUsdcSwap' | 'permissioned' | 'pricePoolId'
+    | 'id'
+    | 'decimals'
+    | 'usd'
+    | 'usdSpot'
+    | 'payUsdcSwap'
+    | 'permissioned'
+    | 'pricePoolId'
+    | 'priceV3Pool'
   >,
   opts?: { spotUsd?: number | null; btcUsd?: number | null },
 ): bigint {
@@ -608,7 +656,7 @@ export function defaultRwaVirtualQuoteRaw(
   if (/^\d+$/.test(raw)) return BigInt(raw)
   const dec = asset.decimals > 0 ? asset.decimals : 6
   const p = quotePolicy(asset)
-  if (p.usd === 'spot' && asset.pricePoolId) {
+  if (p.usd === 'spot' && (asset.pricePoolId || asset.priceV3Pool)) {
     const spot = opts?.spotUsd ?? opts?.btcUsd
     if (!(spot && spot > 0)) return 0n
     // Micro-dollars keep an 18dp meme quote inside integer math (JS Number cannot hold 1e24).

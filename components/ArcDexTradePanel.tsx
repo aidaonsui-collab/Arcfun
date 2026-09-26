@@ -46,6 +46,7 @@ import {
 } from '@/lib/arc-rwa-assets'
 import { fetchQuoteUsdSpot, spotQuoteToUsd } from '@/lib/quote-usd-spot'
 import { fetchQuotePoolUsd } from '@/lib/quote-pool-usd'
+import { getArcLivePriceUsdc } from '@/lib/arc-instant-tokens'
 import { formatToken, parseToken } from '@/lib/token-format'
 import { getIncomingReferralCode } from '@/lib/crucible'
 import { feePairLabel } from '@/lib/eve-fee-split'
@@ -174,6 +175,7 @@ export function ArcDexTradePanel({
   const poolPriceId = quoteAsset?.pricePoolId
   const poolTokenIs0 = quoteAsset?.priceTokenIsCurrency0 === true
   const poolTokenDecimals = quoteAsset?.decimals || 18
+  const v3PricePool = quoteAsset?.priceV3Pool
   const usdcHop: EveV4UsdcHop | null = useMemo(() => {
     if (!quoteAsset?.pricePoolId || !quoteAsset.priceHooks || !quoteAsset.priceFee || !quoteAsset.priceTickSpacing) {
       return null
@@ -233,6 +235,15 @@ export function ArcDexTradePanel({
         cancelled = true
       }
     }
+    if (v3PricePool) {
+      let cancelled = false
+      void getArcLivePriceUsdc(quoteToken, v3PricePool).then((px) => {
+        if (!cancelled) setSpotPx(px)
+      })
+      return () => {
+        cancelled = true
+      }
+    }
     if (!spotUsd || !spotPair) {
       setSpotPx(null)
       return
@@ -244,7 +255,7 @@ export function ArcDexTradePanel({
     return () => {
       cancelled = true
     }
-  }, [spotUsd, spotPair, poolPriceId, poolTokenIs0, poolTokenDecimals])
+  }, [spotUsd, spotPair, poolPriceId, poolTokenIs0, poolTokenDecimals, v3PricePool, quoteToken])
   const refCode = mode === 'buy' ? getIncomingReferralCode() : ''
   const { tile, mono } = tileGradient(token)
   const initial = (symbol || '?').charAt(0).toUpperCase()
