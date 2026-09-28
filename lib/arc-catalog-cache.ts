@@ -5,9 +5,11 @@
  * cache miss (~4s measured, >5s when Infura/baracat throttle). The home page is a client
  * fetch after hydration, so that miss is a spinner in All launches.
  *
- * Serve the last good snapshot immediately (memory, then KV). Refresh in the background
- * when the snapshot is older than FRESH_MS. An empty snapshot is treated as a miss and
- * filled from the indexer so Instant RPC timeouts cannot blank the home grid.
+ * Serve the last good snapshot immediately (memory, then KV). A full factory RPC
+ * rebuild runs in the background only when that snapshot is older than REBUILD_MS.
+ * Doing it on every 20s read held a Fluid instance open. An empty snapshot is
+ * treated as a miss and filled from the indexer so Instant RPC timeouts cannot
+ * blank the home grid.
  */
 import { after } from 'next/server'
 import { kv } from '@vercel/kv'
@@ -28,7 +30,9 @@ import { summarizeRpcError } from './rpc-error'
 
 /** v6: drop v5 snapshots that stored AMG's 6dp-as-18 print (FDV 7e15). */
 const KV_KEY = 'arcfun:catalog:home:v6'
-const FRESH_MS = 20_000
+/** Factory RPC walk. Indexer + upsert keep the grid usable between these. */
+const REBUILD_MS = 3 * 60 * 1000
+let rebuildAttemptAt = 0
 /** Last-good home grid. 10 minutes was short enough for an empty Instant
  *  timeout to expire a real snapshot and latch `tokens: []`. */
 const KV_TTL_SEC = 24 * 60 * 60
@@ -60,8 +64,8 @@ function sanitizeSnapshot(snap: CatalogSnapshot): CatalogSnapshot {
 }
 
 /** Identity upsert writes KV from one instance; another lambda's memory can be
- *  newer-looking by FRESH_MS while missing the just-launched token. Prefer the
- *  snapshot with the later `at`. */
+ *  newer-looking while missing the just-launched token. Prefer the snapshot
+ *  with the later `at`. */
 function pickFresher(
   a: CatalogSnapshot | null | undefined,
   b: CatalogSnapshot | null | undefined,
@@ -165,8 +169,12 @@ async function rebuild(): Promise<CatalogSnapshot> {
   return inflight
 }
 
-function scheduleRefresh(): void {
+function scheduleRefresh(snapAt = 0): void {
   if (inflight) return
+  const now = Date.now()
+  if (snapAt > 0 && now - snapAt < REBUILD_MS) return
+  if (now - rebuildAttemptAt < REBUILD_MS) return
+  rebuildAttemptAt = now
   const run = () => {
     void rebuild().catch((e) => console.warn('[arc-catalog] refresh', summarizeRpcError(e)))
   }
@@ -198,7 +206,7 @@ export async function getArcHomeCatalog(): Promise<CatalogSnapshot> {
   const snap = pickFresher(memory, await readKv())
   if (snap && snap.tokens.length > 0) {
     memory = snap
-    if (Date.now() - snap.at > FRESH_MS) scheduleRefresh()
+    scheduleRefresh(snap.at)
     return overlaySnapshot(snap)
   }
   // No last-good snapshot (or a persisted empty one). Paint from the indexer

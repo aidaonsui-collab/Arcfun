@@ -34,7 +34,8 @@ import {
   arcSwapSpender,
   withRecipient,
 } from './arc-swap'
-import { buildArcCatalog, fetchArcPoolToken, getArcPoolLiquidityUsdc } from './arc-instant-tokens'
+import { fetchArcPoolToken, getArcPoolLiquidityUsdc } from './arc-instant-tokens'
+import { getArcHomeCatalog } from './arc-catalog-cache'
 import { fetchArcTrades } from './arc-trades'
 import { fetchEvmHolders } from './evm-holders'
 import { buildCandles, RANGE_BUCKET_SEC } from './candles'
@@ -205,8 +206,9 @@ function slimToken(t: PoolToken) {
 }
 
 export async function mcpListTokens(limit = 40) {
-  let { tokens, source } = await buildArcCatalog()
-  tokens = tokens.filter((t) => !isHiddenToken(t.coinType ?? t.poolId))
+  const snap = await getArcHomeCatalog()
+  let tokens = snap.tokens.filter((t) => !isHiddenToken(t.coinType ?? t.poolId))
+  const source = snap.source
   try {
     const { enrichTokensWithIndexVolume } = await import('./arc-indexer/run')
     tokens = await enrichTokensWithIndexVolume(tokens)

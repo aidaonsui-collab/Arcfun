@@ -78,7 +78,8 @@ export function HomeClient({
 
   const load = useCallback(async () => {
     try {
-      const res = await coalescedFetch(`/api/arc/tokens?t=${Date.now()}`)
+      // Stable URL so the 20s edge cache is shared. A changing query misses every time.
+      const res = await coalescedFetch('/api/arc/tokens')
       if (res.ok) {
         const data = (await res.json()) as { tokens?: PoolToken[] }
         const next = data.tokens ?? []
