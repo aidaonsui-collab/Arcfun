@@ -11,6 +11,10 @@
     {
       "path": "/api/arc/indexer/holders",
       "schedule": "*/3 * * * *"
+    },
+    {
+      "path": "/api/arc/keeper/vault",
+      "schedule": "0 * * * *"
     }
   ]
 }
