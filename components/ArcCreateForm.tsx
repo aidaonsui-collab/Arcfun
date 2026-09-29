@@ -1224,10 +1224,10 @@ export function ArcCreateForm({
         {!launchesLive ? (
           <div className="mt-6 rounded-[22px] border border-hair bg-s1 px-5 py-6 text-center">
             <p className="m-0 text-[15px] font-semibold tracking-tightish text-white">
-              Launches coming soon
+              Launches are paused
             </p>
             <p className="mt-2 mb-0 text-[13px] text-t2 leading-relaxed max-w-md mx-auto">
-              Instant, Reflection, and custom pair launches are paused while we finish polishing.
+              New Instant, Reflection, and custom pair launches are paused.
               Trading existing tokens stays live.
             </p>
           </div>
