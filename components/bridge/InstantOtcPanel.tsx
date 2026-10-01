@@ -15,6 +15,7 @@ import {
 } from 'wagmi'
 import { isAddress, type Address } from 'viem'
 import { ARC_CHAIN_ID, arcPublicClient } from '@/lib/contracts-arc'
+import { EVE_WAIVER_HINT } from '@/lib/bridge/constants'
 import {
   ROBIN_OTC_LIQUIDITY,
   ARC_USDC,
@@ -802,6 +803,15 @@ export function InstantOtcPanel({ onViewOrders }: { onViewOrders?: () => void } 
       <p className="otc-fee-note">
         Platform fee <strong>{effectiveFeeBps / 100}%</strong> on maker proceeds. Premiums are set
         by makers; unsettled fills can be self-refunded after the timeout.
+        {robinEligible && effectiveFeeBps === 0 ? (
+          <span className="otc-fee-note-ok"> · $EVE holder waiver active — you pay 0%.</span>
+        ) : (
+          <span className="otc-fee-note-muted">
+            {' '}
+            · $EVE holders with ≥0.1% of supply ({EVE_WAIVER_HINT.toLocaleString()}+ $EVE) trade
+            fee-free.
+          </span>
+        )}
       </p>
 
       <div className="otc-toolbar">
