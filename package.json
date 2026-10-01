@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "indexer": "node --env-file=.env.local --experimental-strip-types --import ./scripts/alias-register.mjs lib/arc-indexer/daemon.ts",
-    "backfill-candles": "node --env-file=.env.local --experimental-strip-types --import ./scripts/alias-register.mjs scripts/backfill-candles.ts"
+    "backfill-candles": "node --env-file=.env.local --experimental-strip-types --import ./scripts/alias-register.mjs scripts/backfill-candles.ts",
+    "cook-crucible": "node --env-file=.env.local --experimental-strip-types --import ./scripts/alias-register.mjs scripts/cook-crucible.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
