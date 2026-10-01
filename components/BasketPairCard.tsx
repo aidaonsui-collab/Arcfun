@@ -8,7 +8,7 @@ import { setClientBasketQuotes } from '@/lib/arc-rwa-assets'
 import {
   BASKET_FACTORY_ABI,
   BASKET_VAULT_ABI,
-  DINARI_LEGS,
+  XSTOCK_LEGS,
   basketFactoryAddress,
   basketQuoteId,
   basketToAsset,
@@ -75,7 +75,11 @@ export function BasketPairCard({
       setNote('Set how many dollars one share is worth.')
       return
     }
-    const legs = DINARI_LEGS.filter((l) => picked.includes(l.symbol))
+    const legs = XSTOCK_LEGS.filter((l) => picked.includes(l.symbol))
+    if (legs.some((l) => !l.address)) {
+      setNote('xStocks are not on Arc yet. Seeding opens once they publish contracts.')
+      return
+    }
     const client = arcPublicClient()
     setBusy(true)
     try {
@@ -192,16 +196,18 @@ export function BasketPairCard({
         Two or three assets back one share. A mint pulls that recipe plus a fee. A redeem pays it back
         minus a fee. The share is the Instant quote. USDC can buy or sell it in one swap once each
         asset has a pool, and a dead asset can be skipped on the way out. Mint turns on once each
-        asset can be pulled.
+        asset can be pulled. xStocks are announced for Arc but have no contracts yet, so seeding
+        stays off until they publish addresses.
       </p>
       <div className="flex flex-wrap gap-1.5">
-        {DINARI_LEGS.map((leg) => {
+        {XSTOCK_LEGS.map((leg) => {
           const on = picked.includes(leg.symbol)
           return (
             <button
               key={leg.symbol}
               type="button"
               disabled={disabled || busy || (!on && picked.length >= 3)}
+              title={leg.address ? leg.xSymbol : `${leg.xSymbol} - not on Arc yet`}
               onClick={() => toggle(leg.symbol)}
               className={`h-8 rounded-full pl-1 pr-2.5 text-[12px] font-semibold border inline-flex items-center gap-1.5 ${
                 on ? 'border-lime-line text-white bg-lime/15' : 'border-hair text-t3'
