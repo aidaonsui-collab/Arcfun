@@ -73,7 +73,16 @@ const V4_SWAP = parseAbiItem(
 )
 type V4SwapLog = Log<bigint, number, false, typeof V4_SWAP, true>
 
-const CHUNK = 50n
+/**
+ * eth_getLogs window for the swap scans. rpc.mainnet.arc.io (first in arcLogsRpcUrls) and Warp
+ * take up to 10k blocks; arc.io rate-limits by request count (~3 per burst), so 50-block windows
+ * spent the indexer's whole cycle on one token. dRPC's free tier only takes small windows: once
+ * a big window fails on every URL, the rest of that scan steps in SMALL_CHUNK windows instead.
+ */
+const CHUNK = 5_000n
+const SMALL_CHUNK = 50n
+/** Parallel getBlock calls for one chunk's swap timestamps. */
+const TS_CONCURRENCY = 6
 /**
  * How far back a token's FIRST-EVER scan reaches — ~3.5 days at ~1s/block, 6x the old live-only
  * scanner's ~14h window. Scanned in full, all the way to `head`, in that one cold-start request
@@ -401,6 +410,7 @@ export async function scanSwapRange(
   let cursor = fromBlock
   let scannedTo = fromBlock > 0n ? fromBlock - 1n : 0n
   let budgetHit = false
+  let span = CHUNK
   while (cursor <= toBlock) {
     // Indexer cycle budget: yield mid-token with scannedTo already advanced so the
     // next cycle resumes the cursor instead of burning 10–70 min on one catch-up.
@@ -408,7 +418,7 @@ export async function scanSwapRange(
       budgetHit = true
       break
     }
-    const chunkEnd = cursor + CHUNK - 1n > toBlock ? toBlock : cursor + CHUNK - 1n
+    const chunkEnd = cursor + span - 1n > toBlock ? toBlock : cursor + span - 1n
     let logs: Array<V3SwapLog | V4SwapLog> = []
     try {
       if (venue === 'v4') {
@@ -418,6 +428,11 @@ export async function scanSwapRange(
         logs = await getSwapLogs(pool, cursor, chunkEnd)
       }
     } catch (e) {
+      if (span > SMALL_CHUNK) {
+        // Only small-window RPCs answered; retry this window in small steps.
+        span = SMALL_CHUNK
+        continue
+      }
       console.warn('[arc-trades] getLogs', summarizeRpcError(e))
       // Do not advance past a failed chunk — persisting `to` used to skip the gap
       // and freeze the tape (EVE 2026-09-01).
@@ -426,17 +441,21 @@ export async function scanSwapRange(
 
     if (logs.length > 0) {
       const blockNums = Array.from(new Set(logs.map((l) => l.blockNumber!)))
+      // A 5k-block chunk on a busy token can hold hundreds of swap blocks; firing every getBlock
+      // at once trips the rate limit, and a missed lookup leaves that fill with ts 0.
       const tsMap = new Map<string, number>()
-      await Promise.all(
-        blockNums.map(async (bn) => {
-          try {
-            const b = await client.getBlock({ blockNumber: bn })
-            tsMap.set(bn.toString(), Number(b.timestamp))
-          } catch {
-            /* ignore */
-          }
-        }),
-      )
+      for (let i = 0; i < blockNums.length; i += TS_CONCURRENCY) {
+        await Promise.all(
+          blockNums.slice(i, i + TS_CONCURRENCY).map(async (bn) => {
+            try {
+              const b = await client.getBlock({ blockNumber: bn })
+              tsMap.set(bn.toString(), Number(b.timestamp))
+            } catch {
+              /* ignore */
+            }
+          }),
+        )
+      }
 
       for (const log of logs) {
         // V4 amounts are int128 — coerce via BigInt() so viem number/bigint variants both work.
@@ -555,8 +574,9 @@ export async function fetchOnChain24hSwaps(token: Address): Promise<EvmTrade[] |
   const out: EvmTrade[] = []
   let anyChunkOk = false
   let cursor = fromBlock
+  let span = CHUNK
   while (cursor <= head) {
-    const chunkEnd = cursor + CHUNK - 1n > head ? head : cursor + CHUNK - 1n
+    const chunkEnd = cursor + span - 1n > head ? head : cursor + span - 1n
     let logs: Array<V3SwapLog | V4SwapLog>
     try {
       if (orient.venue === 'v4') {
@@ -567,6 +587,10 @@ export async function fetchOnChain24hSwaps(token: Address): Promise<EvmTrade[] |
       }
       anyChunkOk = true
     } catch (e) {
+      if (span > SMALL_CHUNK) {
+        span = SMALL_CHUNK
+        continue
+      }
       console.warn('[arc-trades] on-chain window getLogs', summarizeRpcError(e))
       cursor = chunkEnd + 1n
       continue
