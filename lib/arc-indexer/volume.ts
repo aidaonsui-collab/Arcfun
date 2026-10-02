@@ -64,7 +64,11 @@ const ONCHAIN_RESCAN_TTL_MS = 90_000
 /** Newest-first windows per compute so all-time pulls ahead of 24h on the first pass. */
 const LIFETIME_CHUNKS = 3000
 
-export async function computeVolumeWindows(token: Address | string): Promise<IndexedVolume> {
+export async function computeVolumeWindows(
+  token: Address | string,
+  opts?: { deadline?: number },
+): Promise<IndexedVolume> {
+  const deadline = opts?.deadline
   const now = Math.floor(Date.now() / 1000)
   let trades: EvmTrade[] = []
   try {
@@ -140,17 +144,24 @@ export async function computeVolumeWindows(token: Address | string): Promise<Ind
 
   try {
     const head = await arcLogsClient().getBlockNumber()
+    // Both walks honor the indexer's cycle deadline and only count blocks actually scanned.
     if (upTo != null && upTo < head) {
-      volumeAll += await sumSwapUsd(token as Address, upTo + 1n, head)
-      upTo = head
+      const fwd = await sumSwapUsd(token as Address, upTo + 1n, head, { deadline })
+      volumeAll += fwd.usd
+      if (fwd.scannedTo > upTo) upTo = fwd.scannedTo
     }
     const cursor = downTo ?? head
     if (cursor > FACTORY_FLOOR) {
       const span = LOG_CHUNK * BigInt(LIFETIME_CHUNKS)
       const from = cursor > FACTORY_FLOOR + span - 1n ? cursor - span + 1n : FACTORY_FLOOR
-      volumeAll += await sumSwapUsd(token as Address, from, cursor)
-      downTo = from > FACTORY_FLOOR ? from - 1n : FACTORY_FLOOR
-      if (upTo == null) upTo = cursor
+      const back = await sumSwapUsd(token as Address, from, cursor, { deadline })
+      // Ascending scan of a window below what's counted: only a complete window can move
+      // downTo, or the blocks between where it stopped and `cursor` would never be counted.
+      if (back.scannedTo >= cursor) {
+        volumeAll += back.usd
+        downTo = from > FACTORY_FLOOR ? from - 1n : FACTORY_FLOOR
+        if (upTo == null) upTo = cursor
+      }
     }
   } catch (e) {
     console.warn('[arc-indexer] lifetime volume', summarizeRpcError(e))
