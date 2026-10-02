@@ -684,6 +684,7 @@ async function maybeRewindStaleCursor(
   key: string,
   orient: ResolvedPool,
   head: bigint,
+  deadline?: number,
 ): Promise<void> {
   const prev = lastRewindAt.get(key)
   if (prev != null && Date.now() - prev < 60_000) return
@@ -704,6 +705,9 @@ async function maybeRewindStaleCursor(
   if (from == null) return
   lastRewindAt.set(key, Date.now())
   const { pool, tokenIs0, tokenDecimals, quoteDecimals, venue, poolId, quoteUsdMult } = orient
+  // A quiet token's tape is always "stale", and an empty rewind never persists, so without a
+  // deadline this re-scanned everything since its last fill on every sync — past the function
+  // timeout on the web path. Found fills still persist, so a cut-off rewind still advances.
   const found = await scanSwapRange(
     client,
     pool,
@@ -712,7 +716,7 @@ async function maybeRewindStaleCursor(
     from,
     head,
     quoteDecimals,
-    { venue, poolId, quoteUsdMult },
+    { venue, poolId, quoteUsdMult, ...(deadline != null ? { deadline } : {}) },
   )
   if (
     shouldPersistScanCursor({
@@ -861,7 +865,7 @@ export async function syncTradesToHead(
     // Rewind from the last persisted fill, not a fixed 12k-block window.
     // Skip when the cycle budget already fired — rewind is another multi-chunk scan.
     if (!budgetHit && (opts?.deadline == null || Date.now() < opts.deadline)) {
-      await maybeRewindStaleCursor(client, key, orient, head)
+      await maybeRewindStaleCursor(client, key, orient, head, opts?.deadline)
     } else if (budgetHit) {
       reachedHead = false
     }
@@ -881,9 +885,23 @@ export async function syncTradesToHead(
  * context — a Route Handler, Server Component, or Server Action; the cron and the local-indexer
  * script both call syncTradesToHead directly, bypassing this) stays non-blocking.
  */
+/** Web-path syncs: a time budget each, and at most one background sync per token per minute per
+ *  instance. Unbounded, a far-behind cursor or a quiet token's rewind ran each request to the
+ *  60s timeout (FUNCTION_INVOCATION_TIMEOUT on every tape poll, 2026-10-02), and since the
+ *  function was killed before persisting, the next request started the same scan over. */
+const BACKGROUND_SYNC_MS = 8_000
+const BACKGROUND_SYNC_EVERY_MS = 60_000
+const REQUEST_SYNC_MS = 10_000
+const COLD_SYNC_MS = 20_000
+const lastBackgroundSyncAt = new Map<string, number>()
+
 function scheduleTradesSync(token: Address): void {
+  const key = token.toLowerCase()
+  const last = lastBackgroundSyncAt.get(key)
+  if (last != null && Date.now() - last < BACKGROUND_SYNC_EVERY_MS) return
+  lastBackgroundSyncAt.set(key, Date.now())
   const run = () => {
-    void syncTradesToHead(token).catch((e) =>
+    void syncTradesToHead(token, { deadline: Date.now() + BACKGROUND_SYNC_MS }).catch((e) =>
       console.warn('[arc-trades] background sync', token, summarizeRpcError(e)),
     )
   }
@@ -927,22 +945,20 @@ export async function fetchArcTrades(
     // it was attached to. The token page polls the tape every 4s and uses ?fresh=1 after a
     // swap or an empty first paint, so a brief stale read self-heals without blocking every view.
     let cursorExists = true
-    let newestTs = 0
     try {
       cursorExists = (await kv.get<string | number>(cursorKvKey(key))) != null
-      const tail = (await kv.lrange<EvmTrade>(tradesKvKey(key), -1, -1)) ?? []
-      newestTs = tail[0]?.ts || 0
     } catch {
       cursorExists = true // a failed check must not force the slow cold-start path
     }
 
-    // Cold start has nothing to show. A stale tape (newest fill >20 min) used to
-    // return immediately and refresh in after() — if that scan used a public RPC
-    // that answered [], the page kept serving 3h-old trades forever (EVE 2026-09-01).
+    // Cold start has nothing to show, so it waits — within a budget. A warm token returns its
+    // stored tape now and catches up in the background. Stale tapes (newest fill >20 min) used to
+    // block on a full sync after EVE 2026-09-01; with launches quiet that is every token, and the
+    // unbounded scan timed out every request. The rewind that fixed EVE still runs, bounded.
     if (opts.fresh) {
-      await syncTradesToHead(token, { force: true })
-    } else if (!cursorExists || tapeIsStaleTs(newestTs)) {
-      await syncTradesToHead(token)
+      await syncTradesToHead(token, { force: true, deadline: Date.now() + REQUEST_SYNC_MS })
+    } else if (!cursorExists) {
+      await syncTradesToHead(token, { deadline: Date.now() + COLD_SYNC_MS })
     } else {
       scheduleTradesSync(token)
     }
