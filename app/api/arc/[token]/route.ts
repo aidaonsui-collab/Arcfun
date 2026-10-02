@@ -26,11 +26,19 @@ import { summarizeRpcError } from '@/lib/rpc-error'
 
 export const dynamic = 'force-dynamic'
 
-const TOKEN_API_CACHE = {
-  'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
-  'CDN-Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
-  'Vercel-CDN-Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
+function cdnCache(sMaxAge: number, swr: number) {
+  const v = `public, s-maxage=${sMaxAge}, stale-while-revalidate=${swr}`
+  return { 'Cache-Control': v, 'CDN-Cache-Control': v, 'Vercel-CDN-Cache-Control': v }
 }
+
+// Something polls a handful of tokens every 20-36s around the clock (~4.3k calls a day each).
+// At s-maxage=5 every poll missed. 30s lets most polls — and every viewer of the same token —
+// share one function run; the page's own tape still updates every 4s once a token trades.
+const TOKEN_API_CACHE = cdnCache(30, 60)
+// Liquidity and burned% (?full=1) move slowly.
+const TOKEN_STATS_CACHE = cdnCache(60, 120)
+// Hidden and unknown tokens get polled too. Short enough that a just-launched token shows up.
+const NOT_FOUND_CACHE = cdnCache(60, 60)
 
 const SLOT0_MS = 800
 const STATS_MS = 5_000
@@ -112,7 +120,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     return NextResponse.json({ error: 'invalid token' }, { status: 400 })
   }
   if (isHiddenToken(token)) {
-    return NextResponse.json({ error: 'not found' }, { status: 404 })
+    return NextResponse.json({ error: 'not found' }, { status: 404, headers: NOT_FOUND_CACHE })
   }
   if (!arcInstantEnabled() && !arcCurveEnabled()) {
     return NextResponse.json({ error: 'arc launchpad not configured' }, { status: 404 })
@@ -123,7 +131,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     let pool = await getArcCatalogToken(addr)
     if (!pool) {
       pool = await fetchArcPoolToken(addr)
-      if (!pool) return NextResponse.json({ error: 'not found' }, { status: 404 })
+      if (!pool) return NextResponse.json({ error: 'not found' }, { status: 404, headers: NOT_FOUND_CACHE })
       try {
         const { enrichTokensWithIndexVolume } = await import('@/lib/arc-indexer/run')
         ;[pool] = await enrichTokensWithIndexVolume([pool])
@@ -133,7 +141,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     }
     pool = await overlayLivePrice(pool, addr)
     if (full) pool = await overlayPoolStats(pool, addr)
-    return jsonSafe(pool, { headers: TOKEN_API_CACHE })
+    return jsonSafe(pool, { headers: full ? TOKEN_STATS_CACHE : TOKEN_API_CACHE })
   } catch (e) {
     console.error('[api/arc/token]', summarizeRpcError(e))
     return NextResponse.json({ error: 'fetch failed' }, { status: 502 })
