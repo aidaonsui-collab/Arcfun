@@ -378,12 +378,12 @@ async function catchUpSwapsAndVolume(
         // Mid-token yield: cursor already saved; stop the batch so the rest of the
         // cycle (and next tick) can proceed instead of draining the budget here.
         budgetHit = true
-        const vol = await computeVolumeWindows(t.token)
+        const vol = await computeVolumeWindows(t.token, { deadline })
         await setVolume(t.token, vol)
         n++
         return false
       }
-      const vol = await computeVolumeWindows(t.token)
+      const vol = await computeVolumeWindows(t.token, { deadline })
       await setVolume(t.token, vol)
       n++
     } catch (e) {

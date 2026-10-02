@@ -76,11 +76,14 @@ type V4SwapLog = Log<bigint, number, false, typeof V4_SWAP, true>
 /**
  * eth_getLogs window for the swap scans. rpc.mainnet.arc.io (first in arcLogsRpcUrls) and Warp
  * take up to 10k blocks; arc.io rate-limits by request count (~3 per burst), so 50-block windows
- * spent the indexer's whole cycle on one token. dRPC's free tier only takes small windows: once
- * a big window fails on every URL, the rest of that scan steps in SMALL_CHUNK windows instead.
+ * spent the indexer's whole cycle on one token. dRPC's free tier only takes small windows. A big
+ * window that fails on every URL is retried once after BIG_WINDOW_RETRY_MS (usually a passing rate
+ * limit), then re-scanned in SMALL_CHUNK steps — that window only. Dropping the whole rest of a
+ * scan to 50 blocks turned one hiccup into a 20+ minute volume scan on the indexer.
  */
 const CHUNK = 5_000n
 const SMALL_CHUNK = 50n
+const BIG_WINDOW_RETRY_MS = 1_500
 /** Parallel getBlock calls for one chunk's swap timestamps. */
 const TS_CONCURRENCY = 6
 /**
@@ -421,16 +424,26 @@ export async function scanSwapRange(
   toBlock: bigint,
   quoteDecimals = 6,
   opts?: ScanSwapOpts,
-): Promise<{ trades: EvmTrade[]; scannedTo: bigint; budgetHit: boolean; emptyVerified: boolean }> {
+): Promise<{
+  trades: EvmTrade[]
+  scannedTo: bigint
+  budgetHit: boolean
+  /** Every empty window in [fromBlock, scannedTo] was cross-checked (verifiedTo === scannedTo). */
+  emptyVerified: boolean
+  /** End of the contiguous prefix whose windows had fills or a cross-checked empty answer. */
+  verifiedTo: bigint
+}> {
   const venue = opts?.venue ?? 'v3'
   const poolId = opts?.poolId
   const out: EvmTrade[] = []
   let cursor = fromBlock
   let scannedTo = fromBlock > 0n ? fromBlock - 1n : 0n
   let budgetHit = false
-  // False once any empty window had a single RPC's word for it.
-  let emptyVerified = true
-  let span = CHUNK
+  // Stops advancing at the first empty window that had a single RPC's word for it.
+  let verifiedTo = fromBlock - 1n
+  // Blocks up to smallUntil are scanned in SMALL_CHUNK steps (a big window there failed).
+  let smallUntil = -1n
+  let retriedAt = -1n
   while (cursor <= toBlock) {
     // Indexer cycle budget: yield mid-token with scannedTo already advanced so the
     // next cycle resumes the cursor instead of burning 10–70 min on one catch-up.
@@ -438,6 +451,7 @@ export async function scanSwapRange(
       budgetHit = true
       break
     }
+    const span = cursor <= smallUntil ? SMALL_CHUNK : CHUNK
     const chunkEnd = cursor + span - 1n > toBlock ? toBlock : cursor + span - 1n
     let logs: Array<V3SwapLog | V4SwapLog> = []
     try {
@@ -449,11 +463,18 @@ export async function scanSwapRange(
         res = await getSwapLogs(pool, cursor, chunkEnd)
       }
       logs = res.logs
-      if (logs.length === 0 && res.emptyAnswers < EMPTY_QUORUM) emptyVerified = false
+      if (verifiedTo === cursor - 1n && (logs.length > 0 || res.emptyAnswers >= EMPTY_QUORUM)) {
+        verifiedTo = chunkEnd
+      }
     } catch (e) {
       if (span > SMALL_CHUNK) {
-        // Only small-window RPCs answered; retry this window in small steps.
-        span = SMALL_CHUNK
+        if (retriedAt !== cursor) {
+          retriedAt = cursor
+          await new Promise((r) => setTimeout(r, BIG_WINDOW_RETRY_MS))
+          continue
+        }
+        // Only small-window RPCs answer this window; step through it in small windows.
+        smallUntil = chunkEnd
         continue
       }
       console.warn('[arc-trades] getLogs', summarizeRpcError(e))
@@ -522,7 +543,13 @@ export async function scanSwapRange(
     scannedTo = chunkEnd
     cursor = chunkEnd + 1n
   }
-  return { trades: out, scannedTo, budgetHit, emptyVerified }
+  return {
+    trades: out,
+    scannedTo,
+    budgetHit,
+    emptyVerified: scannedTo >= fromBlock && verifiedTo === scannedTo,
+    verifiedTo,
+  }
 }
 
 /** USD swapped in [fromBlock, toBlock] (USDC ≈ $1). Used for lifetime pad volume. */
@@ -530,12 +557,15 @@ export async function sumSwapUsd(
   token: Address,
   fromBlock: bigint,
   toBlock: bigint,
-): Promise<number> {
-  if (fromBlock > toBlock) return 0
+  opts?: { deadline?: number },
+): Promise<{ usd: number; scannedTo: bigint }> {
+  if (fromBlock > toBlock) return { usd: 0, scannedTo: toBlock }
   const orient = await resolvePool(token)
-  if (!orient) return 0
+  if (!orient) return { usd: 0, scannedTo: toBlock }
   const client = arcLogsClient()
-  const { trades } = await scanSwapRange(
+  // scannedTo can stop short of toBlock (deadline, or a window no RPC answered). Callers must
+  // only count [fromBlock, scannedTo] — summing a partial scan as the whole range lost volume.
+  const { trades, scannedTo } = await scanSwapRange(
     client,
     orient.pool,
     orient.tokenIs0,
@@ -543,11 +573,16 @@ export async function sumSwapUsd(
     fromBlock,
     toBlock,
     orient.quoteDecimals,
-    { venue: orient.venue, poolId: orient.poolId, quoteUsdMult: orient.quoteUsdMult },
+    {
+      venue: orient.venue,
+      poolId: orient.poolId,
+      quoteUsdMult: orient.quoteUsdMult,
+      ...(opts?.deadline != null ? { deadline: opts.deadline } : {}),
+    },
   )
   let usd = 0
   for (const t of trades) usd += t.valueUsd || 0
-  return usd
+  return { usd, scannedTo }
 }
 
 /** Scan a little past 24h so hour-bucket boundaries never clip a real swap. */
@@ -597,8 +632,10 @@ export async function fetchOnChain24hSwaps(token: Address): Promise<EvmTrade[] |
   const out: EvmTrade[] = []
   let anyChunkOk = false
   let cursor = fromBlock
-  let span = CHUNK
+  let smallUntil = -1n
+  let retriedAt = -1n
   while (cursor <= head) {
+    const span = cursor <= smallUntil ? SMALL_CHUNK : CHUNK
     const chunkEnd = cursor + span - 1n > head ? head : cursor + span - 1n
     let logs: Array<V3SwapLog | V4SwapLog>
     try {
@@ -611,7 +648,12 @@ export async function fetchOnChain24hSwaps(token: Address): Promise<EvmTrade[] |
       anyChunkOk = true
     } catch (e) {
       if (span > SMALL_CHUNK) {
-        span = SMALL_CHUNK
+        if (retriedAt !== cursor) {
+          retriedAt = cursor
+          await new Promise((r) => setTimeout(r, BIG_WINDOW_RETRY_MS))
+          continue
+        }
+        smallUntil = chunkEnd
         continue
       }
       console.warn('[arc-trades] on-chain window getLogs', summarizeRpcError(e))
@@ -791,10 +833,13 @@ async function maybeRewindStaleCursor(
       advanceCursor: cursorNow == null || found.scannedTo > cursorNow,
     })
   }
-  // Record progress only through blocks that produced fills or a cross-checked empty answer.
-  if (found.scannedTo >= from && (found.trades.length > 0 || found.emptyVerified)) {
+  // Record progress only through blocks that produced fills or a cross-checked empty answer:
+  // all of it when a fill made it persist, else the cross-checked prefix. A single-answer window
+  // and everything after it are checked again next time.
+  const checkedTo = found.trades.length > 0 ? found.scannedTo : found.verifiedTo
+  if (checkedTo >= from) {
     try {
-      await kv.set(rewoundKvKey(key), found.scannedTo.toString())
+      await kv.set(rewoundKvKey(key), checkedTo.toString())
     } catch (e) {
       console.warn('[arc-trades] kv rewind progress', summarizeRpcError(e))
     }
@@ -869,7 +914,13 @@ export async function syncTradesToHead(
 
     const persistScan = async (
       from: bigint,
-      found: { trades: EvmTrade[]; scannedTo: bigint; budgetHit: boolean; emptyVerified: boolean },
+      found: {
+        trades: EvmTrade[]
+        scannedTo: bigint
+        budgetHit: boolean
+        emptyVerified: boolean
+        verifiedTo: bigint
+      },
       targetTo: bigint,
       advanceCursor = true,
     ) => {
@@ -890,6 +941,9 @@ export async function syncTradesToHead(
         })
       ) {
         await persistTrades(key, found.trades, found.scannedTo, { advanceCursor })
+      } else if (stale && found.trades.length === 0 && found.verifiedTo >= from) {
+        // Stale, empty, and partly single-sourced: keep the cross-checked prefix.
+        await persistTrades(key, [], found.verifiedTo, { advanceCursor })
       }
       if (found.budgetHit || found.scannedTo < targetTo) reachedHead = false
     }
