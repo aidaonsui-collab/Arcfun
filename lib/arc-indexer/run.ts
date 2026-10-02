@@ -68,6 +68,10 @@ const MAX_FACTORY_CHUNKS = 2000
  */
 const HOT_BATCH = 8
 const ROTATE_BATCH = 12
+/** Most of a cycle the hot batch may use. The rest is the round-robin's: when hot tokens took the
+ *  whole budget (catch-up rewinds, lifetime volume), the rotation never started and swapRotate sat
+ *  at one slot for hours, so quiet tokens were never synced. */
+const HOT_BUDGET_SHARE = 0.5
 
 /**
  * Wall-clock budget for one cron cycle. The route's maxDuration is 300s; this leaves ~60s for
@@ -354,15 +358,16 @@ async function catchUpSwapsAndVolume(
   let n = 0
   let budgetHit = false
   const processed = new Set<string>()
+  const hotDeadline = Date.now() + Math.floor(Math.max(0, deadline - Date.now()) * HOT_BUDGET_SHARE)
 
-  // Returns false only when the wall-clock budget is spent *before* this token's work starts —
-  // the caller uses that to stop without counting the token as covered. A dedupe hit or an RPC
-  // error still returns true (the slot is done; retrying it forever gains nothing).
-  const runOne = async (t: IndexedToken): Promise<boolean> => {
+  // Returns false only when the wall-clock budget (`until`) is spent *before* this token's work
+  // starts — the caller uses that to stop without counting the token as covered. A dedupe hit or
+  // an RPC error still returns true (the slot is done; retrying it forever gains nothing).
+  const runOne = async (t: IndexedToken, until: number): Promise<boolean> => {
     const key = t.token.toLowerCase()
     if (processed.has(key)) return true
-    if (Date.now() >= deadline) {
-      budgetHit = true
+    if (Date.now() >= until) {
+      if (until === deadline) budgetHit = true
       return false
     }
     processed.add(key)
@@ -373,17 +378,17 @@ async function catchUpSwapsAndVolume(
       // returns immediately and refreshes stale tokens in the background (see fetchArcTrades's
       // own comment) — right for a page view, wrong here, where volume must reflect this cycle's
       // sync, not whatever was cached before it.
-      const sync = await syncTradesToHead(t.token as Address, { deadline })
+      const sync = await syncTradesToHead(t.token as Address, { deadline: until })
       if (sync.budgetHit) {
         // Mid-token yield: cursor already saved; stop the batch so the rest of the
         // cycle (and next tick) can proceed instead of draining the budget here.
-        budgetHit = true
-        const vol = await computeVolumeWindows(t.token, { deadline })
+        if (until === deadline) budgetHit = true
+        const vol = await computeVolumeWindows(t.token, { deadline: until })
         await setVolume(t.token, vol)
         n++
         return false
       }
-      const vol = await computeVolumeWindows(t.token, { deadline })
+      const vol = await computeVolumeWindows(t.token, { deadline: until })
       await setVolume(t.token, vol)
       n++
     } catch (e) {
@@ -392,17 +397,17 @@ async function catchUpSwapsAndVolume(
     return true
   }
 
-  // Hot tokens first — the ones people are actually looking at get refreshed even on a cycle
-  // that never reaches the rotation.
+  // Hot tokens first — the ones people are actually looking at get refreshed every cycle —
+  // within HOT_BUDGET_SHARE of it, so the rotation below always gets the rest.
   for (const t of hot) {
-    if (!(await runOne(t))) break
+    if (!(await runOne(t, hotDeadline))) break
   }
 
   // Then the round-robin. The cursor advances only past slots we actually reached, so a cycle
   // cut short by the budget resumes here next time instead of skipping quiet tokens.
   let rotatedConsumed = 0
   for (const t of rotated) {
-    if (!(await runOne(t))) break
+    if (!(await runOne(t, deadline))) break
     rotatedConsumed++
   }
 
