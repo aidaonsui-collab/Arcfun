@@ -26,16 +26,20 @@ export function staleTapeRewindFrom(opts: {
 }
 
 /** Empty getLogs while the tape is already stale must not park the cursor at
- *  `head` — that is how a public RPC answering `[]` froze EVE. */
+ *  `head` — that is how a public RPC answering `[]` froze EVE. Unless the empty
+ *  answer was cross-checked: two logs RPCs both said "no swaps" for every empty
+ *  window. A quiet token's tape is always stale, and without that exception its
+ *  catch-up and rewind re-scanned the same blocks on every sync, forever. */
 export function shouldPersistScanCursor(opts: {
   foundTrades: number
   scannedTo: bigint
   from: bigint
   tapeIsStale: boolean
+  emptyVerified?: boolean
 }): boolean {
   if (opts.scannedTo < opts.from) return false
   if (opts.foundTrades > 0) return true
-  return !opts.tapeIsStale
+  return !opts.tapeIsStale || opts.emptyVerified === true
 }
 
 export function tapeIsStaleTs(newestTs: number, nowSec = Math.floor(Date.now() / 1000)): boolean {
