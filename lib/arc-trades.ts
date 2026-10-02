@@ -106,6 +106,8 @@ const FRESH_MS = 6_000
 const tradesKvKey = (token: string) => `arcfun:trades:${token.toLowerCase()}`
 const cursorKvKey = (token: string) => `arcfun:trades:cursor:${token.toLowerCase()}`
 const seenKvKey = (token: string) => `arcfun:trades:seen:${token.toLowerCase()}`
+/** Last block a stale-tape rewind has already cross-checked (see maybeRewindStaleCursor). */
+const rewoundKvKey = (token: string) => `arcfun:trades:rewound:${token.toLowerCase()}`
 
 function tradeId(t: Pick<EvmTrade, 'txHash' | 'logIndex'>): string {
   return t.logIndex != null ? `${t.txHash}:${t.logIndex}` : t.txHash
@@ -307,12 +309,24 @@ function buildStats(trades: EvmTrade[]): EvmTradeStats {
 /** Chunked ascending eth_getLogs scan over [fromBlock, toBlock], parsed into EvmTrade rows. Used
  *  for both the one-time cold-start backfill and the warm incremental catch-up — same shape,
  *  different range. */
-async function getSwapLogs(pool: Address, fromBlock: bigint, toBlock: bigint): Promise<V3SwapLog[]> {
+/** Logs RPCs that must agree on "no swaps" before an empty window counts as checked. */
+const EMPTY_QUORUM = 2
+
+type SwapLogsResult<L> = {
+  logs: L[]
+  /** URLs that answered this window with no swaps. EMPTY_QUORUM or more = cross-checked. */
+  emptyAnswers: number
+}
+
+async function getSwapLogs(
+  pool: Address,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<SwapLogsResult<V3SwapLog>> {
   const urls = arcLogsRpcUrls()
-  let lastEmpty: V3SwapLog[] = []
-  // Tracks whether ANY url gave a definitive answer (even an empty one) — separate from
+  // Counts URLs that gave a definitive answer (even an empty one) — separate from
   // lastErr, which used to survive past a later success and get thrown anyway.
-  let gotSuccess = false
+  let emptyAnswers = 0
   let lastErr: unknown
   for (let i = 0; i < urls.length; i++) {
     const client = createPublicClient({
@@ -326,11 +340,12 @@ async function getSwapLogs(pool: Address, fromBlock: bigint, toBlock: bigint): P
         fromBlock,
         toBlock,
       })) as V3SwapLog[]
-      if (logs.length > 0) return logs
-      lastEmpty = logs
-      gotSuccess = true
-      // Empty is not final when another URL might still have the fills — try the rest, but
-      // this IS a real, trustworthy answer if nothing better turns up.
+      if (logs.length > 0) return { logs, emptyAnswers }
+      emptyAnswers++
+      // Empty is not final when another URL might still have the fills — ask a second one.
+      // Two agreeing is the cross-check; polling the rest (two are down, one times out at 4s)
+      // only slowed every empty window.
+      if (emptyAnswers >= EMPTY_QUORUM) break
       continue
     } catch (e) {
       lastErr = e
@@ -350,15 +365,18 @@ async function getSwapLogs(pool: Address, fromBlock: bigint, toBlock: bigint): P
   //
   // A url that answered — even empty — is a real answer. Only throw when EVERY url failed
   // outright and none ever produced one.
-  if (gotSuccess) return lastEmpty
+  if (emptyAnswers > 0) return { logs: [], emptyAnswers }
   throw lastErr
 }
 
 /** V4 PoolManager Swap logs filtered by pool id — same multi-URL resilience as getSwapLogs. */
-async function getV4SwapLogs(poolId: Hex, fromBlock: bigint, toBlock: bigint): Promise<V4SwapLog[]> {
+async function getV4SwapLogs(
+  poolId: Hex,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<SwapLogsResult<V4SwapLog>> {
   const urls = arcLogsRpcUrls()
-  let lastEmpty: V4SwapLog[] = []
-  let gotSuccess = false
+  let emptyAnswers = 0
   let lastErr: unknown
   for (let i = 0; i < urls.length; i++) {
     const client = createPublicClient({
@@ -373,16 +391,16 @@ async function getV4SwapLogs(poolId: Hex, fromBlock: bigint, toBlock: bigint): P
         fromBlock,
         toBlock,
       })) as V4SwapLog[]
-      if (logs.length > 0) return logs
-      lastEmpty = logs
-      gotSuccess = true
+      if (logs.length > 0) return { logs, emptyAnswers }
+      emptyAnswers++
+      if (emptyAnswers >= EMPTY_QUORUM) break
       continue
     } catch (e) {
       lastErr = e
       if (!isArcRpcInfraError(e) && i === urls.length - 1) throw e
     }
   }
-  if (gotSuccess) return lastEmpty
+  if (emptyAnswers > 0) return { logs: [], emptyAnswers }
   throw lastErr
 }
 
@@ -403,13 +421,15 @@ export async function scanSwapRange(
   toBlock: bigint,
   quoteDecimals = 6,
   opts?: ScanSwapOpts,
-): Promise<{ trades: EvmTrade[]; scannedTo: bigint; budgetHit: boolean }> {
+): Promise<{ trades: EvmTrade[]; scannedTo: bigint; budgetHit: boolean; emptyVerified: boolean }> {
   const venue = opts?.venue ?? 'v3'
   const poolId = opts?.poolId
   const out: EvmTrade[] = []
   let cursor = fromBlock
   let scannedTo = fromBlock > 0n ? fromBlock - 1n : 0n
   let budgetHit = false
+  // False once any empty window had a single RPC's word for it.
+  let emptyVerified = true
   let span = CHUNK
   while (cursor <= toBlock) {
     // Indexer cycle budget: yield mid-token with scannedTo already advanced so the
@@ -421,12 +441,15 @@ export async function scanSwapRange(
     const chunkEnd = cursor + span - 1n > toBlock ? toBlock : cursor + span - 1n
     let logs: Array<V3SwapLog | V4SwapLog> = []
     try {
+      let res: SwapLogsResult<V3SwapLog | V4SwapLog>
       if (venue === 'v4') {
         if (!poolId) throw new Error('v4 scan requires poolId')
-        logs = await getV4SwapLogs(poolId, cursor, chunkEnd)
+        res = await getV4SwapLogs(poolId, cursor, chunkEnd)
       } else {
-        logs = await getSwapLogs(pool, cursor, chunkEnd)
+        res = await getSwapLogs(pool, cursor, chunkEnd)
       }
+      logs = res.logs
+      if (logs.length === 0 && res.emptyAnswers < EMPTY_QUORUM) emptyVerified = false
     } catch (e) {
       if (span > SMALL_CHUNK) {
         // Only small-window RPCs answered; retry this window in small steps.
@@ -499,7 +522,7 @@ export async function scanSwapRange(
     scannedTo = chunkEnd
     cursor = chunkEnd + 1n
   }
-  return { trades: out, scannedTo, budgetHit }
+  return { trades: out, scannedTo, budgetHit, emptyVerified }
 }
 
 /** USD swapped in [fromBlock, toBlock] (USDC ≈ $1). Used for lifetime pad volume. */
@@ -581,9 +604,9 @@ export async function fetchOnChain24hSwaps(token: Address): Promise<EvmTrade[] |
     try {
       if (orient.venue === 'v4') {
         if (!orient.poolId) return null
-        logs = await getV4SwapLogs(orient.poolId, cursor, chunkEnd)
+        logs = (await getV4SwapLogs(orient.poolId, cursor, chunkEnd)).logs
       } else {
-        logs = await getSwapLogs(orient.pool, cursor, chunkEnd)
+        logs = (await getSwapLogs(orient.pool, cursor, chunkEnd)).logs
       }
       anyChunkOk = true
     } catch (e) {
@@ -720,18 +743,30 @@ async function maybeRewindStaleCursor(
     return
   }
   const now = Math.floor(Date.now() / 1000)
-  const from = staleTapeRewindFrom({
+  const staleFrom = staleTapeRewindFrom({
     head,
     lastTradeBlock: last?.blockNumber || 0,
     lastTradeTs: last?.ts || 0,
     nowSec: now,
   })
-  if (from == null) return
+  if (staleFrom == null) return
+  // A quiet token's tape is always "stale", so this used to re-scan everything since its last
+  // fill (KIETH: ~1.9M blocks) on every sync and never record an empty result — no indexer cycle
+  // could finish it. Resume after the last block a rewind already cross-checked instead.
+  let checkedThrough = -1n
+  let cursorNow: bigint | null = null
+  try {
+    const raw = await kv.get<string | number>(rewoundKvKey(key))
+    if (raw != null) checkedThrough = BigInt(raw)
+    const cur = await kv.get<string | number>(cursorKvKey(key))
+    if (cur != null) cursorNow = BigInt(cur)
+  } catch {
+    /* unknown progress: rewind from the last fill, as before */
+  }
+  const from = checkedThrough >= staleFrom ? checkedThrough + 1n : staleFrom
+  if (from > head) return
   lastRewindAt.set(key, Date.now())
   const { pool, tokenIs0, tokenDecimals, quoteDecimals, venue, poolId, quoteUsdMult } = orient
-  // A quiet token's tape is always "stale", and an empty rewind never persists, so without a
-  // deadline this re-scanned everything since its last fill on every sync — past the function
-  // timeout on the web path. Found fills still persist, so a cut-off rewind still advances.
   const found = await scanSwapRange(
     client,
     pool,
@@ -748,9 +783,21 @@ async function maybeRewindStaleCursor(
       scannedTo: found.scannedTo,
       from,
       tapeIsStale: tapeIsStaleTs(last?.ts || 0, now),
+      emptyVerified: found.emptyVerified,
     })
   ) {
-    await persistTrades(key, found.trades, found.scannedTo)
+    // A rewind cut off by the deadline can stop short of the cursor; never pull it back.
+    await persistTrades(key, found.trades, found.scannedTo, {
+      advanceCursor: cursorNow == null || found.scannedTo > cursorNow,
+    })
+  }
+  // Record progress only through blocks that produced fills or a cross-checked empty answer.
+  if (found.scannedTo >= from && (found.trades.length > 0 || found.emptyVerified)) {
+    try {
+      await kv.set(rewoundKvKey(key), found.scannedTo.toString())
+    } catch (e) {
+      console.warn('[arc-trades] kv rewind progress', summarizeRpcError(e))
+    }
   }
 }
 
@@ -822,14 +869,15 @@ export async function syncTradesToHead(
 
     const persistScan = async (
       from: bigint,
-      found: { trades: EvmTrade[]; scannedTo: bigint; budgetHit: boolean },
+      found: { trades: EvmTrade[]; scannedTo: bigint; budgetHit: boolean; emptyVerified: boolean },
       targetTo: bigint,
       advanceCursor = true,
     ) => {
       if (found.budgetHit) budgetHit = true
       // Always save mid-token progress when the cycle budget cuts us off — otherwise the
       // next cycle restarts the same multi-chunk window. For normal completions keep the
-      // stale-tape empty-getLogs guard (shouldPersistScanCursor).
+      // stale-tape empty-getLogs guard (shouldPersistScanCursor), which a cross-checked
+      // empty answer satisfies.
       const forcePersist = found.budgetHit && found.scannedTo >= from
       if (
         forcePersist ||
@@ -838,6 +886,7 @@ export async function syncTradesToHead(
           scannedTo: found.scannedTo,
           from,
           tapeIsStale: stale,
+          emptyVerified: found.emptyVerified,
         })
       ) {
         await persistTrades(key, found.trades, found.scannedTo, { advanceCursor })
